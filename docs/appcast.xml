@@ -1,0 +1,14 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Recap</title>
+        <item>
+            <title>0.1.1</title>
+            <pubDate>Thu, 02 Jul 2026 15:30:05 -0400</pubDate>
+            <sparkle:version>14</sparkle:version>
+            <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/gregorymfoster/recap/releases/download/v0.1.1/Recap-0.1.1.dmg" length="5052316" type="application/octet-stream" sparkle:edSignature="IC3XExqPcTtd9HK2eOthrmLpNYHP/hugDiZGMKwO4KMgTcrbB5/4uFOPCTjF1jzWU9xpTglt5suY2eWI6OzSAg=="/>
+        </item>
+    </channel>
+</rss>
