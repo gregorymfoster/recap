@@ -19,7 +19,6 @@ public final class LibraryStore {
     public private(set) var meetings: [MeetingRecord] = []
     public var selectedMeetingID: UUID?
     public var queueSummary: QueueSummary?
-    public var activeModelName = "Whisper Small · English"
 
     private let storage: LibraryStorage?
     private let index: SearchIndex?

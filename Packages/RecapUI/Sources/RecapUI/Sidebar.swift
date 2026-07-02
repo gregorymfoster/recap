@@ -1,3 +1,4 @@
+import RecapTranscription
 import SwiftUI
 
 enum SidebarItem: String, CaseIterable, Identifiable {
@@ -27,6 +28,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 struct Sidebar: View {
     @Binding var selection: SidebarItem?
     @Environment(LibraryStore.self) private var library
+    @Environment(WhisperModelManager.self) private var models
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,20 +64,25 @@ struct Sidebar: View {
     }
 
     private var activeModelFooter: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(Tokens.successGreen)
-                .frame(width: 6, height: 6)
-            Text(library.activeModelName)
-                .font(Tokens.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Image(systemName: "gearshape")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+        Button {
+            selection = .models
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(models.activeModel == nil ? Color.orange : Tokens.successGreen)
+                    .frame(width: 6, height: 6)
+                Text(models.activeModel.map { "\($0.displayName) · \($0.languages)" } ?? "No model installed")
+                    .font(Tokens.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Image(systemName: "gearshape")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .buttonStyle(.plain)
         .overlay(alignment: .top) {
             Divider()
         }

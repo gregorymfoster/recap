@@ -1,10 +1,12 @@
 import RecapCore
+import RecapTranscription
 import SwiftUI
 
 /// App root: sidebar navigation + the selected section.
 public struct RootView: View {
     @State private var library: LibraryStore
     @State private var session = MeetingSessionStore()
+    @State private var models = WhisperModelManager()
     @State private var sidebarSelection: SidebarItem? = .library
 
     /// Disk-backed root, used by the app. `-fixtures` swaps in sample data
@@ -45,6 +47,7 @@ public struct RootView: View {
         }
         .environment(library)
         .environment(session)
+        .environment(models)
     }
 
     @ViewBuilder
@@ -65,7 +68,7 @@ public struct RootView: View {
                 LibraryView()
             }
         case .models:
-            placeholder("Models", note: "Model manager arrives in M5.")
+            ModelManagerView()
         case .settings:
             placeholder("Settings", note: "Settings arrive in M9.")
         }

@@ -3,7 +3,8 @@ import Testing
 
 @Suite struct ModelCatalogTests {
     @Test func recommendedModelIsWhisperSmall() {
-        #expect(ModelCatalog.recommended.id == "openai_whisper-small")
+        #expect(ModelCatalog.recommended.id == "small")
+        #expect(ModelCatalog.recommended.repoFolderName == "openai_whisper-small")
     }
 
     @Test func catalogIDsAreUnique() {
