@@ -34,8 +34,10 @@ public struct RootView: View {
         .overlay(alignment: .bottom) {
             if let startedAt = session.startedAt {
                 RecordingPill(startedAt: startedAt, levels: session.levels) {
-                    if let (record, duration) = session.stop() {
-                        library.finishRecording(record, duration: duration)
+                    Task {
+                        if let (record, duration) = await session.stop() {
+                            library.finishRecording(record, duration: duration)
+                        }
                     }
                 }
                 .padding(.bottom, 22)

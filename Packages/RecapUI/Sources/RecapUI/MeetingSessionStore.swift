@@ -15,8 +15,12 @@ public final class MeetingSessionStore {
     public private(set) var levels: [Float] = MeetingSessionStore.idleLevels
     public private(set) var permissionDenied = false
 
+    /// True while recording, when the system-audio tap couldn't start —
+    /// other meeting participants aren't being captured.
+    public private(set) var systemAudioUnavailable = false
+
     private static let idleLevels = [Float](repeating: 0, count: 16)
-    private let recorder = MicRecorder()
+    private let recorder = MeetingRecorder()
     private var levelTask: Task<Void, Never>?
 
     public init() {}
@@ -25,13 +29,14 @@ public final class MeetingSessionStore {
 
     public func start(record: MeetingRecord) async {
         guard activeRecord == nil else { return }
-        guard await MicRecorder.requestPermission() else {
+        guard await MeetingRecorder.requestMicPermission() else {
             permissionDenied = true
             return
         }
         permissionDenied = false
         do {
             let output = try recorder.start(writingTo: record.audioURL)
+            systemAudioUnavailable = !recorder.systemAudioActive
             activeRecord = record
             startedAt = .now
             levelTask = Task { [weak self] in
@@ -46,14 +51,15 @@ public final class MeetingSessionStore {
 
     /// Stops capture and returns the finished record with its duration.
     @discardableResult
-    public func stop() -> (record: MeetingRecord, duration: TimeInterval)? {
+    public func stop() async -> (record: MeetingRecord, duration: TimeInterval)? {
         guard let record = activeRecord else { return nil }
-        let duration = recorder.stop()
+        let duration = await recorder.stop()
         levelTask?.cancel()
         levelTask = nil
         activeRecord = nil
         startedAt = nil
         levels = Self.idleLevels
+        systemAudioUnavailable = false
         return (record, duration)
     }
 

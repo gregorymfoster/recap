@@ -20,7 +20,7 @@ public actor NotesAutosaver {
         flushTask = Task { [interval] in
             try? await Task.sleep(for: interval)
             guard !Task.isCancelled else { return }
-            await self.flush()
+            self.flush()
         }
     }
 
