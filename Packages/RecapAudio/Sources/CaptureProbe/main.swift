@@ -6,8 +6,36 @@ import RecapAudio
 // Records mic + system audio for N seconds (default 5) to capture-probe.m4a
 // in the current directory and prints stream stats. Play some audio while it
 // runs to verify the system tap; speak to verify the mic.
+//
+// Flags:
+//   --list-devices        Print input devices (id, name, uid) and exit.
+//   --device <uid>         Bind explicitly to this device's persistent UID
+//                          (see --list-devices) instead of the system default.
+//   <seconds>              Positional; how long to record (default 5).
 
-let seconds = CommandLine.arguments.dropFirst().first.flatMap(Double.init) ?? 5
+var arguments = Array(CommandLine.arguments.dropFirst())
+
+if let listIndex = arguments.firstIndex(of: "--list-devices") {
+    arguments.remove(at: listIndex)
+    for device in AudioInputDevices.inputDevices() {
+        print("\(device.id)\t\(device.name)\t\(device.uid)")
+    }
+    exit(0)
+}
+
+var deviceUID: String?
+if let flagIndex = arguments.firstIndex(of: "--device") {
+    let valueIndex = arguments.index(after: flagIndex)
+    guard valueIndex < arguments.count else {
+        print("FAIL: --device requires a UID (see --list-devices)")
+        exit(1)
+    }
+    deviceUID = arguments[valueIndex]
+    arguments.remove(at: valueIndex)
+    arguments.remove(at: flagIndex)
+}
+
+let seconds = arguments.first.flatMap(Double.init) ?? 5
 
 @MainActor
 func run() async {
@@ -20,15 +48,24 @@ func run() async {
         exit(1)
     }
 
+    if let deviceUID {
+        guard let device = AudioInputDevices.device(forUID: deviceUID) else {
+            print("FAIL: no attached input device with uid \(deviceUID) (see --list-devices)")
+            exit(1)
+        }
+        print("binding explicitly to \(device.name) (\(device.uid))")
+    }
+
     let recorder = MeetingRecorder()
     let output: MeetingRecorder.Output
     do {
-        output = try recorder.start(writingTo: url)
+        output = try recorder.start(writingTo: url, preferredInputUID: deviceUID)
     } catch {
         print("FAIL: recorder start: \(error)")
         exit(1)
     }
     print("recording \(seconds)s — system audio active: \(recorder.systemAudioActive)")
+    print("bound input device: \(recorder.activeInputDeviceName ?? "unknown")")
 
     let statsTask = Task {
         var chunkCount = 0

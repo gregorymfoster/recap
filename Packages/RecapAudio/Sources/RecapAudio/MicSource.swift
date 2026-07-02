@@ -1,5 +1,7 @@
 import AppKit
+import AudioToolbox
 import AVFoundation
+import CoreAudio
 import RecapCore
 
 /// Shared buffer→[Float] conversion used by both capture sources.
@@ -56,6 +58,23 @@ public final class MicSource {
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain
     )
+    private var deviceListListener: AudioObjectPropertyListenerBlock?
+
+    /// The device the user picked in Settings, by persistent UID
+    /// (`AudioDeviceID`s aren't stable across reboots/replugs). `nil` means
+    /// "system default" — today's behavior. Setting this mid-recording
+    /// schedules a rebuild that rebinds the engine to the new device.
+    public var preferredInputUID: String? {
+        didSet {
+            guard oldValue != preferredInputUID else { return }
+            scheduleRebuild(reason: preferredDeviceRebuildReason())
+        }
+    }
+
+    /// The device actually bound after the last (re)build — may differ from
+    /// `preferredInputUID` if that device wasn't resolvable, in which case
+    /// this reports the system-default fallback.
+    public private(set) var activeDeviceName: String?
 
     /// Called after the capture graph was rebuilt mid-recording.
     public var onRebuild: (@MainActor (String) -> Void)?
@@ -86,12 +105,14 @@ public final class MicSource {
         engine.stop()
         continuation?.finish()
         continuation = nil
+        activeDeviceName = nil
     }
 
     // MARK: Capture graph
 
     private func attachTapAndStart() throws {
         guard let continuation else { return }
+        bindPreferredDeviceIfPossible()
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard
@@ -113,6 +134,53 @@ public final class MicSource {
             }
         }
         try engine.start()
+    }
+
+    /// Binds the engine's AUHAL input unit to `preferredInputUID` when it
+    /// resolves to a currently-attached device; otherwise leaves the engine
+    /// on the system default (today's behavior). Must run before the input
+    /// node's format/tap are touched — changing the AU's device changes its
+    /// output format.
+    private func bindPreferredDeviceIfPossible() {
+        guard let preferredInputUID, let device = AudioInputDevices.device(forUID: preferredInputUID) else {
+            activeDeviceName = systemDefaultInputName()
+            return
+        }
+        guard let audioUnit = engine.inputNode.audioUnit else {
+            activeDeviceName = systemDefaultInputName()
+            return
+        }
+        var deviceID = device.id
+        let status = AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &deviceID,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+        activeDeviceName = status == noErr ? device.name : systemDefaultInputName()
+    }
+
+    private func systemDefaultInputName() -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
+        )
+        guard status == noErr else { return nil }
+        return AudioInputDevices.inputDevices().first { $0.id == deviceID }?.name
+    }
+
+    /// Reason string for a preferred-device change, naming the target device
+    /// when one is being switched to (surfaced verbatim in the UI).
+    private func preferredDeviceRebuildReason() -> String {
+        AudioInputDevices.rebuildReason(forPreferredUID: preferredInputUID, in: AudioInputDevices.inputDevices())
     }
 
     /// Tears down the engine and rebuilds against the current default input.
@@ -170,6 +238,16 @@ public final class MicSource {
         AudioObjectAddPropertyListenerBlock(
             AudioObjectID(kAudioObjectSystemObject), &defaultInputAddress, .main, listener
         )
+
+        // A preferred device that's currently unplugged should bind as soon
+        // as it reappears, not just wait for the (unrelated) default-input
+        // notification.
+        deviceListListener = AudioInputDevices.addDeviceListListener(queue: .main) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.preferredInputUID != nil else { return }
+                self.scheduleRebuild(reason: self.preferredDeviceRebuildReason())
+            }
+        }
     }
 
     private func removeObservers() {
@@ -183,6 +261,10 @@ public final class MicSource {
                 AudioObjectID(kAudioObjectSystemObject), &defaultInputAddress, .main, listener
             )
             defaultInputListener = nil
+        }
+        if let listener = deviceListListener {
+            AudioInputDevices.removeDeviceListListener(listener)
+            deviceListListener = nil
         }
     }
 }

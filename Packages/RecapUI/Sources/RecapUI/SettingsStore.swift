@@ -67,6 +67,18 @@ public final class SettingsStore {
         }
     }
 
+    /// Preferred microphone, by Core Audio persistent UID. `nil` means
+    /// "system default" — today's behavior.
+    public var preferredInputUID: String? {
+        didSet {
+            if let preferredInputUID {
+                defaults.set(preferredInputUID, forKey: "preferredInputUID")
+            } else {
+                defaults.removeObject(forKey: "preferredInputUID")
+            }
+        }
+    }
+
     private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
@@ -82,6 +94,7 @@ public final class SettingsStore {
         webhookURL = defaults.string(forKey: "webhookURL") ?? ""
         saveRootPath = defaults.string(forKey: "saveRootPath") ?? LibraryStorage.defaultRootURL.path
         lastSystemAudioTapFailed = defaults.object(forKey: "lastSystemAudioTapFailed") as? Bool
+        preferredInputUID = defaults.string(forKey: "preferredInputUID")
     }
 
     public var saveRootURL: URL {

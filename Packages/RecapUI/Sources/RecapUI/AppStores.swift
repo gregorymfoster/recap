@@ -105,7 +105,8 @@ public final class AppStores {
             await session.start(
                 record: record,
                 engine: models.activeEngine(),
-                includeSystemAudio: settings.includeSystemAudio
+                includeSystemAudio: settings.includeSystemAudio,
+                preferredInputUID: settings.preferredInputUID
             )
             if session.permissionDenied {
                 library.markError(record, message: "Microphone access denied")

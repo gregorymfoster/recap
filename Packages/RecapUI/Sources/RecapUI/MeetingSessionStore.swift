@@ -31,6 +31,14 @@ public final class MeetingSessionStore {
     /// Why the last `start()` failed, beyond mic permission (e.g. disk full).
     public private(set) var startFailureMessage: String?
 
+    /// The mic device actually in use, for display in the live header/pill.
+    public private(set) var activeInputDeviceName: String?
+
+    /// A brief note about a mid-recording input switch ("Input switched to
+    /// AirPods Pro"), cleared automatically after a few seconds.
+    public private(set) var inputSwitchNote: String?
+    private var inputSwitchNoteTask: Task<Void, Never>?
+
     private static let idleLevels = [Float](repeating: 0, count: 16)
     private let recorder = MeetingRecorder()
     private var levelTask: Task<Void, Never>?
@@ -51,7 +59,8 @@ public final class MeetingSessionStore {
     public func start(
         record: MeetingRecord,
         engine: (any TranscriptionEngine)? = nil,
-        includeSystemAudio: Bool = true
+        includeSystemAudio: Bool = true,
+        preferredInputUID: String? = nil
     ) async {
         guard activeRecord == nil else { return }
         guard await MeetingRecorder.requestMicPermission() else {
@@ -63,13 +72,15 @@ public final class MeetingSessionStore {
         recordingFailureMessage = nil
         do {
             let output = try recorder.start(
-                writingTo: record.audioURL, includeSystemAudio: includeSystemAudio
+                writingTo: record.audioURL, includeSystemAudio: includeSystemAudio,
+                preferredInputUID: preferredInputUID
             )
             systemAudioUnavailable = includeSystemAudio && !recorder.systemAudioActive
             activeRecord = record
             startedAt = .now
             liveUtterances = []
             partialUtterance = nil
+            activeInputDeviceName = recorder.activeInputDeviceName
             levelTask = Task { [weak self] in
                 for await level in output.levels {
                     self?.pushLevel(level)
@@ -97,17 +108,40 @@ public final class MeetingSessionStore {
         }
     }
 
+    /// Switches the input device mid-recording. Goes through the recorder's
+    /// existing debounced rebuild path; `.inputRebuilt` (surfaced via
+    /// `handle(_:)`) confirms the switch once it lands.
+    public func setPreferredInputUID(_ uid: String?) {
+        guard isRecording else { return }
+        recorder.setPreferredInputUID(uid)
+    }
+
     private func handle(_ event: RecorderEvent) {
         switch event {
-        case .inputRebuilt:
-            // Informational: the mic graph survived a device change. Levels
-            // resuming is the visible signal; nothing to surface.
-            break
+        case .inputRebuilt(let reason):
+            // The mic graph survived a device switch — levels resuming is
+            // the main signal, but a brief note confirms which device won.
+            activeInputDeviceName = recorder.activeInputDeviceName
+            showInputSwitchNote(reason)
         case .writeFailed:
             // Audio can't reach disk — stop now so what was captured
             // survives, and tell the user why the recording ended.
             recordingFailureMessage = "Recording stopped — couldn't write audio (disk full?)"
             onAutoStop?()
+        }
+    }
+
+    /// Shows `reason` as a transient note and clears it a few seconds later.
+    private func showInputSwitchNote(_ reason: String) {
+        let note = reason.prefix(1).uppercased() + reason.dropFirst()
+        inputSwitchNote = note
+        inputSwitchNoteTask?.cancel()
+        inputSwitchNoteTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            if self?.inputSwitchNote == note {
+                self?.inputSwitchNote = nil
+            }
         }
     }
 
@@ -140,6 +174,10 @@ public final class MeetingSessionStore {
         systemAudioUnavailable = false
         liveUtterances = []
         partialUtterance = nil
+        activeInputDeviceName = nil
+        inputSwitchNoteTask?.cancel()
+        inputSwitchNoteTask = nil
+        inputSwitchNote = nil
         return (record, duration)
     }
 

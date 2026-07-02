@@ -1,6 +1,8 @@
 import AppKit
 import AVFoundation
+import CoreAudio
 import EventKit
+import RecapAudio
 import SwiftUI
 
 /// The Settings section: permissions, save location, recording sources, processing.
@@ -10,6 +12,8 @@ struct SettingsView: View {
     @Environment(QueueStore.self) private var queue: QueueStore?
     @State private var micStatus = AVAudioApplication.shared.recordPermission
     @State private var calendarStatus = EKEventStore.authorizationStatus(for: .event)
+    @State private var inputDevices: [AudioInputDevice] = AudioInputDevices.inputDevices()
+    @State private var deviceListListener: AudioObjectPropertyListenerBlock?
 
     var body: some View {
         @Bindable var settings = settings
@@ -60,6 +64,18 @@ struct SettingsView: View {
             }
 
             Section("Recording") {
+                Picker("Microphone", selection: $settings.preferredInputUID) {
+                    Text("System default").tag(String?.none)
+                    ForEach(inputDevices) { device in
+                        Text(device.name).tag(String?.some(device.uid))
+                    }
+                }
+                .onChange(of: settings.preferredInputUID) {
+                    stores?.session.setPreferredInputUID(settings.preferredInputUID)
+                }
+                Text("Switching mid-recording keeps the file writing — expect a brief gap.")
+                    .font(Tokens.caption)
+                    .foregroundStyle(Tokens.textTertiary)
                 Toggle("Capture system audio (other participants)", isOn: $settings.includeSystemAudio)
                 Text("Uses macOS's System Audio Recording permission. Turn off to record only your microphone.")
                     .font(Tokens.caption)
@@ -68,6 +84,18 @@ struct SettingsView: View {
                 Text("Works even when Recap isn't the active app — also available from the menu bar icon.")
                     .font(Tokens.caption)
                     .foregroundStyle(Tokens.textTertiary)
+            }
+            .onAppear {
+                inputDevices = AudioInputDevices.inputDevices()
+                deviceListListener = AudioInputDevices.addDeviceListListener(queue: .main) {
+                    Task { @MainActor in inputDevices = AudioInputDevices.inputDevices() }
+                }
+            }
+            .onDisappear {
+                if let deviceListListener {
+                    AudioInputDevices.removeDeviceListListener(deviceListListener)
+                }
+                deviceListListener = nil
             }
 
             Section("Calendar") {

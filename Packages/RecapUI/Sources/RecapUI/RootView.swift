@@ -46,7 +46,10 @@ public struct RootView: View {
         }
         .overlay(alignment: .bottom) {
             if let startedAt = session.startedAt {
-                RecordingPill(startedAt: startedAt, levels: session.levels) {
+                RecordingPill(
+                    startedAt: startedAt, levels: session.levels,
+                    inputDeviceName: session.activeInputDeviceName
+                ) {
                     stores.stopRecording()
                 }
                 .padding(.bottom, 22)

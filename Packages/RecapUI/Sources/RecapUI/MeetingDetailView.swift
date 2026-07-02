@@ -1,3 +1,5 @@
+import CoreAudio
+import RecapAudio
 import RecapCore
 import RecapTranscription
 import SwiftUI
@@ -9,11 +11,14 @@ struct MeetingDetailView: View {
     @Environment(LibraryStore.self) private var library
     @Environment(MeetingSessionStore.self) private var session
     @Environment(WhisperModelManager.self) private var models
+    @Environment(SettingsStore.self) private var settings
     @State private var notes = ""
     @State private var showTranscript = false
     @State private var savedTranscript: Transcript?
     @State private var enhancedNotes: String?
     @State private var showingOriginal = false
+    @State private var inputDevices: [AudioInputDevice] = []
+    @State private var deviceListListener: AudioObjectPropertyListenerBlock?
 
     private var isLiveMeeting: Bool {
         session.activeRecord?.meeting.id == record.meeting.id
@@ -62,6 +67,18 @@ struct MeetingDetailView: View {
         }
         .onChange(of: notes) {
             library.notesChanged(notes, in: record)
+        }
+        .onAppear {
+            inputDevices = AudioInputDevices.inputDevices()
+            deviceListListener = AudioInputDevices.addDeviceListListener(queue: .main) {
+                Task { @MainActor in inputDevices = AudioInputDevices.inputDevices() }
+            }
+        }
+        .onDisappear {
+            if let deviceListListener {
+                AudioInputDevices.removeDeviceListListener(deviceListListener)
+            }
+            deviceListListener = nil
         }
     }
 
@@ -141,7 +158,45 @@ struct MeetingDetailView: View {
                 }
                 .padding(.top, 4)
             }
+            if isLiveMeeting {
+                liveInputRow
+            }
         }
+    }
+
+    /// Input-device selector + a transient note when a mid-recording switch
+    /// lands, shown only in the live meeting's header.
+    private var liveInputRow: some View {
+        @Bindable var settings = settings
+        return HStack(spacing: 10) {
+            Image(systemName: "mic.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(Tokens.textTertiary)
+            Picker("", selection: $settings.preferredInputUID) {
+                Text("System default").tag(String?.none)
+                ForEach(inputDevices) { device in
+                    Text(device.name).tag(String?.some(device.uid))
+                }
+            }
+            .labelsHidden()
+            .controlSize(.small)
+            .fixedSize()
+            .onChange(of: settings.preferredInputUID) {
+                session.setPreferredInputUID(settings.preferredInputUID)
+            }
+            if let note = session.inputSwitchNote {
+                Text(note)
+                    .font(Tokens.microLabel)
+                    .foregroundStyle(Tokens.successGreenText)
+                    .transition(.opacity)
+            } else if let name = session.activeInputDeviceName {
+                Text(name)
+                    .font(Tokens.caption)
+                    .foregroundStyle(Tokens.textTertiary)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: session.inputSwitchNote)
+        .padding(.top, 2)
     }
 
     private var statusBar: some View {

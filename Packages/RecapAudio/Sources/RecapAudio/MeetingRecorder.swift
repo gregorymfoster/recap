@@ -46,19 +46,33 @@ public final class MeetingRecorder {
     /// hardware trouble) and the recording is mic-only.
     public private(set) var systemAudioActive = false
 
+    /// The mic device actually in use, for display (nil while not recording,
+    /// or when it couldn't be determined).
+    public var activeInputDeviceName: String? { mic.activeDeviceName }
+
     public init() {}
 
     public static func requestMicPermission() async -> Bool {
         await MicSource.requestPermission()
     }
 
-    public func start(writingTo url: URL, includeSystemAudio: Bool = true) throws -> Output {
+    /// Switches the input device mid-recording (or before starting). Goes
+    /// through `MicSource`'s existing debounced rebuild path, so the output
+    /// file keeps writing across the switch. `nil` means system default.
+    public func setPreferredInputUID(_ uid: String?) {
+        mic.preferredInputUID = uid
+    }
+
+    public func start(
+        writingTo url: URL, includeSystemAudio: Bool = true, preferredInputUID: String? = nil
+    ) throws -> Output {
         let folder = url.deletingLastPathComponent()
         if let free = try? folder.resourceValues(
             forKeys: [.volumeAvailableCapacityForImportantUsageKey]
         ).volumeAvailableCapacityForImportantUsage, free < Self.minimumFreeBytes {
             throw RecorderError.diskFull
         }
+        mic.preferredInputUID = preferredInputUID
 
         // System audio first, so its stream is live before the mic starts
         // filling the mix buffer's other side.

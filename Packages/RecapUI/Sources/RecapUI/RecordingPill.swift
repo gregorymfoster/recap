@@ -5,6 +5,9 @@ import SwiftUI
 struct RecordingPill: View {
     var startedAt: Date
     var levels: [Float]
+    /// Name of the mic in use, when it's known — shown as a small hoverable
+    /// label so the pill stays compact but the device is still visible.
+    var inputDeviceName: String?
     var onStop: () -> Void
 
     var body: some View {
@@ -30,6 +33,7 @@ struct RecordingPill: View {
                     .fill(.white.opacity(0.15))
                     .frame(width: 1, height: 18)
             }
+            .help(inputDeviceName.map { "Recording from \($0)" } ?? "")
             Button(action: onStop) {
                 Text("Stop")
                     .font(.system(size: 12, weight: .semibold))
@@ -91,6 +95,7 @@ struct PulsingDot: View {
     RecordingPill(
         startedAt: .now.addingTimeInterval(-1453),
         levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
+        inputDeviceName: "AirPods Pro",
         onStop: {}
     )
     .padding(40)
