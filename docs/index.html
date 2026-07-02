@@ -48,6 +48,12 @@
     background: var(--red); border-radius: 10px; padding: 12px 26px;
     text-decoration: none; margin-bottom: 14px;
   }
+  .brew {
+    display: block; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13px; color: var(--body); background: rgba(0, 0, 0, .04);
+    border: 1px solid var(--hairline); border-radius: 8px;
+    padding: 9px 14px; margin: 0 auto 14px; width: fit-content;
+  }
   .sub { font-size: 13px; color: var(--secondary); }
   .sub a { color: inherit; }
   @media (max-width: 560px) { .features { grid-template-columns: 1fr; } h1 { font-size: 34px; } }
@@ -74,6 +80,7 @@
     </div>
   </div>
   <a class="cta" href="https://github.com/gregorymfoster/recap/releases/latest">Download for macOS</a>
+  <code class="brew">brew install --cask gregorymfoster/tap/recap</code>
   <p class="sub">Requires macOS 26 · Apple silicon recommended<br>Free &amp; open source, <a href="https://github.com/gregorymfoster/recap">source on GitHub</a>, <a href="https://github.com/gregorymfoster/recap/blob/main/LICENSE">MIT licensed</a>.</p>
 </main>
 </body>

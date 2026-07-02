@@ -9,7 +9,13 @@ Recap records your meetings (your mic *and* the other participants via system au
 
 **Nothing ever leaves your Mac.** No account, no cloud, no subscription.
 
-> 🚧 Recap is under active development and not yet released. Watch the repo for the first build.
+## Install
+
+Download the latest DMG from [Releases](https://github.com/gregorymfoster/recap/releases/latest), or use Homebrew:
+
+```sh
+brew install --cask gregorymfoster/tap/recap
+```
 
 ## How it works
 
@@ -22,7 +28,7 @@ Everything is stored as plain Markdown and audio files in a folder you choose (d
 ## Requirements
 
 - macOS 26 or later, Apple silicon recommended
-- ~500 MB disk for the recommended Whisper Small model (downloaded in-app)
+- ~650 MB disk for the recommended Whisper Large v3 Turbo model (downloaded in-app)
 - Note enhancement uses Apple Intelligence when available; transcription works regardless
 
 ## Build from source
