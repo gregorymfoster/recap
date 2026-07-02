@@ -78,6 +78,7 @@ struct MeetingProcessor: JobExecutor {
                 } else {
                     // Apple Intelligence off → meeting completes transcript-only.
                     await onStatus(job.meetingID, .ready)
+                    exportToObsidianIfEnabled(record)
                 }
             } catch {
                 processorLog.error("Transcription failed: \(error, privacy: .public)")
@@ -91,6 +92,7 @@ struct MeetingProcessor: JobExecutor {
                 !transcript.utterances.isEmpty
             else {
                 await onStatus(job.meetingID, .ready)
+                exportToObsidianIfEnabled(record)
                 return
             }
             await onStatus(job.meetingID, .enhancing)
@@ -103,6 +105,26 @@ struct MeetingProcessor: JobExecutor {
                 // its transcript; enhancement can be retried from the editor.
             }
             await onStatus(job.meetingID, .ready)
+            exportToObsidianIfEnabled(record)
+        }
+    }
+
+    /// Mirrors a finished meeting into the configured Obsidian vault.
+    /// Best-effort: a failed export never affects the meeting itself.
+    private func exportToObsidianIfEnabled(_ record: MeetingRecord) {
+        let defaults = UserDefaults.standard
+        let path = defaults.string(forKey: "obsidianVaultPath") ?? ""
+        guard defaults.bool(forKey: "obsidianSync"), !path.isEmpty else { return }
+        let exporter = ObsidianExporter(vaultFolderURL: URL(fileURLWithPath: path))
+        do {
+            try exporter.export(
+                record,
+                notes: try? storage.loadNotes(in: record),
+                enhanced: (try? storage.loadEnhancedNotes(in: record)) ?? nil,
+                transcript: try? storage.loadTranscript(in: record)
+            )
+        } catch {
+            processorLog.error("Obsidian export failed: \(error, privacy: .public)")
         }
     }
 }

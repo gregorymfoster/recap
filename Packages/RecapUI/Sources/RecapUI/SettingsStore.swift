@@ -35,6 +35,15 @@ public final class SettingsStore {
         didSet { defaults.set(calendarAutoRecord.rawValue, forKey: "calendarAutoRecord") }
     }
 
+    /// Mirror finished meetings into an Obsidian vault folder as Markdown.
+    public var syncsToObsidian: Bool {
+        didSet { defaults.set(syncsToObsidian, forKey: "obsidianSync") }
+    }
+
+    public var obsidianVaultPath: String {
+        didSet { defaults.set(obsidianVaultPath, forKey: "obsidianVaultPath") }
+    }
+
     /// Meeting library location. Applies to meetings created after a change.
     public var saveRootPath: String {
         didSet { defaults.set(saveRootPath, forKey: "saveRootPath") }
@@ -50,6 +59,8 @@ public final class SettingsStore {
         labelsSpeakers = defaults.object(forKey: "labelSpeakers") as? Bool ?? true
         calendarAutoRecord = defaults.string(forKey: "calendarAutoRecord")
             .flatMap(CalendarAutoRecordMode.init(rawValue:)) ?? .off
+        syncsToObsidian = defaults.bool(forKey: "obsidianSync")
+        obsidianVaultPath = defaults.string(forKey: "obsidianVaultPath") ?? ""
         saveRootPath = defaults.string(forKey: "saveRootPath") ?? LibraryStorage.defaultRootURL.path
     }
 

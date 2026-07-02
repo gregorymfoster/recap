@@ -24,6 +24,8 @@ public final class AppStores {
     public let session: MeetingSessionStore
     public let queue: QueueStore?
     public let router = AppRouter()
+    /// nil in fixture/preview graphs, where nothing touches disk.
+    private let storage: LibraryStorage?
 
     /// ⌥⌘R anywhere toggles recording. nil when another app owns the combo.
     @ObservationIgnored private var recordHotKey: GlobalHotKey?
@@ -42,6 +44,7 @@ public final class AppStores {
             models = WhisperModelManager()
             session = MeetingSessionStore()
             queue = nil
+            storage = nil
         } else {
             let settings = SettingsStore()
             let storage = LibraryStorage(rootURL: settings.saveRootURL)
@@ -51,6 +54,7 @@ public final class AppStores {
             self.settings = settings
             self.library = library
             self.models = models
+            self.storage = storage
             session = MeetingSessionStore()
             queue = QueueStore(library: library, storage: storage, models: models)
             recordHotKey = GlobalHotKey(keyCode: kVK_ANSI_R, modifiers: cmdKey | optionKey) { [weak self] in
@@ -77,6 +81,7 @@ public final class AppStores {
         models = WhisperModelManager()
         session = MeetingSessionStore()
         queue = nil
+        storage = nil
     }
 
     // MARK: Recording control
@@ -161,5 +166,28 @@ public final class AppStores {
 
     private func startRecording(for event: CalendarEventSnapshot) {
         startRecording(title: event.title, attendees: event.otherAttendees)
+    }
+
+    // MARK: Obsidian sync
+
+    /// Backfills the vault with every finished meeting. Called when sync is
+    /// switched on so the vault doesn't start with only future meetings.
+    public func exportAllReadyMeetingsToObsidian() {
+        guard settings.syncsToObsidian, !settings.obsidianVaultPath.isEmpty,
+              let storage else { return }
+        let exporter = ObsidianExporter(
+            vaultFolderURL: URL(fileURLWithPath: settings.obsidianVaultPath)
+        )
+        let ready = library.meetings.filter { $0.meeting.status == .ready }
+        Task.detached(priority: .utility) {
+            for record in ready {
+                try? exporter.export(
+                    record,
+                    notes: try? storage.loadNotes(in: record),
+                    enhanced: (try? storage.loadEnhancedNotes(in: record)) ?? nil,
+                    transcript: try? storage.loadTranscript(in: record)
+                )
+            }
+        }
     }
 }

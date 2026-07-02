@@ -56,6 +56,32 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Sync") {
+                Toggle("Copy finished meetings into an Obsidian vault", isOn: $settings.syncsToObsidian)
+                    .onChange(of: settings.syncsToObsidian) {
+                        if settings.syncsToObsidian {
+                            if settings.obsidianVaultPath.isEmpty { pickVaultFolder() }
+                            stores?.exportAllReadyMeetingsToObsidian()
+                        }
+                    }
+                if settings.syncsToObsidian {
+                    LabeledContent("Vault folder") {
+                        HStack(spacing: 10) {
+                            Text(settings.obsidianVaultPath.isEmpty
+                                ? "None selected"
+                                : tildePath(settings.obsidianVaultPath))
+                                .font(Tokens.meta)
+                                .foregroundStyle(Tokens.textSecondary)
+                            Button("Change…") { pickVaultFolder() }
+                                .controlSize(.small)
+                        }
+                    }
+                }
+                Text("Each meeting becomes one Markdown note — enhanced notes plus the speaker-labeled transcript. Notes are copies; the meetings folder stays the source of truth.")
+                    .font(Tokens.caption)
+                    .foregroundStyle(Tokens.textTertiary)
+            }
+
             Section("Processing") {
                 Toggle("Pause transcription on battery", isOn: $settings.pausesOnBattery)
                     .onChange(of: settings.pausesOnBattery) {
@@ -71,6 +97,19 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func pickVaultFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Use Folder"
+        panel.message = "Choose a folder inside your Obsidian vault"
+        if panel.runModal() == .OK, let url = panel.url {
+            settings.obsidianVaultPath = url.path
+            stores?.exportAllReadyMeetingsToObsidian()
+        }
     }
 
     private func pickFolder() {
