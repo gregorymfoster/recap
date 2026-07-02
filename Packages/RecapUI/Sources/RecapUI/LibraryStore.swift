@@ -49,10 +49,11 @@ public final class LibraryStore {
         try? index.reindex(from: storage)
     }
 
-    /// Creates a new meeting on disk and selects it.
+    /// Creates a new meeting on disk and selects it. Calendar auto-record
+    /// seeds the title and attendees from the event.
     @discardableResult
-    public func startNewMeeting() -> MeetingRecord? {
-        let meeting = Meeting(title: "Untitled meeting", date: .now, status: .recording)
+    public func startNewMeeting(title: String = "Untitled meeting", attendees: [String] = []) -> MeetingRecord? {
+        let meeting = Meeting(title: title, date: .now, attendees: attendees, status: .recording)
         guard let storage else {
             let record = MeetingRecord(meeting: meeting, folderURL: URL(filePath: "/dev/null"))
             meetings.insert(record, at: 0)

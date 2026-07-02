@@ -3,6 +3,7 @@ import SwiftUI
 
 /// The Settings section: save location, recording sources, processing.
 struct SettingsView: View {
+    @Environment(AppStores.self) private var stores: AppStores?
     @Environment(SettingsStore.self) private var settings
     @Environment(QueueStore.self) private var queue: QueueStore?
 
@@ -33,6 +34,26 @@ struct SettingsView: View {
                 Text("Works even when Recap isn't the active app — also available from the menu bar icon.")
                     .font(Tokens.caption)
                     .foregroundStyle(Tokens.textTertiary)
+            }
+
+            Section("Calendar") {
+                Picker("When a calendar meeting starts", selection: $settings.calendarAutoRecord) {
+                    Text("Do nothing").tag(CalendarAutoRecordMode.off)
+                    Text("Ask to record").tag(CalendarAutoRecordMode.prompt)
+                    Text("Record automatically").tag(CalendarAutoRecordMode.auto)
+                }
+                .onChange(of: settings.calendarAutoRecord) {
+                    stores?.applyCalendarAutoRecordSetting()
+                }
+                if stores?.calendarAccessDenied == true {
+                    Text("Calendar access is off. Allow it in System Settings → Privacy & Security → Calendars.")
+                        .font(Tokens.caption)
+                        .foregroundStyle(Tokens.warningAmberText)
+                } else {
+                    Text("Detects events with a video-call link or invitees. The recording is titled after the event, with attendees attached.")
+                        .font(Tokens.caption)
+                        .foregroundStyle(Tokens.textTertiary)
+                }
             }
 
             Section("Processing") {

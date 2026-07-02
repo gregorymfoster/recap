@@ -27,6 +27,11 @@ public final class AppStores {
 
     /// ⌥⌘R anywhere toggles recording. nil when another app owns the combo.
     @ObservationIgnored private var recordHotKey: GlobalHotKey?
+    @ObservationIgnored private var calendarWatcher: CalendarWatcher?
+    @ObservationIgnored private var recordPrompter: RecordPrompter?
+    /// True when calendar auto-record is enabled in Settings but macOS
+    /// calendar access was denied — surfaced as a warning there.
+    public private(set) var calendarAccessDenied = false
 
     /// Disk-backed graph used by the app. `-fixtures` swaps in sample data
     /// for UI work and screenshots (no queue — fixtures never process).
@@ -56,6 +61,7 @@ public final class AppStores {
             } else {
                 storesLog.info("⌥⌘R global hot key registered")
             }
+            applyCalendarAutoRecordSetting()
         }
     }
 
@@ -71,9 +77,11 @@ public final class AppStores {
     // MARK: Recording control
 
     /// The one start-recording flow, shared by the Record button, the menu
-    /// bar extra, and the global hot key.
-    public func startRecording() {
-        guard !session.isRecording, let record = library.startNewMeeting() else { return }
+    /// bar extra, the global hot key, and calendar auto-record.
+    public func startRecording(title: String = "Untitled meeting", attendees: [String] = []) {
+        guard !session.isRecording,
+              let record = library.startNewMeeting(title: title, attendees: attendees)
+        else { return }
         Task {
             await session.start(
                 record: record,
@@ -104,5 +112,47 @@ public final class AppStores {
     public func showMeeting(_ id: UUID) {
         router.section = .library
         library.selectedMeetingID = id
+    }
+
+    // MARK: Calendar auto-record
+
+    /// Starts or stops the calendar watcher to match Settings. Called at
+    /// launch and whenever the setting changes.
+    public func applyCalendarAutoRecordSetting() {
+        guard settings.calendarAutoRecord != .off else {
+            calendarWatcher?.stop()
+            calendarAccessDenied = false
+            return
+        }
+        if calendarWatcher == nil {
+            calendarWatcher = CalendarWatcher { [weak self] event in
+                self?.meetingEventStarting(event)
+            }
+        }
+        if recordPrompter == nil {
+            recordPrompter = RecordPrompter { [weak self] event in
+                self?.startRecording(for: event)
+            }
+        }
+        Task {
+            let granted = await calendarWatcher?.start() ?? false
+            calendarAccessDenied = !granted
+        }
+    }
+
+    private func meetingEventStarting(_ event: CalendarEventSnapshot) {
+        guard !session.isRecording else { return }
+        switch settings.calendarAutoRecord {
+        case .off:
+            break
+        case .prompt:
+            recordPrompter?.promptToRecord(event)
+        case .auto:
+            startRecording(for: event)
+        }
+    }
+
+    private func startRecording(for event: CalendarEventSnapshot) {
+        startRecording(title: event.title, attendees: event.otherAttendees)
     }
 }

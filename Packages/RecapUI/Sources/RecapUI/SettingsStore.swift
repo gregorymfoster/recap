@@ -2,6 +2,13 @@ import Foundation
 import Observation
 import RecapCore
 
+/// What Recap does when a meeting-shaped calendar event starts.
+public enum CalendarAutoRecordMode: String, CaseIterable, Sendable {
+    case off
+    case prompt
+    case auto
+}
+
 /// User preferences, backed by UserDefaults.
 @MainActor
 @Observable
@@ -24,6 +31,10 @@ public final class SettingsStore {
         didSet { defaults.set(labelsSpeakers, forKey: "labelSpeakers") }
     }
 
+    public var calendarAutoRecord: CalendarAutoRecordMode {
+        didSet { defaults.set(calendarAutoRecord.rawValue, forKey: "calendarAutoRecord") }
+    }
+
     /// Meeting library location. Applies to meetings created after a change.
     public var saveRootPath: String {
         didSet { defaults.set(saveRootPath, forKey: "saveRootPath") }
@@ -37,6 +48,8 @@ public final class SettingsStore {
         includeSystemAudio = defaults.object(forKey: "includeSystemAudio") as? Bool ?? true
         pausesOnBattery = defaults.object(forKey: "pauseOnBattery") as? Bool ?? true
         labelsSpeakers = defaults.object(forKey: "labelSpeakers") as? Bool ?? true
+        calendarAutoRecord = defaults.string(forKey: "calendarAutoRecord")
+            .flatMap(CalendarAutoRecordMode.init(rawValue:)) ?? .off
         saveRootPath = defaults.string(forKey: "saveRootPath") ?? LibraryStorage.defaultRootURL.path
     }
 
