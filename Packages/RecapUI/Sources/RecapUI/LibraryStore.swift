@@ -6,10 +6,12 @@ import RecapCore
 public struct QueueSummary: Equatable, Sendable {
     public var jobCount: Int
     public var progress: Double
+    public var pauseReason: String?
 
-    public init(jobCount: Int, progress: Double) {
+    public init(jobCount: Int, progress: Double, pauseReason: String? = nil) {
         self.jobCount = jobCount
         self.progress = progress
+        self.pauseReason = pauseReason
     }
 }
 
@@ -78,6 +80,21 @@ public final class LibraryStore {
         var updated = record
         updated.meeting.status = .error(message: message)
         replace(updated)
+    }
+
+    /// Status transition from the processing pipeline. Transcription progress
+    /// ticks update the UI only; transitions between states hit disk.
+    public func updateStatus(_ id: UUID, to status: MeetingStatus) {
+        guard var record = record(for: id) else { return }
+        let previous = record.meeting.status
+        record.meeting.status = status
+        if case .transcribing = status, case .transcribing = previous {
+            if let i = meetings.firstIndex(where: { $0.meeting.id == id }) {
+                meetings[i] = record
+            }
+        } else {
+            replace(record)
+        }
     }
 
     private func replace(_ record: MeetingRecord) {

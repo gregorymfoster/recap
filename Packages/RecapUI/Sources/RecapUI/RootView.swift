@@ -7,6 +7,7 @@ public struct RootView: View {
     @State private var library: LibraryStore
     @State private var session = MeetingSessionStore()
     @State private var models = WhisperModelManager()
+    @State private var queue: QueueStore?
     @State private var sidebarSelection: SidebarItem? = .library
 
     /// Disk-backed root, used by the app. `-fixtures` swaps in sample data
@@ -18,7 +19,11 @@ public struct RootView: View {
         }
         let storage = LibraryStorage(rootURL: LibraryStorage.defaultRootURL)
         let index = (try? SearchIndex(databaseURL: SearchIndex.defaultDatabaseURL)) ?? (try! SearchIndex())
-        _library = State(initialValue: LibraryStore(storage: storage, index: index))
+        let library = LibraryStore(storage: storage, index: index)
+        let models = WhisperModelManager()
+        _library = State(initialValue: library)
+        _models = State(initialValue: models)
+        _queue = State(initialValue: QueueStore(library: library, storage: storage, models: models))
     }
 
     /// Injectable root, for previews.
@@ -39,6 +44,7 @@ public struct RootView: View {
                     Task {
                         if let (record, duration) = await session.stop() {
                             library.finishRecording(record, duration: duration)
+                            queue?.enqueueTranscription(for: record.meeting.id)
                         }
                     }
                 }
