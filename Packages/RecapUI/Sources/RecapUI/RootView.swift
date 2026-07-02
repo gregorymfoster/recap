@@ -10,39 +10,26 @@ final class AppRouter {
     var section: SidebarItem? = .library
 }
 
-/// App root: sidebar navigation + the selected section.
+/// App root: sidebar navigation + the selected section. Never build stores
+/// here — view values re-initialize freely; the graph lives in `AppStores`.
 public struct RootView: View {
-    @State private var library: LibraryStore
-    @State private var session = MeetingSessionStore()
-    @State private var models = WhisperModelManager()
-    @State private var settings = SettingsStore()
-    @State private var queue: QueueStore?
+    private let stores: AppStores
     @State private var router = AppRouter()
     @State private var showSearch = false
 
-    /// Disk-backed root, used by the app. `-fixtures` swaps in sample data
-    /// for UI work and screenshots.
-    public init() {
-        if ProcessInfo.processInfo.arguments.contains("-fixtures") {
-            _library = State(initialValue: .fixture())
-            _settings = State(initialValue: .ephemeralOnboarded())
-            return
-        }
-        let settings = SettingsStore()
-        let storage = LibraryStorage(rootURL: settings.saveRootURL)
-        let index = (try? SearchIndex(databaseURL: SearchIndex.defaultDatabaseURL)) ?? (try! SearchIndex())
-        let library = LibraryStore(storage: storage, index: index)
-        let models = WhisperModelManager()
-        _settings = State(initialValue: settings)
-        _library = State(initialValue: library)
-        _models = State(initialValue: models)
-        _queue = State(initialValue: QueueStore(library: library, storage: storage, models: models))
+    private var library: LibraryStore { stores.library }
+    private var session: MeetingSessionStore { stores.session }
+    private var models: WhisperModelManager { stores.models }
+    private var settings: SettingsStore { stores.settings }
+    private var queue: QueueStore? { stores.queue }
+
+    public init(stores: AppStores) {
+        self.stores = stores
     }
 
     /// Injectable root, for previews.
     init(library: LibraryStore) {
-        _library = State(initialValue: library)
-        _settings = State(initialValue: .ephemeralOnboarded())
+        stores = AppStores(library: library)
     }
 
     public var body: some View {

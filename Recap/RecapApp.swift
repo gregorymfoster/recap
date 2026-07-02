@@ -4,6 +4,10 @@ import SwiftUI
 
 @main
 struct RecapApp: App {
+    /// The app-lifetime store graph — the App struct persists for the whole
+    /// process, so this is constructed exactly once.
+    @State private var stores = AppStores()
+
     private let updaterController = SPUStandardUpdaterController(
         startingUpdater: true,
         updaterDelegate: nil,
@@ -12,7 +16,7 @@ struct RecapApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            RootView(stores: stores)
         }
         .defaultSize(width: 1060, height: 660)
         .commands {
