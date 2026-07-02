@@ -89,10 +89,19 @@ public struct WhisperKitEngine: TranscriptionEngine {
         let maxBuffer = Int(30 * sampleRate)  // Whisper's window
         let silenceRMS: Float = 0.005
 
+        continuation.yield(.status(.loadingModel))
         let config = WhisperKitConfig(
             modelFolder: modelFolder.path, verbose: false, load: true, download: false
         )
-        guard let pipe = try? await WhisperKit(config) else { return }
+        let pipe: WhisperKit
+        do {
+            pipe = try await WhisperKit(config)
+        } catch {
+            continuation.yield(.status(.failed(reason: "Couldn't load \(modelName)")))
+            return
+        }
+        guard !Task.isCancelled else { return }
+        continuation.yield(.status(.live))
 
         var buffer: [Float] = []
         var bufferStart: TimeInterval = 0

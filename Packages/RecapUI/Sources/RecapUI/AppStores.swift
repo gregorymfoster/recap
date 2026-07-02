@@ -101,10 +101,14 @@ public final class AppStores {
         guard !session.isRecording,
               let record = library.startNewMeeting(title: title, attendees: attendees)
         else { return }
+        // Keep the light streaming model topped up in the background — first
+        // recording on a fresh install won't have it yet, and this makes
+        // sure it's there for the next one even if this one starts without it.
+        models.ensureStreamingModelDownloading()
         Task {
             await session.start(
                 record: record,
-                engine: models.activeEngine(),
+                engine: models.streamingEngine(),
                 includeSystemAudio: settings.includeSystemAudio,
                 preferredInputUID: settings.preferredInputUID
             )

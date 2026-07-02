@@ -49,6 +49,13 @@ public enum ModelCatalog {
         all.first(where: \.isRecommended)!
     }
 
+    /// Default model for the live (streaming) pass during recording: small
+    /// enough to load quickly and keep up with a 4s realtime loop, independent
+    /// of whatever the user picked for the canonical file pass.
+    public static var streamingDefault: ModelInfo {
+        all.first { $0.id == "tiny" }!
+    }
+
     public static func info(for id: String) -> ModelInfo? {
         all.first { $0.id == id }
     }

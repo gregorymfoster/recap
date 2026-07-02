@@ -65,6 +65,10 @@ struct OnboardingView: View {
             case .available:
                 Button {
                     models.download(model)
+                    // Kick off the small live-transcription model alongside
+                    // the main one so it's ready before the first recording
+                    // instead of loading cold at that moment.
+                    models.ensureStreamingModelDownloading()
                 } label: {
                     Text("Download \(model.displayName)")
                         .font(.system(size: 13, weight: .semibold))

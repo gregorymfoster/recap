@@ -19,12 +19,19 @@ public enum ModelState: Equatable, Sendable {
 public final class WhisperModelManager {
     public private(set) var states: [String: ModelState] = [:]
     public private(set) var activeModelID: String?
+    /// The dedicated light model used for the live (streaming) pass during
+    /// recording — independent of `activeModelID`, which drives the
+    /// canonical post-stop file pass. Defaults to Whisper Tiny: small enough
+    /// to load fast and keep up with a 4s realtime loop even when the file
+    /// pass model is something heavy like Large v3 Turbo.
+    public private(set) var streamingModelID: String
 
     private let modelsRoot: URL
     private let defaults: UserDefaults
     private var downloadTasks: [String: Task<Void, Never>] = [:]
 
     private static let activeModelKey = "activeModelID"
+    private static let streamingModelKey = "streamingModelID"
 
     public static var defaultModelsRoot: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -35,11 +42,16 @@ public final class WhisperModelManager {
         self.modelsRoot = modelsRoot
         self.defaults = defaults
         activeModelID = defaults.string(forKey: Self.activeModelKey)
+        streamingModelID = defaults.string(forKey: Self.streamingModelKey) ?? ModelCatalog.streamingDefault.id
         refresh()
     }
 
     public var activeModel: ModelInfo? {
         activeModelID.flatMap(ModelCatalog.info(for:))
+    }
+
+    public var streamingModel: ModelInfo? {
+        ModelCatalog.info(for: streamingModelID)
     }
 
     /// Local folder of an installed model, or nil if not fully downloaded.
@@ -122,10 +134,41 @@ public final class WhisperModelManager {
         }
     }
 
+    /// Changes the dedicated live-pass model. Persisted separately from
+    /// `activeModelID` so switching the file-pass model never disturbs it.
+    public func setStreamingModel(_ id: String) {
+        streamingModelID = id
+        defaults.set(id, forKey: Self.streamingModelKey)
+    }
+
     /// The engine for the active model, if one is installed.
     public func activeEngine() -> WhisperKitEngine? {
         guard let model = activeModel, let folder = installedFolder(for: model) else { return nil }
         return WhisperKitEngine(modelFolder: folder, modelName: model.repoFolderName)
+    }
+
+    /// The engine for the dedicated streaming model, if one is installed.
+    /// Independent of `activeEngine()` — a second WhisperKit instance, kept
+    /// deliberately light so it can keep up with the realtime loop even when
+    /// the file-pass model is large. If the streaming and active models
+    /// happen to be the same variant, the two engines simply point at the
+    /// same folder; each still loads its own WhisperKit instance.
+    public func streamingEngine() -> WhisperKitEngine? {
+        guard let model = streamingModel, let folder = installedFolder(for: model) else { return nil }
+        return WhisperKitEngine(modelFolder: folder, modelName: model.repoFolderName)
+    }
+
+    /// True once the streaming model is installed and ready to use.
+    public var isStreamingModelInstalled: Bool {
+        guard let model = streamingModel else { return false }
+        return states[model.id] == .installed
+    }
+
+    /// Starts downloading the streaming model if it isn't already installed
+    /// or in flight. Safe to call unconditionally (e.g. on first recording).
+    public func ensureStreamingModelDownloading() {
+        guard let model = streamingModel, !isStreamingModelInstalled else { return }
+        download(model)
     }
 
     // MARK: Private

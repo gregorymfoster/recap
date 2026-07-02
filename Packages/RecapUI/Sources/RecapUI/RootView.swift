@@ -48,7 +48,8 @@ public struct RootView: View {
             if let startedAt = session.startedAt {
                 RecordingPill(
                     startedAt: startedAt, levels: session.levels,
-                    inputDeviceName: session.activeInputDeviceName
+                    inputDeviceName: session.activeInputDeviceName,
+                    lastHeardText: session.lastHeardText
                 ) {
                     stores.stopRecording()
                 }

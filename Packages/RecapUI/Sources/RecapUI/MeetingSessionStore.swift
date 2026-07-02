@@ -15,10 +15,21 @@ public final class MeetingSessionStore {
     public private(set) var levels: [Float] = MeetingSessionStore.idleLevels
     public private(set) var permissionDenied = false
 
-    /// Live transcript state (split view). Provisional — the post-stop file
-    /// pass produces the canonical transcript.
-    public private(set) var liveUtterances: [Utterance] = []
-    public private(set) var partialUtterance: Utterance?
+    /// Live transcript state (split view), reduced from `TranscriptionUpdate`s
+    /// by the pure `LiveTranscriptState.applying(_:)`. Provisional — the
+    /// post-stop file pass produces the canonical transcript.
+    private var liveTranscript = LiveTranscriptState()
+
+    public var liveUtterances: [Utterance] { liveTranscript.utterances }
+    public var partialUtterance: Utterance? { liveTranscript.partial }
+
+    /// Health of the live streaming pipeline — drives the transcript pane
+    /// header so "Listening…" never lies about a stalled or missing model.
+    public var liveState: LiveState { liveTranscript.liveState }
+
+    /// The most recent confirmed utterance's text, for the RecordingPill's
+    /// "last heard" snippet — visible even without the main window open.
+    public var lastHeardText: String? { liveTranscript.lastHeardText }
 
     /// True while recording, when the system-audio tap couldn't start —
     /// other meeting participants aren't being captured.
@@ -78,8 +89,7 @@ public final class MeetingSessionStore {
             systemAudioUnavailable = includeSystemAudio && !recorder.systemAudioActive
             activeRecord = record
             startedAt = .now
-            liveUtterances = []
-            partialUtterance = nil
+            liveTranscript = LiveTranscriptState()
             activeInputDeviceName = recorder.activeInputDeviceName
             levelTask = Task { [weak self] in
                 for await level in output.levels {
@@ -92,12 +102,17 @@ public final class MeetingSessionStore {
                 }
             }
             if let engine {
+                liveTranscript.liveState = .loadingModel
                 let updates = engine.transcribe(stream: output.chunks)
                 transcriptTask = Task { [weak self] in
                     for await update in updates {
                         self?.apply(update)
                     }
                 }
+            } else {
+                // No streaming-capable model at all — say so plainly instead
+                // of leaving the pane on a "Listening…" placeholder forever.
+                liveTranscript.liveState = .noModelInstalled
             }
         } catch MeetingRecorder.RecorderError.diskFull {
             activeRecord = nil
@@ -146,15 +161,7 @@ public final class MeetingSessionStore {
     }
 
     private func apply(_ update: TranscriptionUpdate) {
-        switch update {
-        case .confirmed(let utterance):
-            liveUtterances.append(utterance)
-            partialUtterance = nil
-        case .partial(let utterance):
-            partialUtterance = utterance
-        case .progress:
-            break
-        }
+        liveTranscript = liveTranscript.applying(update)
     }
 
     /// Stops capture and returns the finished record with its duration.
@@ -172,8 +179,7 @@ public final class MeetingSessionStore {
         startedAt = nil
         levels = Self.idleLevels
         systemAudioUnavailable = false
-        liveUtterances = []
-        partialUtterance = nil
+        liveTranscript = LiveTranscriptState()
         activeInputDeviceName = nil
         inputSwitchNoteTask?.cancel()
         inputSwitchNoteTask = nil

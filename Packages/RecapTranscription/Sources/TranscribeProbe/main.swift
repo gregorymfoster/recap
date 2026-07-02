@@ -69,6 +69,8 @@ func runStreamProbe(engine: WhisperKitEngine, url: URL) async {
         continuation.finish()
     }
     var confirmed = 0
+    var sawLive = false
+    var sawFailure = false
     for await update in updates {
         switch update {
         case .confirmed(let utterance):
@@ -78,11 +80,18 @@ func runStreamProbe(engine: WhisperKitEngine, url: URL) async {
             print(String(format: "partial   [%5.1f – %5.1f] %@", utterance.start, utterance.end, utterance.text))
         case .progress:
             break
+        case .status(let state):
+            print("STATUS    \(state)")
+            switch state {
+            case .live: sawLive = true
+            case .failed: sawFailure = true
+            default: break
+            }
         }
     }
     _ = await feed.value
-    print("done — \(confirmed) confirmed utterances")
-    exit(confirmed > 0 ? 0 : 1)
+    print("done — \(confirmed) confirmed utterances, live=\(sawLive), failed=\(sawFailure)")
+    exit(confirmed > 0 && sawLive && !sawFailure ? 0 : 1)
 }
 
 @MainActor

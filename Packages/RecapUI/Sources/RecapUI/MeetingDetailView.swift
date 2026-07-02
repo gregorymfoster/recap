@@ -31,7 +31,9 @@ struct MeetingDetailView: View {
                     TranscriptPane(
                         utterances: isLiveMeeting ? session.liveUtterances : savedTranscript?.utterances ?? [],
                         partial: isLiveMeeting ? session.partialUtterance : nil,
-                        isLive: isLiveMeeting
+                        isLive: isLiveMeeting,
+                        liveState: isLiveMeeting ? session.liveState : nil,
+                        onDownloadStreamingModel: { models.ensureStreamingModelDownloading() }
                     )
                     .frame(minWidth: 260, idealWidth: 420)
                 }
@@ -53,6 +55,12 @@ struct MeetingDetailView: View {
             savedTranscript = library.loadTranscript(for: record)
             enhancedNotes = library.loadEnhancedNotes(for: record)
             showingOriginal = false
+            // Live meetings default to expanded so the user sees text
+            // appearing without hunting for the toggle; saved meetings keep
+            // whatever the user last chose.
+            if isLiveMeeting {
+                showTranscript = true
+            }
         }
         .task(id: record.meeting.status) {
             // Refresh once the pipeline lands results (status flips to ready).

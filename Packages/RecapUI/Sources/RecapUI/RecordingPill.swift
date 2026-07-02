@@ -8,51 +8,71 @@ struct RecordingPill: View {
     /// Name of the mic in use, when it's known — shown as a small hoverable
     /// label so the pill stays compact but the device is still visible.
     var inputDeviceName: String?
+    /// Latest confirmed live-transcription text, shown as a one-line rolling
+    /// snippet under the waveform so confidence is visible even without the
+    /// main window open — the whole point of the light streaming pass.
+    var lastHeardText: String?
     var onStop: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
-            PulsingDot()
-            TimelineView(.periodic(from: startedAt, by: 1)) { context in
-                Text(elapsedLabel(at: context.date))
-                    .font(Tokens.timer)
-                    .foregroundStyle(.white)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 14) {
+                PulsingDot()
+                TimelineView(.periodic(from: startedAt, by: 1)) { context in
+                    Text(elapsedLabel(at: context.date))
+                        .font(Tokens.timer)
+                        .foregroundStyle(.white)
+                }
+                waveform
+                HStack(spacing: 4) {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 8))
+                    Text("local")
+                        .font(Tokens.microLabel)
+                        .fixedSize()
+                }
+                .foregroundStyle(.white.opacity(0.55))
+                .padding(.leading, 12)
+                .overlay(alignment: .leading) {
+                    Rectangle()
+                        .fill(.white.opacity(0.15))
+                        .frame(width: 1, height: 18)
+                }
+                .help(inputDeviceName.map { "Recording from \($0)" } ?? "")
+                Button(action: onStop) {
+                    Text("Stop")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Tokens.textPrimary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .background(.white, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(".", modifiers: .command)
             }
-            waveform
-            HStack(spacing: 4) {
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 8))
-                Text("local")
-                    .font(Tokens.microLabel)
-                    .fixedSize()
+            if let lastHeardText, !lastHeardText.isEmpty {
+                Text(lastHeardText)
+                    .font(Tokens.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 360, alignment: .leading)
+                    .transition(.opacity)
             }
-            .foregroundStyle(.white.opacity(0.55))
-            .padding(.leading, 12)
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(.white.opacity(0.15))
-                    .frame(width: 1, height: 18)
-            }
-            .help(inputDeviceName.map { "Recording from \($0)" } ?? "")
-            Button(action: onStop) {
-                Text("Stop")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Tokens.textPrimary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(.white, in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut(".", modifiers: .command)
         }
         .padding(.leading, 18)
         .padding(.trailing, 10)
         .padding(.vertical, 10)
-        .background(Tokens.darkSurface, in: Capsule())
+        // A plain Capsule reads as a pill for the single-line case; once the
+        // "last heard" line pushes the pill taller, a Capsule's semicircular
+        // ends would look increasingly stretched, so use a fixed radius that
+        // stays pill-like at both heights.
+        .background(Tokens.darkSurface, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .shadow(color: .black.opacity(0.25), radius: 14, y: 8)
         // The bottom overlay proposes a narrow width; without this the HStack
         // compresses — "local" wraps and the Stop label truncates to "…".
         .fixedSize()
+        .animation(.easeOut(duration: 0.15), value: lastHeardText)
     }
 
     private var waveform: some View {
@@ -92,12 +112,21 @@ struct PulsingDot: View {
 }
 
 #Preview {
-    RecordingPill(
-        startedAt: .now.addingTimeInterval(-1453),
-        levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
-        inputDeviceName: "AirPods Pro",
-        onStop: {}
-    )
+    VStack(spacing: 24) {
+        RecordingPill(
+            startedAt: .now.addingTimeInterval(-1453),
+            levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
+            inputDeviceName: "AirPods Pro",
+            lastHeardText: "…so I think we should ship the onboarding revamp next sprint.",
+            onStop: {}
+        )
+        RecordingPill(
+            startedAt: .now.addingTimeInterval(-1453),
+            levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
+            inputDeviceName: "AirPods Pro",
+            onStop: {}
+        )
+    }
     .padding(40)
     .background(.white)
 }
