@@ -1,0 +1,30 @@
+name: Bug report
+description: Something in Recap isn't working
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Recap version
+      placeholder: "0.1.0 (About Recap)"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac model
+      placeholder: "macOS 26.4, MacBook Pro M3"
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: If audio-related — which mic/output device, which meeting app? If transcription-related — which model?

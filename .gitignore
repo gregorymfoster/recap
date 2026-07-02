@@ -1,0 +1,18 @@
+# XcodeGen output — regenerate with Scripts/bootstrap.sh
+*.xcodeproj
+
+# Xcode
+DerivedData/
+xcuserdata/
+*.xcresult
+
+# SPM
+.build/
+.swiftpm/
+
+# Release artifacts
+*.dmg
+build/
+dist/
+
+.DS_Store

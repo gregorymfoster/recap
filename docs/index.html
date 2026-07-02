@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recap — Private, offline meeting transcription for Mac</title>
+<meta name="description" content="Recap records and transcribes your meetings entirely on-device with open-source models. No bot, no cloud, no subscription.">
+<style>
+  :root {
+    --text: #1c1c1e;
+    --body: #2c2c2e;
+    --secondary: rgba(0, 0, 0, .55);
+    --hairline: rgba(0, 0, 0, .08);
+    --green-text: #2a7d43;
+    --green-tint: rgba(48, 179, 82, .12);
+    --red: #ff453a;
+  }
+  * { margin: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    color: var(--body);
+    background: #fff;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 640px; margin: 0 auto; padding: 96px 24px 80px; text-align: center; }
+  .logo {
+    width: 56px; height: 56px; border-radius: 14px; background: var(--text);
+    display: inline-flex; align-items: flex-end; justify-content: center;
+    gap: 4px; padding-bottom: 16px; margin-bottom: 28px;
+  }
+  .logo span { width: 5px; border-radius: 2px; background: #fff; display: block; }
+  h1 { font-size: 44px; font-weight: 700; letter-spacing: -1px; color: var(--text); margin-bottom: 16px; }
+  .tagline { font-size: 19px; line-height: 1.5; color: var(--secondary); margin-bottom: 28px; }
+  .badge {
+    display: inline-block; font-size: 13px; font-weight: 600;
+    color: var(--green-text); background: var(--green-tint);
+    border-radius: 6px; padding: 5px 12px; margin-bottom: 48px;
+  }
+  .features {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
+    text-align: left; margin-bottom: 56px;
+  }
+  .feature { border: 1px solid var(--hairline); border-radius: 12px; padding: 18px; }
+  .feature h2 { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+  .feature p { font-size: 13px; line-height: 1.5; color: var(--secondary); }
+  .cta {
+    display: inline-block; font-size: 15px; font-weight: 600; color: #fff;
+    background: var(--red); border-radius: 10px; padding: 12px 26px;
+    text-decoration: none; margin-bottom: 14px;
+  }
+  .sub { font-size: 13px; color: var(--secondary); }
+  .sub a { color: inherit; }
+  @media (max-width: 560px) { .features { grid-template-columns: 1fr; } h1 { font-size: 34px; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="logo" aria-hidden="true"><span style="height:10px"></span><span style="height:22px"></span><span style="height:15px"></span></div>
+  <h1>Recap</h1>
+  <p class="tagline">Private, offline meeting transcription for your Mac.<br>Rough notes in, polished notes out — powered by the meeting itself.</p>
+  <div class="badge">🔒 Everything stays on your Mac</div>
+  <div class="features">
+    <div class="feature">
+      <h2>No bot in your call</h2>
+      <p>Recap records your mic and system audio directly — other participants are captured without anything joining the meeting.</p>
+    </div>
+    <div class="feature">
+      <h2>On-device transcription</h2>
+      <p>Open-source Whisper models run locally, as a low-priority background job that pauses on battery.</p>
+    </div>
+    <div class="feature">
+      <h2>Notes, enhanced</h2>
+      <p>Type lazy bullets during the meeting. Afterwards they're expanded with specifics from the transcript — your structure, kept.</p>
+    </div>
+  </div>
+  <a class="cta" href="https://github.com/gregorymfoster/recap">View on GitHub</a>
+  <p class="sub">Under active development — first release coming soon.<br>Free &amp; open source, <a href="https://github.com/gregorymfoster/recap/blob/main/LICENSE">MIT licensed</a>.</p>
+</main>
+</body>
+</html>

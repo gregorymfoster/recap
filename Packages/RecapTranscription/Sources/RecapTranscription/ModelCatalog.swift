@@ -1,0 +1,47 @@
+import Foundation
+
+/// A downloadable speech model the user can install via the Model Manager.
+public struct ModelInfo: Identifiable, Equatable, Sendable {
+    public var id: String
+    public var displayName: String
+    public var approximateSizeMB: Int
+    public var languages: String
+    public var qualityHint: String
+    public var isRecommended: Bool
+
+    public init(
+        id: String,
+        displayName: String,
+        approximateSizeMB: Int,
+        languages: String,
+        qualityHint: String,
+        isRecommended: Bool = false
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.approximateSizeMB = approximateSizeMB
+        self.languages = languages
+        self.qualityHint = qualityHint
+        self.isRecommended = isRecommended
+    }
+}
+
+/// Static catalog of WhisperKit CoreML builds hosted at huggingface.co/argmaxinc/whisperkit-coreml.
+public enum ModelCatalog {
+    public static let all: [ModelInfo] = [
+        ModelInfo(id: "openai_whisper-tiny", displayName: "Whisper Tiny", approximateSizeMB: 80,
+                  languages: "Multilingual", qualityHint: "Fastest · rough drafts"),
+        ModelInfo(id: "openai_whisper-base", displayName: "Whisper Base", approximateSizeMB: 150,
+                  languages: "Multilingual", qualityHint: "Fast · casual notes"),
+        ModelInfo(id: "openai_whisper-small", displayName: "Whisper Small", approximateSizeMB: 500,
+                  languages: "Multilingual", qualityHint: "Balanced · recommended", isRecommended: true),
+        ModelInfo(id: "openai_whisper-medium", displayName: "Whisper Medium", approximateSizeMB: 1500,
+                  languages: "Multilingual", qualityHint: "Accurate · slower"),
+        ModelInfo(id: "openai_whisper-large-v3_turbo", displayName: "Whisper Large v3 Turbo", approximateSizeMB: 1600,
+                  languages: "Multilingual", qualityHint: "Most accurate · Apple silicon"),
+    ]
+
+    public static var recommended: ModelInfo {
+        all.first(where: \.isRecommended)!
+    }
+}
