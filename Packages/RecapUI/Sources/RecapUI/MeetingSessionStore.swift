@@ -35,7 +35,11 @@ public final class MeetingSessionStore {
 
     /// Starts capture; when a transcription engine is available, live
     /// transcription runs alongside it feeding the split view.
-    public func start(record: MeetingRecord, engine: (any TranscriptionEngine)? = nil) async {
+    public func start(
+        record: MeetingRecord,
+        engine: (any TranscriptionEngine)? = nil,
+        includeSystemAudio: Bool = true
+    ) async {
         guard activeRecord == nil else { return }
         guard await MeetingRecorder.requestMicPermission() else {
             permissionDenied = true
@@ -43,8 +47,10 @@ public final class MeetingSessionStore {
         }
         permissionDenied = false
         do {
-            let output = try recorder.start(writingTo: record.audioURL)
-            systemAudioUnavailable = !recorder.systemAudioActive
+            let output = try recorder.start(
+                writingTo: record.audioURL, includeSystemAudio: includeSystemAudio
+            )
+            systemAudioUnavailable = includeSystemAudio && !recorder.systemAudioActive
             activeRecord = record
             startedAt = .now
             liveUtterances = []

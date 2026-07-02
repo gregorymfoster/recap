@@ -6,6 +6,12 @@ public struct SearchHit: Equatable, Sendable, Identifiable {
     public var title: String
     public var snippet: String
 
+    public init(meetingID: UUID, title: String, snippet: String) {
+        self.meetingID = meetingID
+        self.title = title
+        self.snippet = snippet
+    }
+
     public var id: UUID { meetingID }
 }
 
