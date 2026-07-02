@@ -62,6 +62,11 @@ public final class AppStores {
                 storesLog.info("⌥⌘R global hot key registered")
             }
             applyCalendarAutoRecordSetting()
+            // A recorder-initiated stop (disk full) still runs the normal
+            // stop flow so the salvaged audio gets transcribed.
+            session.onAutoStop = { [weak self] in
+                self?.stopRecording()
+            }
         }
     }
 
@@ -90,6 +95,8 @@ public final class AppStores {
             )
             if session.permissionDenied {
                 library.markError(record, message: "Microphone access denied")
+            } else if let message = session.startFailureMessage {
+                library.markError(record, message: message)
             }
         }
     }

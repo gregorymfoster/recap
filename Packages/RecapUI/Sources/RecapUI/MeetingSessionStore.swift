@@ -24,10 +24,23 @@ public final class MeetingSessionStore {
     /// other meeting participants aren't being captured.
     public private(set) var systemAudioUnavailable = false
 
+    /// Set when recording can't continue safely (e.g. disk full) — the
+    /// session auto-stops so the audio captured so far is salvaged.
+    public private(set) var recordingFailureMessage: String?
+
+    /// Why the last `start()` failed, beyond mic permission (e.g. disk full).
+    public private(set) var startFailureMessage: String?
+
     private static let idleLevels = [Float](repeating: 0, count: 16)
     private let recorder = MeetingRecorder()
     private var levelTask: Task<Void, Never>?
     private var transcriptTask: Task<Void, Never>?
+    private var eventTask: Task<Void, Never>?
+
+    /// Called when the session stops itself (write failure) rather than via
+    /// the user; AppStores routes this through the normal stop flow so the
+    /// meeting still gets transcribed.
+    public var onAutoStop: (@MainActor () -> Void)?
 
     public init() {}
 
@@ -46,6 +59,8 @@ public final class MeetingSessionStore {
             return
         }
         permissionDenied = false
+        startFailureMessage = nil
+        recordingFailureMessage = nil
         do {
             let output = try recorder.start(
                 writingTo: record.audioURL, includeSystemAudio: includeSystemAudio
@@ -60,6 +75,11 @@ public final class MeetingSessionStore {
                     self?.pushLevel(level)
                 }
             }
+            eventTask = Task { [weak self] in
+                for await event in output.events {
+                    self?.handle(event)
+                }
+            }
             if let engine {
                 let updates = engine.transcribe(stream: output.chunks)
                 transcriptTask = Task { [weak self] in
@@ -68,8 +88,26 @@ public final class MeetingSessionStore {
                     }
                 }
             }
+        } catch MeetingRecorder.RecorderError.diskFull {
+            activeRecord = nil
+            startFailureMessage = "Not enough free disk space"
         } catch {
             activeRecord = nil
+            startFailureMessage = "Couldn't start recording"
+        }
+    }
+
+    private func handle(_ event: RecorderEvent) {
+        switch event {
+        case .inputRebuilt:
+            // Informational: the mic graph survived a device change. Levels
+            // resuming is the visible signal; nothing to surface.
+            break
+        case .writeFailed:
+            // Audio can't reach disk — stop now so what was captured
+            // survives, and tell the user why the recording ended.
+            recordingFailureMessage = "Recording stopped — couldn't write audio (disk full?)"
+            onAutoStop?()
         }
     }
 
@@ -94,6 +132,8 @@ public final class MeetingSessionStore {
         levelTask = nil
         transcriptTask?.cancel()
         transcriptTask = nil
+        eventTask?.cancel()
+        eventTask = nil
         activeRecord = nil
         startedAt = nil
         levels = Self.idleLevels

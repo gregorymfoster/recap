@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import OSLog
+import RecapAudio
 import RecapCore
 import RecapEnhancement
 import RecapTranscription
@@ -16,6 +17,8 @@ struct MeetingProcessor: JobExecutor {
     let diarizerProvider: @Sendable () async -> SpeakerDiarizer?
     let enhancer: NoteEnhancer
     let onStatus: @Sendable (UUID, MeetingStatus) async -> Void
+    /// Crash salvage recovered the audio; the file length is the duration.
+    let onDurationRecovered: @Sendable (UUID, TimeInterval) async -> Void
     /// Enqueues a follow-up job (transcribe → enhance chaining).
     let chain: @Sendable (ProcessingJob) async -> Void
 
@@ -25,6 +28,17 @@ struct MeetingProcessor: JobExecutor {
 
         switch job.kind {
         case .transcribe:
+            // A leftover CAF spool means the recording died mid-write (crash,
+            // power loss, disk full): rebuild the m4a from it before
+            // transcribing, so the meeting is never lost.
+            let spoolURL = record.audioURL.deletingPathExtension().appendingPathExtension("caf")
+            if FileManager.default.fileExists(atPath: spoolURL.path) {
+                if AudioTranscoder.salvageSpool(caf: spoolURL, m4a: record.audioURL),
+                   record.meeting.duration == 0,
+                   let duration = AudioTranscoder.duration(of: record.audioURL) {
+                    await onDurationRecovered(job.meetingID, duration)
+                }
+            }
             guard FileManager.default.fileExists(atPath: record.audioURL.path) else {
                 await onStatus(job.meetingID, .error(message: "Recording file missing"))
                 return
@@ -116,6 +130,9 @@ public final class QueueStore {
             enhancer: FoundationModelEnhancer(),
             onStatus: { @Sendable id, status in
                 await library.updateStatus(id, to: status)
+            },
+            onDurationRecovered: { @Sendable id, duration in
+                await library.updateDuration(id, to: duration)
             },
             chain: { @Sendable job in
                 await queueBox.queue?.enqueue(job)

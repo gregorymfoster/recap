@@ -98,6 +98,13 @@ public final class LibraryStore {
         }
     }
 
+    /// Used by crash salvage: the recovered file is the only duration source.
+    public func updateDuration(_ id: UUID, to duration: TimeInterval) {
+        guard var record = record(for: id) else { return }
+        record.meeting.duration = duration
+        replace(record)
+    }
+
     private func replace(_ record: MeetingRecord) {
         if let i = meetings.firstIndex(where: { $0.meeting.id == record.meeting.id }) {
             meetings[i] = record
