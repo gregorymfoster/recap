@@ -1,4 +1,5 @@
 import RecapCore
+import RecapTranscription
 import SwiftUI
 
 /// The Library home screen (design mock 1c): header with Record button,
@@ -7,6 +8,7 @@ import SwiftUI
 struct LibraryView: View {
     @Environment(LibraryStore.self) private var library
     @Environment(MeetingSessionStore.self) private var session
+    @Environment(WhisperModelManager.self) private var models
 
     var body: some View {
         ScrollView {
@@ -35,7 +37,7 @@ struct LibraryView: View {
             Button {
                 guard !session.isRecording, let record = library.startNewMeeting() else { return }
                 Task {
-                    await session.start(record: record)
+                    await session.start(record: record, engine: models.activeEngine())
                     if session.permissionDenied {
                         library.markError(record, message: "Microphone access denied")
                     }

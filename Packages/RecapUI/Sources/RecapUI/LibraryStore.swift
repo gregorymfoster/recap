@@ -110,11 +110,24 @@ public final class LibraryStore {
         meetings.first { $0.meeting.id == id }
     }
 
-    // MARK: Notes
+    // MARK: Notes & transcript
 
     public func loadNotes(for record: MeetingRecord) -> String {
         guard let storage else { return "" }
         return (try? storage.loadNotes(in: record)) ?? ""
+    }
+
+    public func loadTranscript(for record: MeetingRecord) -> Transcript? {
+        guard let storage else { return nil }
+        return try? storage.loadTranscript(in: record)
+    }
+
+    /// "~/Recap"-style label for the status bar.
+    public var saveLocationLabel: String {
+        guard let storage else { return "~/Recap" }
+        let path = storage.rootURL.path
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 
     /// Called on every keystroke; the autosaver debounces the disk write.

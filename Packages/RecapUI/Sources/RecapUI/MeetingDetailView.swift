@@ -1,14 +1,62 @@
 import RecapCore
+import RecapTranscription
 import SwiftUI
 
-/// The meeting editor (design mock 1a). M2 ships the header + notes editing;
-/// the recording pill and live transcript arrive with capture (M3+).
+/// The meeting editor (design mocks 1a/1b): notes-first, with a toggleable
+/// transcript pane — live while recording, saved afterwards.
 struct MeetingDetailView: View {
     var record: MeetingRecord
     @Environment(LibraryStore.self) private var library
+    @Environment(MeetingSessionStore.self) private var session
+    @Environment(WhisperModelManager.self) private var models
     @State private var notes = ""
+    @State private var showTranscript = false
+    @State private var savedTranscript: Transcript?
+
+    private var isLiveMeeting: Bool {
+        session.activeRecord?.meeting.id == record.meeting.id
+    }
 
     var body: some View {
+        VStack(spacing: 0) {
+            HSplitView {
+                if showTranscript {
+                    TranscriptPane(
+                        utterances: isLiveMeeting ? session.liveUtterances : savedTranscript?.utterances ?? [],
+                        partial: isLiveMeeting ? session.partialUtterance : nil,
+                        isLive: isLiveMeeting
+                    )
+                    .frame(minWidth: 260, idealWidth: 420)
+                }
+                editor
+                    .frame(minWidth: 320)
+            }
+            statusBar
+        }
+        .toolbar {
+            ToolbarItem {
+                Toggle(isOn: $showTranscript) {
+                    Label("Transcript", systemImage: "text.quote")
+                }
+                .help("Show transcript")
+            }
+        }
+        .task(id: record.meeting.id) {
+            notes = library.loadNotes(for: record)
+            savedTranscript = library.loadTranscript(for: record)
+        }
+        .task(id: record.meeting.status) {
+            // Refresh once transcription lands (status flips to ready).
+            if case .ready = record.meeting.status, savedTranscript == nil {
+                savedTranscript = library.loadTranscript(for: record)
+            }
+        }
+        .onChange(of: notes) {
+            library.notesChanged(notes, in: record)
+        }
+    }
+
+    private var editor: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(.horizontal, 40)
@@ -22,12 +70,6 @@ struct MeetingDetailView: View {
                 .padding(.top, 16)
         }
         .background(.white)
-        .task(id: record.meeting.id) {
-            notes = library.loadNotes(for: record)
-        }
-        .onChange(of: notes) {
-            library.notesChanged(notes, in: record)
-        }
     }
 
     private var header: some View {
@@ -37,6 +79,11 @@ struct MeetingDetailView: View {
                     .font(Tokens.caption)
                     .foregroundStyle(Tokens.textSecondary)
                 OnDeviceBadge()
+                if session.systemAudioUnavailable, isLiveMeeting {
+                    Text("Other participants aren't being captured — check System Audio permission")
+                        .font(Tokens.microLabel)
+                        .foregroundStyle(.orange)
+                }
             }
             Text(record.meeting.title)
                 .font(Tokens.pageTitle)
@@ -56,5 +103,21 @@ struct MeetingDetailView: View {
                 .padding(.top, 4)
             }
         }
+    }
+
+    private var statusBar: some View {
+        HStack(spacing: 14) {
+            Text(models.activeModel.map { "\($0.displayName) · \($0.languages)" } ?? "No model installed")
+            Text("·")
+            Text("CPU: low-priority")
+            Spacer()
+            Text("Saving to \(library.saveLocationLabel)")
+        }
+        .font(.system(size: 10.5))
+        .foregroundStyle(Tokens.textSecondary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Color(red: 0xF8 / 255, green: 0xF8 / 255, blue: 0xF6 / 255).opacity(0.9))
+        .overlay(alignment: .top) { Divider() }
     }
 }

@@ -15,6 +15,11 @@ public final class MeetingSessionStore {
     public private(set) var levels: [Float] = MeetingSessionStore.idleLevels
     public private(set) var permissionDenied = false
 
+    /// Live transcript state (split view). Provisional — the post-stop file
+    /// pass produces the canonical transcript.
+    public private(set) var liveUtterances: [Utterance] = []
+    public private(set) var partialUtterance: Utterance?
+
     /// True while recording, when the system-audio tap couldn't start —
     /// other meeting participants aren't being captured.
     public private(set) var systemAudioUnavailable = false
@@ -22,12 +27,15 @@ public final class MeetingSessionStore {
     private static let idleLevels = [Float](repeating: 0, count: 16)
     private let recorder = MeetingRecorder()
     private var levelTask: Task<Void, Never>?
+    private var transcriptTask: Task<Void, Never>?
 
     public init() {}
 
     public var isRecording: Bool { activeRecord != nil }
 
-    public func start(record: MeetingRecord) async {
+    /// Starts capture; when a transcription engine is available, live
+    /// transcription runs alongside it feeding the split view.
+    public func start(record: MeetingRecord, engine: (any TranscriptionEngine)? = nil) async {
         guard activeRecord == nil else { return }
         guard await MeetingRecorder.requestMicPermission() else {
             permissionDenied = true
@@ -39,13 +47,35 @@ public final class MeetingSessionStore {
             systemAudioUnavailable = !recorder.systemAudioActive
             activeRecord = record
             startedAt = .now
+            liveUtterances = []
+            partialUtterance = nil
             levelTask = Task { [weak self] in
                 for await level in output.levels {
                     self?.pushLevel(level)
                 }
             }
+            if let engine {
+                let updates = engine.transcribe(stream: output.chunks)
+                transcriptTask = Task { [weak self] in
+                    for await update in updates {
+                        self?.apply(update)
+                    }
+                }
+            }
         } catch {
             activeRecord = nil
+        }
+    }
+
+    private func apply(_ update: TranscriptionUpdate) {
+        switch update {
+        case .confirmed(let utterance):
+            liveUtterances.append(utterance)
+            partialUtterance = nil
+        case .partial(let utterance):
+            partialUtterance = utterance
+        case .progress:
+            break
         }
     }
 
@@ -56,10 +86,14 @@ public final class MeetingSessionStore {
         let duration = await recorder.stop()
         levelTask?.cancel()
         levelTask = nil
+        transcriptTask?.cancel()
+        transcriptTask = nil
         activeRecord = nil
         startedAt = nil
         levels = Self.idleLevels
         systemAudioUnavailable = false
+        liveUtterances = []
+        partialUtterance = nil
         return (record, duration)
     }
 
