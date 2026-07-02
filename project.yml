@@ -7,6 +7,9 @@ options:
   createIntermediateGroups: true
 
 packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.0.0
   RecapCore:
     path: Packages/RecapCore
   RecapAudio:
@@ -30,6 +33,7 @@ targets:
       - package: RecapTranscription
       - package: RecapEnhancement
       - package: RecapUI
+      - package: Sparkle
     info:
       path: Recap/Info.plist
       properties:
@@ -41,6 +45,9 @@ targets:
         NSMicrophoneUsageDescription: Recap records your microphone during meetings you start. Audio never leaves your Mac.
         NSAudioCaptureUsageDescription: Recap records system audio so other meeting participants are captured. Audio never leaves your Mac.
         NSHumanReadableCopyright: © 2026 Greg Foster. MIT License.
+        SUFeedURL: https://gregorymfoster.github.io/recap/appcast.xml
+        SUPublicEDKey: WsqMrsc1Rv980zEPBuwQtawmJ0em/FshzcflTky6naY=
+        SUEnableAutomaticChecks: true
     entitlements:
       path: Recap/Recap.entitlements
       properties:
