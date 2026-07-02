@@ -13,6 +13,8 @@ enum TextOverlap {
             text.lowercased()
                 .components(separatedBy: CharacterSet.alphanumerics.inverted)
                 .filter { $0.count > 3 && !stopwords.contains($0) }
+                // Fold trivial inflections so "moves" matches "move".
+                .map { $0.hasSuffix("s") && !$0.hasSuffix("ss") ? String($0.dropLast()) : $0 }
         )
     }
 
