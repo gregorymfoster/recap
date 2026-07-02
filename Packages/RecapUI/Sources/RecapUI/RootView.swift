@@ -1,32 +1,77 @@
+import RecapCore
 import SwiftUI
 
-/// App root. M2 replaces the placeholder detail with the Library home
-/// and real sidebar navigation.
+/// App root: sidebar navigation + the selected section.
 public struct RootView: View {
-    public init() {}
+    @State private var library: LibraryStore
+    @State private var sidebarSelection: SidebarItem? = .library
+
+    /// Disk-backed root, used by the app. `-fixtures` swaps in sample data
+    /// for UI work and screenshots.
+    public init() {
+        if ProcessInfo.processInfo.arguments.contains("-fixtures") {
+            _library = State(initialValue: .fixture())
+            return
+        }
+        let storage = LibraryStorage(rootURL: LibraryStorage.defaultRootURL)
+        let index = (try? SearchIndex(databaseURL: SearchIndex.defaultDatabaseURL)) ?? (try! SearchIndex())
+        _library = State(initialValue: LibraryStore(storage: storage, index: index))
+    }
+
+    /// Injectable root, for previews.
+    init(library: LibraryStore) {
+        _library = State(initialValue: library)
+    }
 
     public var body: some View {
         NavigationSplitView {
-            List {
-                Label("Library", systemImage: "rectangle.stack")
-            }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+            Sidebar(selection: $sidebarSelection)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220)
         } detail: {
-            VStack(spacing: 12) {
-                RecapLogo(size: 44)
-                Text("Recap")
-                    .font(Tokens.pageTitle)
-                    .foregroundStyle(Tokens.textPrimary)
-                Text("Offline meeting transcription — nothing leaves your Mac.")
-                    .font(Tokens.meta)
-                    .foregroundStyle(Tokens.textSecondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            detail
         }
+        .environment(library)
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        switch sidebarSelection {
+        case .library, nil:
+            if let id = library.selectedMeetingID, let record = library.record(for: id) {
+                MeetingDetailView(record: record)
+                    .toolbar {
+                        ToolbarItem(placement: .navigation) {
+                            Button("Library", systemImage: "chevron.left") {
+                                library.flushNotes(for: record)
+                                library.selectedMeetingID = nil
+                            }
+                        }
+                    }
+            } else {
+                LibraryView()
+            }
+        case .models:
+            placeholder("Models", note: "Model manager arrives in M5.")
+        case .settings:
+            placeholder("Settings", note: "Settings arrive in M9.")
+        }
+    }
+
+    private func placeholder(_ title: String, note: String) -> some View {
+        VStack(spacing: 10) {
+            Text(title)
+                .font(Tokens.sectionTitle)
+                .foregroundStyle(Tokens.textPrimary)
+            Text(note)
+                .font(Tokens.meta)
+                .foregroundStyle(Tokens.textSecondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.white)
     }
 }
 
-#Preview {
-    RootView()
+#Preview("Library") {
+    RootView(library: .fixture())
         .frame(width: 1060, height: 660)
 }
