@@ -39,12 +39,10 @@ public enum ModelCatalog {
         ModelInfo(id: "base", displayName: "Whisper Base", approximateSizeMB: 150,
                   languages: "Multilingual", qualityHint: "Fast · casual notes"),
         ModelInfo(id: "small", displayName: "Whisper Small", approximateSizeMB: 500,
-                  languages: "Multilingual", qualityHint: "Balanced · recommended", isRecommended: true),
-        ModelInfo(id: "medium", displayName: "Whisper Medium", approximateSizeMB: 1500,
-                  languages: "Multilingual", qualityHint: "Accurate · slower"),
+                  languages: "Multilingual", qualityHint: "Balanced · faster on older Macs"),
         ModelInfo(id: "large-v3-v20240930_626MB", displayName: "Whisper Large v3 Turbo",
                   approximateSizeMB: 626,
-                  languages: "Multilingual", qualityHint: "Most accurate · compressed"),
+                  languages: "Multilingual", qualityHint: "Most accurate · recommended", isRecommended: true),
     ]
 
     public static var recommended: ModelInfo {
