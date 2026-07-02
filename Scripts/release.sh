@@ -22,6 +22,7 @@ VERSION="${1:?usage: Scripts/release.sh <version>}"
 TEAM_ID="2V7W69N399"
 ASC_KEY_ID="XS4DNNPK82"
 ASC_ISSUER="69a6de74-5cd4-47e3-e053-5b8c7c11a4d1"
+ASC_KEY_PATH="$HOME/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8"
 SPARKLE_BIN="${SPARKLE_BIN:-}"
 BUILD_DIR="build"
 DMG="dist/Recap-$VERSION.dmg"
@@ -35,6 +36,10 @@ if ! security find-identity -v -p codesigning | grep -q "Developer ID Applicatio
 fi
 if [[ -z "$SPARKLE_BIN" || ! -x "$SPARKLE_BIN/generate_appcast" ]]; then
   echo "Set SPARKLE_BIN to Sparkle's bin/ directory (contains generate_appcast, sign_update)." >&2
+  exit 1
+fi
+if [[ ! -f "$ASC_KEY_PATH" ]]; then
+  echo "Missing App Store Connect API key at $ASC_KEY_PATH" >&2
   exit 1
 fi
 
@@ -58,10 +63,29 @@ xcodebuild archive \
 
 APP="$BUILD_DIR/Recap.xcarchive/Products/Applications/Recap.app"
 
+echo "==> Re-sign Sparkle's nested helpers"
+# Sparkle.framework ships its own helper binaries pre-signed adhoc (no team
+# identity, no secure timestamp) — `xcodebuild archive` doesn't re-sign
+# already-signed nested code, so notarization rejects them. Sign deepest-first
+# per Sparkle's notarization guide, then re-sign the framework and outer app.
+SPARKLE_FW="$APP/Contents/Frameworks/Sparkle.framework"
+sign() {
+  codesign --force --options runtime --timestamp --sign "Developer ID Application" "$1"
+}
+if [[ -d "$SPARKLE_FW" ]]; then
+  sign "$SPARKLE_FW/Versions/B/Autoupdate"
+  sign "$SPARKLE_FW/Versions/B/Updater.app/Contents/MacOS/Updater"
+  sign "$SPARKLE_FW/Versions/B/Updater.app"
+  sign "$SPARKLE_FW/Versions/B/XPCServices/Downloader.xpc"
+  sign "$SPARKLE_FW/Versions/B/XPCServices/Installer.xpc"
+  sign "$SPARKLE_FW"
+fi
+sign "$APP"
+
 echo "==> Notarize"
 /usr/bin/ditto -c -k --keepParent "$APP" "$BUILD_DIR/Recap.zip"
 xcrun notarytool submit "$BUILD_DIR/Recap.zip" \
-  --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER" --wait
+  --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER" --wait
 xcrun stapler staple "$APP"
 
 echo "==> DMG"
@@ -74,7 +98,7 @@ create-dmg \
   --hide-extension "Recap.app" \
   "$DMG" "$APP"
 xcrun notarytool submit "$DMG" \
-  --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER" --wait
+  --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER" --wait
 xcrun stapler staple "$DMG"
 
 echo "==> Appcast"
@@ -83,7 +107,7 @@ echo "==> Appcast"
 cp dist/appcast.xml docs/appcast.xml
 
 echo "==> Draft GitHub release"
-git add project.yml docs/appcast.xml
+git add project.yml Recap/Info.plist docs/appcast.xml
 git commit -m "Release v$VERSION"
 git tag "v$VERSION"
 git push origin main "v$VERSION"
