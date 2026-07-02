@@ -120,7 +120,14 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         }
 
         var sections = [bullets.joined(separator: "\n")]
-        let extras = try await alsoDiscussed(noteLines: noteLines, digestText: digestText)
+        // Compare against the REWRITTEN bullets: they contain the facts that
+        // were merged in, so the model (and the overlap filter below) can see
+        // a topic is already covered — the rough lines alone can't show that.
+        let rewritten = bullets.map { String($0.dropFirst(2)) }
+        let extras = try await alsoDiscussed(noteLines: rewritten, digestText: digestText)
+            .filter { extra in
+                !rewritten.contains { TextOverlap.containment(of: extra, in: $0) >= 0.7 }
+            }
         if !extras.isEmpty {
             sections.append("## Also discussed\n" + extras.map { "- \($0)" }.joined(separator: "\n"))
         }
@@ -178,9 +185,10 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         let session = LanguageModelSession(
             instructions: """
             You compare meeting-digest facts against a user's notes and return only the \
-            important digest facts the notes do not mention. Return them as short \
-            standalone sentences. Return an empty list when the notes already cover \
-            everything important. Never invent facts.
+            important digest facts the notes do not mention. Exclude anything the notes \
+            already say, even in different words. Return them as short standalone \
+            sentences. Return an empty list when the notes already cover everything \
+            important. Never invent facts.
             """
         )
         let prompt = """

@@ -1,0 +1,11 @@
+{
+  "engine": "fixture",
+  "language": "en",
+  "model": "fixture",
+  "utterances": [
+    {"id": "00000000-0000-0000-0000-000000000011", "speakerID": "S1", "start": 0, "end": 7, "text": "Quick standup. The checkout bug from yesterday is fixed — it was a race in the payment webhook handler, and the fix is already on staging."},
+    {"id": "00000000-0000-0000-0000-000000000012", "speakerID": "S2", "start": 7, "end": 14, "text": "Nice. I'm still on the search indexing work, about seventy percent done. Should wrap tomorrow unless the reindex surfaces more bad rows."},
+    {"id": "00000000-0000-0000-0000-000000000013", "speakerID": "S3", "start": 14, "end": 21, "text": "Reminder that the production deploy window is Friday at ten a.m. If the indexing work isn't merged by Thursday evening it waits until next week."},
+    {"id": "00000000-0000-0000-0000-000000000014", "speakerID": "S1", "start": 21, "end": 27, "text": "One blocker: I need someone to review the webhook fix pull request today. It's small, maybe two hundred lines."}
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "mustContain": ["40", "September 12", "designer", "trademark"],
+  "mustNotContain": ["podcast sponsorship confirmed"],
+  "notes": "Four rough lines, each with digest facts available. Expect 40k budget, Sept 12 date, senior designer, trademark follow-up."
+}

@@ -1,0 +1,5 @@
+{
+  "mustContain": ["mobile", "1000", "Elena"],
+  "mustNotContain": [],
+  "notes": "Mobile postponed to next year, rate limit raised to 1000 rpm, Elena owns onboarding."
+}

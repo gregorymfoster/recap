@@ -1,0 +1,5 @@
+{
+  "mustContain": ["## Summary", "checkout", "Friday"],
+  "mustNotContain": [],
+  "notes": "No user notes: expect the Summary/Action-items path with the checkout bug and Friday deploy."
+}

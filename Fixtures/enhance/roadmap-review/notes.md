@@ -1,0 +1,3 @@
+- mobile app decision?
+- api rate limits
+- who owns onboarding revamp

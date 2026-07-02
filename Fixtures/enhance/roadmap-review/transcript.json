@@ -1,0 +1,11 @@
+{
+  "engine": "fixture",
+  "language": "en",
+  "model": "fixture",
+  "utterances": [
+    {"id": "00000000-0000-0000-0000-000000000021", "speakerID": "S1", "start": 0, "end": 9, "text": "Let's settle the roadmap questions. On the mobile app: after looking at the numbers we're postponing it to next year. The web usage on phones is under eight percent, so it doesn't justify two new hires this year."},
+    {"id": "00000000-0000-0000-0000-000000000022", "speakerID": "S2", "start": 9, "end": 17, "text": "Makes sense. On the API side, three enterprise customers hit the rate limits last month, so we're raising the default from two hundred to one thousand requests per minute next week."},
+    {"id": "00000000-0000-0000-0000-000000000023", "speakerID": "S1", "start": 17, "end": 25, "text": "For the onboarding revamp, Elena will own it end to end. She's starting with the activation funnel research and will bring a proposal to the October planning meeting."},
+    {"id": "00000000-0000-0000-0000-000000000024", "speakerID": "S2", "start": 25, "end": 32, "text": "And we agreed the pricing page experiment keeps running two more weeks before we read the results, so nobody should touch the variants until then."}
+  ]
+}

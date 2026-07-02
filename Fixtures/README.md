@@ -17,3 +17,14 @@
   ```sh
   swift run --package-path Packages/RecapTranscription diarize-probe Fixtures/two-speaker-fixture.m4a
   ```
+
+- `enhance/` — (transcript, notes, expectations) triples for the enhancement
+  quality scorecard. Run after any prompt change:
+
+  ```sh
+  swift run --package-path Packages/RecapEnhancement enhance-eval --runs 2
+  ```
+
+  Metrics: structure (one bullet per note line), recall (expected specifics
+  present), meta (no narration), numbers (no digits absent from the source —
+  hallucination proxy), dupes ("Also discussed" restating a note bullet).

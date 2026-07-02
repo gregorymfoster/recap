@@ -1,0 +1,13 @@
+{
+  "engine": "fixture",
+  "language": "en",
+  "model": "fixture",
+  "utterances": [
+    {"id": "00000000-0000-0000-0000-000000000001", "speakerID": "S1", "start": 0, "end": 8, "text": "Okay, main thing today is closing out the Q3 marketing budget. Finance came back and approved forty thousand dollars, which is five thousand less than we asked for."},
+    {"id": "00000000-0000-0000-0000-000000000002", "speakerID": "S2", "start": 8, "end": 15, "text": "That works if we cut the podcast sponsorship. I'd rather protect the conference booth at San Diego since that drove most of last quarter's pipeline."},
+    {"id": "00000000-0000-0000-0000-000000000003", "speakerID": "S1", "start": 15, "end": 24, "text": "Agreed, drop the podcast for now. Second thing: launch date. Engineering wants to move the launch from August 30 to September 12 to get the migration tool finished."},
+    {"id": "00000000-0000-0000-0000-000000000004", "speakerID": "S2", "start": 24, "end": 33, "text": "September 12 is fine by marketing, but Priya needs final copy two weeks before, so August 29 at the latest. I'll own getting her the draft by August 22."},
+    {"id": "00000000-0000-0000-0000-000000000005", "speakerID": "S1", "start": 33, "end": 41, "text": "Good. Last one, the hiring req. We got headcount for one senior designer. Marcus will post the role on Monday and we want a shortlist by the end of the month."},
+    {"id": "00000000-0000-0000-0000-000000000006", "speakerID": "S2", "start": 41, "end": 47, "text": "One more thing — legal still hasn't cleared the new trademark. I'll ping them again tomorrow so it doesn't block the launch page."}
+  ]
+}
