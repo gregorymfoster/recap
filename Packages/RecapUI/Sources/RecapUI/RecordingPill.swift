@@ -21,6 +21,7 @@ struct RecordingPill: View {
                     .font(.system(size: 8))
                 Text("local")
                     .font(Tokens.microLabel)
+                    .fixedSize()
             }
             .foregroundStyle(.white.opacity(0.55))
             .padding(.leading, 12)
@@ -45,6 +46,9 @@ struct RecordingPill: View {
         .padding(.vertical, 10)
         .background(Tokens.darkSurface, in: Capsule())
         .shadow(color: .black.opacity(0.25), radius: 14, y: 8)
+        // The bottom overlay proposes a narrow width; without this the HStack
+        // compresses — "local" wraps and the Stop label truncates to "…".
+        .fixedSize()
     }
 
     private var waveform: some View {

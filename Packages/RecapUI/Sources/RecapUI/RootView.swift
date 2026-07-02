@@ -1,6 +1,14 @@
+import Observation
 import RecapCore
 import RecapTranscription
 import SwiftUI
+
+/// Which top-level section is showing. Held in the environment so any view
+/// (e.g. a "needs model" library chip) can navigate without threading bindings.
+@Observable
+final class AppRouter {
+    var section: SidebarItem? = .library
+}
 
 /// App root: sidebar navigation + the selected section.
 public struct RootView: View {
@@ -9,7 +17,7 @@ public struct RootView: View {
     @State private var models = WhisperModelManager()
     @State private var settings = SettingsStore()
     @State private var queue: QueueStore?
-    @State private var sidebarSelection: SidebarItem? = .library
+    @State private var router = AppRouter()
     @State private var showSearch = false
 
     /// Disk-backed root, used by the app. `-fixtures` swaps in sample data
@@ -38,8 +46,9 @@ public struct RootView: View {
     }
 
     public var body: some View {
-        NavigationSplitView {
-            Sidebar(selection: $sidebarSelection)
+        @Bindable var router = router
+        return NavigationSplitView {
+            Sidebar(selection: $router.section)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220)
         } detail: {
             detail
@@ -77,16 +86,23 @@ public struct RootView: View {
         .sheet(isPresented: .constant(!settings.hasOnboarded)) {
             OnboardingView()
         }
+        // A model was installed at launch or just now → finish any recordings
+        // parked in `.needsModel`.
+        .task { if models.activeModelID != nil { queue?.retryMeetingsAwaitingModel(in: library) } }
+        .onChange(of: models.activeModelID) { _, active in
+            if active != nil { queue?.retryMeetingsAwaitingModel(in: library) }
+        }
         .environment(library)
         .environment(session)
         .environment(models)
         .environment(settings)
         .environment(queue)
+        .environment(router)
     }
 
     @ViewBuilder
     private var detail: some View {
-        switch sidebarSelection {
+        switch router.section {
         case .library, nil:
             if let id = library.selectedMeetingID, let record = library.record(for: id) {
                 MeetingDetailView(record: record)

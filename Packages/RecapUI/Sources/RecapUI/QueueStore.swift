@@ -25,7 +25,7 @@ struct MeetingProcessor: JobExecutor {
                 return
             }
             guard let engine = await engineProvider() else {
-                await onStatus(job.meetingID, .error(message: "No speech model installed"))
+                await onStatus(job.meetingID, .needsModel)
                 return
             }
             await onStatus(job.meetingID, .transcribing(progress: 0))
@@ -122,6 +122,16 @@ public final class QueueStore {
         Task { await queue.enqueue(ProcessingJob(kind: .transcribe, meetingID: meetingID)) }
     }
 
+    /// Re-runs transcription for every meeting parked in `.needsModel`. Called
+    /// when a speech model becomes active (freshly installed, or restored at
+    /// launch) so parked recordings finish without the user re-recording.
+    public func retryMeetingsAwaitingModel(in library: LibraryStore) {
+        for record in library.meetings where record.meeting.status == .needsModel {
+            library.updateStatus(record.meeting.id, to: .queued)
+            enqueueTranscription(for: record.meeting.id)
+        }
+    }
+
     public func setPausesOnBattery(_ value: Bool) {
         UserDefaults.standard.set(value, forKey: "pauseOnBattery")
         Task { await queue.setPausesOnBattery(value) }
@@ -139,7 +149,13 @@ public final class QueueStore {
             case .enhancing:
                 library.updateStatus(record.meeting.id, to: .queued)
                 Task { await queue.enqueue(ProcessingJob(kind: .enhance, meetingID: record.meeting.id)) }
-            case .ready, .error:
+            case .error("No speech model installed"):
+                // Migrate meetings saved before `.needsModel` existed so they
+                // become retryable instead of a permanent dead end.
+                library.updateStatus(record.meeting.id, to: .needsModel)
+            case .needsModel, .ready, .error:
+                // `.needsModel` is retried by `retryMeetingsAwaitingModel` once a
+                // model is active; genuine errors stay put.
                 break
             }
         }

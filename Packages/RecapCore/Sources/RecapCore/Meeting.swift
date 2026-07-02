@@ -1,12 +1,17 @@
 import Foundation
 
-/// Processing lifecycle of a meeting: recording → queued → transcribing(pct) → enhancing → ready | error.
+/// Processing lifecycle of a meeting: recording → queued → transcribing(pct) → enhancing → ready.
+/// `needsModel` is a recoverable pause (audio is saved, but no speech model is
+/// installed yet); `error` is a genuine failure.
 public enum MeetingStatus: Codable, Equatable, Sendable {
     case recording
     case queued
     case transcribing(progress: Double)
     case enhancing
     case ready
+    /// Recorded and saved, but transcription is blocked until a speech model
+    /// is installed. Auto-retries once one becomes available.
+    case needsModel
     case error(message: String)
 }
 

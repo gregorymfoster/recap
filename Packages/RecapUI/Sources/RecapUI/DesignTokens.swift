@@ -16,6 +16,9 @@ public enum Tokens {
     public static let successGreen = Color(red: 0x30 / 255, green: 0xB3 / 255, blue: 0x52 / 255)  // #30b352
     public static let successGreenText = Color(red: 0x2A / 255, green: 0x7D / 255, blue: 0x43 / 255)  // #2a7d43
     public static let successGreenTint = successGreen.opacity(0.12)
+    public static let warningAmber = Color(red: 0xFF / 255, green: 0x9F / 255, blue: 0x0A / 255)  // #ff9f0a
+    public static let warningAmberText = Color(red: 0x9A / 255, green: 0x63 / 255, blue: 0x00 / 255)  // #9a6300
+    public static let warningAmberTint = warningAmber.opacity(0.14)
     public static let darkSurface = Color(red: 0x1C / 255, green: 0x1C / 255, blue: 0x1E / 255).opacity(0.96)
     public static let chipBackground = Color.black.opacity(0.05)
 

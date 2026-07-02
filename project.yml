@@ -45,6 +45,8 @@ targets:
         NSMicrophoneUsageDescription: Recap records your microphone during meetings you start. Audio never leaves your Mac.
         NSAudioCaptureUsageDescription: Recap records system audio so other meeting participants are captured. Audio never leaves your Mac.
         NSHumanReadableCopyright: © 2026 Greg Foster. MIT License.
+        # The design system is light-only (hardcoded token colors); render Aqua in dark mode too.
+        NSRequiresAquaSystemAppearance: true
         SUFeedURL: https://gregorymfoster.github.io/recap/appcast.xml
         SUPublicEDKey: WsqMrsc1Rv980zEPBuwQtawmJ0em/FshzcflTky6naY=
         SUEnableAutomaticChecks: true

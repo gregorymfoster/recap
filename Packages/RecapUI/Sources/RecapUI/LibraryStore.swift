@@ -185,6 +185,7 @@ extension LibraryStore {
             fixtures: [
                 record("Design sync — Q3 roadmap", hoursAgo: 0.5, duration: 1_453, attendees: ["Maya", "Sam", "Priya"], status: .transcribing(progress: 0.42)),
                 record("Customer call — Meridian", hoursAgo: 3, duration: 1_800, attendees: ["Alex"], status: .queued),
+                record("Budget review", hoursAgo: 4, duration: 1_320, attendees: ["Priya"], status: .needsModel),
                 record("Weekly standup", hoursAgo: 6, duration: 900, attendees: ["Maya", "Sam"], status: .ready),
                 record("1:1 with Sam", hoursAgo: 26, duration: 1_680, attendees: ["Sam"], status: .ready),
                 record("Pricing brainstorm", hoursAgo: 30, duration: 2_400, attendees: ["Maya", "Alex", "Priya"], status: .ready),

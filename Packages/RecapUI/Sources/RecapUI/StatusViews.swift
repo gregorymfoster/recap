@@ -2,9 +2,13 @@ import RecapCore
 import SwiftUI
 
 /// Trailing status indicator on a Library row: blue progress while transcribing,
-/// gray chip while queued, green chip when ready.
+/// gray chip while queued, green chip when ready. `needsModel` is an actionable
+/// amber button that jumps to the Models tab; `error` surfaces its message.
 struct MeetingStatusView: View {
     var status: MeetingStatus
+    /// Invoked when the user taps the "needs model" chip. When nil, the chip is
+    /// shown as a non-interactive label (e.g. in previews).
+    var onInstallModel: (() -> Void)?
 
     var body: some View {
         switch status {
@@ -25,8 +29,35 @@ struct MeetingStatusView: View {
             chip("Enhancing", foreground: Tokens.accentBlue, background: Tokens.accentBlue.opacity(0.1))
         case .ready:
             chip("Ready", foreground: Tokens.successGreenText, background: Tokens.successGreenTint)
-        case .error:
-            chip("Error", foreground: Tokens.recordRedDark, background: Tokens.recordRed.opacity(0.1))
+        case .needsModel:
+            needsModelChip
+        case .error(let message):
+            // Show the actual reason ("Microphone access denied", …) rather
+            // than a bare "Error", with the full text on hover.
+            chip(message, foreground: Tokens.recordRedDark, background: Tokens.recordRed.opacity(0.1))
+                .help(message)
+        }
+    }
+
+    /// Amber, tappable "install a model to finish this" affordance.
+    @ViewBuilder private var needsModelChip: some View {
+        let label = HStack(spacing: 5) {
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.system(size: 11))
+            Text("Install model to transcribe")
+                .font(Tokens.caption.weight(.semibold))
+        }
+        .foregroundStyle(Tokens.warningAmberText)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(Tokens.warningAmberTint, in: RoundedRectangle(cornerRadius: Tokens.radiusChip))
+
+        if let onInstallModel {
+            Button(action: onInstallModel) { label }
+                .buttonStyle(.plain)
+                .help("No speech model is installed yet. Click to open Models and download one — this meeting transcribes automatically once it's ready.")
+        } else {
+            label
         }
     }
 
@@ -34,6 +65,7 @@ struct MeetingStatusView: View {
         Text(label)
             .font(Tokens.caption.weight(.semibold))
             .foregroundStyle(foreground)
+            .lineLimit(1)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(background, in: RoundedRectangle(cornerRadius: Tokens.radiusChip))

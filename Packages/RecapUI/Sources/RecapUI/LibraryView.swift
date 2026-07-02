@@ -10,22 +10,40 @@ struct LibraryView: View {
     @Environment(MeetingSessionStore.self) private var session
     @Environment(WhisperModelManager.self) private var models
     @Environment(SettingsStore.self) private var settings
+    @Environment(AppRouter.self) private var router
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 header
                     .padding(.bottom, 20)
-                LazyVStack(spacing: 10) {
-                    ForEach(library.meetings) { record in
-                        MeetingRow(record: record)
-                            .onTapGesture { library.selectedMeetingID = record.meeting.id }
+                if library.meetings.isEmpty {
+                    emptyState
+                } else {
+                    LazyVStack(spacing: 10) {
+                        ForEach(library.meetings) { record in
+                            MeetingRow(record: record) { router.section = .models }
+                                .onTapGesture { library.selectedMeetingID = record.meeting.id }
+                        }
                     }
                 }
             }
             .padding(28)
         }
         .background(.white)
+    }
+
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label("No meetings yet", systemImage: "waveform")
+                .font(Tokens.rowTitle)
+                .foregroundStyle(Tokens.textPrimary)
+        } description: {
+            Text("Hit Record when your next call starts. Recap captures the audio, transcribes it on this Mac, and turns your rough notes into a clean summary.")
+                .font(Tokens.meta)
+                .foregroundStyle(Tokens.textSecondary)
+        }
+        .padding(.top, 120)
     }
 
     private var header: some View {
@@ -66,6 +84,7 @@ struct LibraryView: View {
 
 private struct MeetingRow: View {
     var record: MeetingRecord
+    var onInstallModel: () -> Void
     @State private var hovering = false
 
     var body: some View {
@@ -81,7 +100,7 @@ private struct MeetingRow: View {
                     .foregroundStyle(Tokens.textSecondary)
             }
             Spacer(minLength: 12)
-            MeetingStatusView(status: record.meeting.status)
+            MeetingStatusView(status: record.meeting.status, onInstallModel: onInstallModel)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
@@ -114,5 +133,6 @@ private struct MeetingRow: View {
 #Preview {
     LibraryView()
         .environment(LibraryStore.fixture())
+        .environment(AppRouter())
         .frame(width: 820, height: 620)
 }
