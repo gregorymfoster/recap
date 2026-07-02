@@ -4,6 +4,7 @@ import SwiftUI
 /// App root: sidebar navigation + the selected section.
 public struct RootView: View {
     @State private var library: LibraryStore
+    @State private var session = MeetingSessionStore()
     @State private var sidebarSelection: SidebarItem? = .library
 
     /// Disk-backed root, used by the app. `-fixtures` swaps in sample data
@@ -30,7 +31,18 @@ public struct RootView: View {
         } detail: {
             detail
         }
+        .overlay(alignment: .bottom) {
+            if let startedAt = session.startedAt {
+                RecordingPill(startedAt: startedAt, levels: session.levels) {
+                    if let (record, duration) = session.stop() {
+                        library.finishRecording(record, duration: duration)
+                    }
+                }
+                .padding(.bottom, 22)
+            }
+        }
         .environment(library)
+        .environment(session)
     }
 
     @ViewBuilder

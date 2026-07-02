@@ -8,10 +8,11 @@ let package = Package(
         .library(name: "RecapUI", targets: ["RecapUI"])
     ],
     dependencies: [
-        .package(path: "../RecapCore")
+        .package(path: "../RecapCore"),
+        .package(path: "../RecapAudio"),
     ],
     targets: [
-        .target(name: "RecapUI", dependencies: ["RecapCore"]),
+        .target(name: "RecapUI", dependencies: ["RecapCore", "RecapAudio"]),
         .testTarget(name: "RecapUITests", dependencies: ["RecapUI"]),
     ]
 )

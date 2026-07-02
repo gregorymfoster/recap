@@ -48,17 +48,45 @@ public final class LibraryStore {
         try? index.reindex(from: storage)
     }
 
-    /// Creates a new meeting on disk and selects it. Audio capture attaches in M3.
-    public func startNewMeeting() {
+    /// Creates a new meeting on disk and selects it.
+    @discardableResult
+    public func startNewMeeting() -> MeetingRecord? {
         let meeting = Meeting(title: "Untitled meeting", date: .now, status: .recording)
         guard let storage else {
-            meetings.insert(MeetingRecord(meeting: meeting, folderURL: URL(filePath: "/dev/null")), at: 0)
+            let record = MeetingRecord(meeting: meeting, folderURL: URL(filePath: "/dev/null"))
+            meetings.insert(record, at: 0)
             selectedMeetingID = meeting.id
-            return
+            return record
         }
-        guard let record = try? storage.create(meeting) else { return }
+        guard let record = try? storage.create(meeting) else { return nil }
         meetings.insert(record, at: 0)
         selectedMeetingID = meeting.id
+        if let index { try? index.update(record, from: storage) }
+        return record
+    }
+
+    /// Recording stopped: persist the duration and hand the meeting to the
+    /// processing queue (M6 — until then it parks as queued).
+    public func finishRecording(_ record: MeetingRecord, duration: TimeInterval) {
+        var updated = record
+        updated.meeting.duration = duration
+        updated.meeting.status = .queued
+        replace(updated)
+    }
+
+    /// Aborts a recording that never captured audio (permission denied, engine failure).
+    public func markError(_ record: MeetingRecord, message: String) {
+        var updated = record
+        updated.meeting.status = .error(message: message)
+        replace(updated)
+    }
+
+    private func replace(_ record: MeetingRecord) {
+        if let i = meetings.firstIndex(where: { $0.meeting.id == record.meeting.id }) {
+            meetings[i] = record
+        }
+        guard let storage else { return }
+        try? storage.saveMetadata(record)
         if let index { try? index.update(record, from: storage) }
     }
 

@@ -6,6 +6,7 @@ import SwiftUI
 /// enhanced meeting.
 struct LibraryView: View {
     @Environment(LibraryStore.self) private var library
+    @Environment(MeetingSessionStore.self) private var session
 
     var body: some View {
         ScrollView {
@@ -32,7 +33,13 @@ struct LibraryView: View {
                 .kerning(-0.3)
             Spacer()
             Button {
-                library.startNewMeeting()
+                guard !session.isRecording, let record = library.startNewMeeting() else { return }
+                Task {
+                    await session.start(record: record)
+                    if session.permissionDenied {
+                        library.markError(record, message: "Microphone access denied")
+                    }
+                }
             } label: {
                 HStack(spacing: 7) {
                     Circle().fill(.white).frame(width: 8, height: 8)
