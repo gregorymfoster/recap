@@ -42,7 +42,12 @@ struct TranscriptPane: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 14) {
-                            ForEach(utterances) { utterance in
+                            ForEach(Array(utterances.enumerated()), id: \.element.id) { index, utterance in
+                                let previous = index > 0 ? utterances[index - 1].speakerID : nil
+                                if let speaker = utterance.speakerID, speaker != previous {
+                                    speakerLabel(speaker)
+                                        .padding(.top, index > 0 ? 6 : 0)
+                                }
                                 row(utterance)
                             }
                             if let partial {
@@ -81,6 +86,30 @@ struct TranscriptPane: View {
         }
     }
 
+    /// "S1" → "Speaker 1", colored consistently per speaker (mock 1b).
+    private func speakerLabel(_ speakerID: String) -> some View {
+        Text(displayName(for: speakerID))
+            .font(Tokens.microLabel)
+            .kerning(0.4)
+            .foregroundStyle(color(for: speakerID))
+            .padding(.leading, 48)  // aligns with the text column
+    }
+
+    private func displayName(for speakerID: String) -> String {
+        if let number = speakerNumber(speakerID) { return "Speaker \(number)" }
+        return speakerID
+    }
+
+    private func color(for speakerID: String) -> Color {
+        guard let number = speakerNumber(speakerID), number >= 1 else { return Tokens.textSecondary }
+        return Tokens.speakerPalette[(number - 1) % Tokens.speakerPalette.count]
+    }
+
+    private func speakerNumber(_ speakerID: String) -> Int? {
+        guard speakerID.hasPrefix("S") else { return nil }
+        return Int(speakerID.dropFirst())
+    }
+
     private func timestamp(_ seconds: TimeInterval) -> String {
         let total = Int(seconds)
         if total >= 3600 {
@@ -93,10 +122,11 @@ struct TranscriptPane: View {
 #Preview {
     TranscriptPane(
         utterances: [
-            Utterance(start: 0, end: 4, text: "Hello everyone, thanks for joining."),
-            Utterance(start: 4, end: 9, text: "Today we're walking through the Q3 roadmap and the onboarding revamp."),
+            Utterance(speakerID: "S1", start: 0, end: 4, text: "Hello everyone, thanks for joining."),
+            Utterance(speakerID: "S1", start: 4, end: 9, text: "Today we're walking through the Q3 roadmap and the onboarding revamp."),
+            Utterance(speakerID: "S2", start: 9, end: 14, text: "Sounds good — I have the metrics from last week ready to share."),
         ],
-        partial: Utterance(start: 9, end: 11, text: "Maya, do you want to start with"),
+        partial: Utterance(start: 14, end: 16, text: "Maya, do you want to start with"),
         isLive: true
     )
     .frame(width: 420, height: 500)

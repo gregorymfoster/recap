@@ -39,6 +39,10 @@ struct SettingsView: View {
                 Text("Transcription and note enhancement always run at low priority; on battery they wait until you're plugged in.")
                     .font(Tokens.caption)
                     .foregroundStyle(Tokens.textTertiary)
+                Toggle("Label speakers in transcripts", isOn: $settings.labelsSpeakers)
+                Text("Tells apart who spoke, on-device. The first labeled transcript downloads a small model (~50 MB); if it isn't available yet, transcripts are simply unlabeled.")
+                    .font(Tokens.caption)
+                    .foregroundStyle(Tokens.textTertiary)
             }
         }
         .formStyle(.grouped)

@@ -1,14 +1,19 @@
 import Foundation
 import Observation
+import OSLog
 import RecapCore
 import RecapEnhancement
 import RecapTranscription
+
+private let processorLog = Logger(subsystem: "com.gregfoster.recap", category: "MeetingProcessor")
 
 /// Executes queue jobs: loads the meeting, runs the active engine, saves
 /// results, and reports status transitions back to the main actor.
 struct MeetingProcessor: JobExecutor {
     let storage: LibraryStorage
     let engineProvider: @Sendable () async -> TranscriptionEngine?
+    /// nil when speaker labeling is disabled in settings.
+    let diarizerProvider: @Sendable () async -> SpeakerDiarizer?
     let enhancer: NoteEnhancer
     let onStatus: @Sendable (UUID, MeetingStatus) async -> Void
     /// Enqueues a follow-up job (transcribe → enhance chaining).
@@ -30,9 +35,27 @@ struct MeetingProcessor: JobExecutor {
             }
             await onStatus(job.meetingID, .transcribing(progress: 0))
             do {
-                let transcript = try await engine.transcribe(file: record.audioURL) { fraction in
-                    progress(fraction)
-                    Task { await onStatus(job.meetingID, .transcribing(progress: fraction)) }
+                let diarizer = await diarizerProvider()
+                // Diarization gets the tail of the progress bar when enabled.
+                let transcribeShare = diarizer == nil ? 1.0 : 0.85
+                var transcript = try await engine.transcribe(file: record.audioURL) { fraction in
+                    let overall = fraction * transcribeShare
+                    progress(overall)
+                    Task { await onStatus(job.meetingID, .transcribing(progress: overall)) }
+                }
+                if let diarizer {
+                    do {
+                        let turns = try await diarizer.speakerTurns(in: record.audioURL) { fraction in
+                            let overall = transcribeShare + fraction * (1 - transcribeShare)
+                            progress(overall)
+                            Task { await onStatus(job.meetingID, .transcribing(progress: overall)) }
+                        }
+                        transcript.utterances = SpeakerAssignment.label(transcript.utterances, with: turns)
+                    } catch {
+                        // Best-effort: a first run without network (models not
+                        // yet downloaded) must not cost the transcript.
+                        processorLog.error("Diarization skipped: \(error, privacy: .public)")
+                    }
                 }
                 try storage.saveTranscript(transcript, in: record)
                 if enhancer.isAvailable {
@@ -43,6 +66,7 @@ struct MeetingProcessor: JobExecutor {
                     await onStatus(job.meetingID, .ready)
                 }
             } catch {
+                processorLog.error("Transcription failed: \(error, privacy: .public)")
                 await onStatus(job.meetingID, .error(message: "Transcription failed"))
             }
 
@@ -81,9 +105,14 @@ public final class QueueStore {
     public init(library: LibraryStore, storage: LibraryStorage, models: WhisperModelManager) {
         // Two-phase init: the processor's chain closure needs the queue.
         let queueBox = QueueBox()
+        let diarizer = SpeakerDiarizer()
         let processor = MeetingProcessor(
             storage: storage,
             engineProvider: { @Sendable in await models.activeEngine() },
+            diarizerProvider: { @Sendable in
+                let enabled = UserDefaults.standard.object(forKey: "labelSpeakers") as? Bool ?? true
+                return enabled ? diarizer : nil
+            },
             enhancer: FoundationModelEnhancer(),
             onStatus: { @Sendable id, status in
                 await library.updateStatus(id, to: status)

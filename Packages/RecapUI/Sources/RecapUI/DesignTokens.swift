@@ -21,6 +21,15 @@ public enum Tokens {
     public static let warningAmberTint = warningAmber.opacity(0.14)
     public static let darkSurface = Color(red: 0x1C / 255, green: 0x1C / 255, blue: 0x1E / 255).opacity(0.96)
     public static let chipBackground = Color.black.opacity(0.05)
+    /// Speaker-label colors for diarized transcripts, cycled by speaker index.
+    public static let speakerPalette: [Color] = [
+        accentBlue,
+        successGreenText,
+        Color(red: 0xAF / 255, green: 0x52 / 255, blue: 0xDE / 255),  // #af52de purple
+        warningAmberText,
+        Color(red: 0x00 / 255, green: 0x7A / 255, blue: 0x8A / 255),  // #007a8a teal
+        recordRedDark,
+    ]
 
     // MARK: Radii
     public static let radiusChip: CGFloat = 5

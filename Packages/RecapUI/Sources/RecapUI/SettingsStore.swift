@@ -19,6 +19,11 @@ public final class SettingsStore {
         didSet { defaults.set(pausesOnBattery, forKey: "pauseOnBattery") }
     }
 
+    /// Label who spoke in transcripts (on-device diarization).
+    public var labelsSpeakers: Bool {
+        didSet { defaults.set(labelsSpeakers, forKey: "labelSpeakers") }
+    }
+
     /// Meeting library location. Applies to meetings created after a change.
     public var saveRootPath: String {
         didSet { defaults.set(saveRootPath, forKey: "saveRootPath") }
@@ -31,6 +36,7 @@ public final class SettingsStore {
         hasOnboarded = defaults.bool(forKey: "hasOnboarded")
         includeSystemAudio = defaults.object(forKey: "includeSystemAudio") as? Bool ?? true
         pausesOnBattery = defaults.object(forKey: "pauseOnBattery") as? Bool ?? true
+        labelsSpeakers = defaults.object(forKey: "labelSpeakers") as? Bool ?? true
         saveRootPath = defaults.string(forKey: "saveRootPath") ?? LibraryStorage.defaultRootURL.path
     }
 
