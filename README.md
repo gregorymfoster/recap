@@ -1,6 +1,9 @@
 # Recap
 
-**Private, offline meeting transcription for your Mac.**
+[![CI](https://github.com/gregorymfoster/recap/actions/workflows/ci.yml/badge.svg)](https://github.com/gregorymfoster/recap/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+**Private, offline meeting transcription for your Mac.** — [recap website](https://gregorymfoster.github.io/recap/)
 
 Recap records your meetings (your mic *and* the other participants via system audio — no bot joins your call), transcribes them entirely on-device with open-source Whisper models, and turns your rough in-meeting bullets into polished notes using Apple's on-device language model.
 
