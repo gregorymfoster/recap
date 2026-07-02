@@ -122,6 +122,11 @@ public final class LibraryStore {
         return try? storage.loadTranscript(in: record)
     }
 
+    public func loadEnhancedNotes(for record: MeetingRecord) -> String? {
+        guard let storage else { return nil }
+        return (try? storage.loadEnhancedNotes(in: record)) ?? nil
+    }
+
     /// "~/Recap"-style label for the status bar.
     public var saveLocationLabel: String {
         guard let storage else { return "~/Recap" }

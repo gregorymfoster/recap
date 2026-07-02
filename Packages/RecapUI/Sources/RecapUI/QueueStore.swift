@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import RecapCore
+import RecapEnhancement
 import RecapTranscription
 
 /// Executes queue jobs: loads the meeting, runs the active engine, saves
@@ -8,7 +9,10 @@ import RecapTranscription
 struct MeetingProcessor: JobExecutor {
     let storage: LibraryStorage
     let engineProvider: @Sendable () async -> TranscriptionEngine?
+    let enhancer: NoteEnhancer
     let onStatus: @Sendable (UUID, MeetingStatus) async -> Void
+    /// Enqueues a follow-up job (transcribe → enhance chaining).
+    let chain: @Sendable (ProcessingJob) async -> Void
 
     func execute(_ job: ProcessingJob, progress: @escaping @Sendable (Double) -> Void) async throws {
         guard let record = try storage.loadAll().first(where: { $0.meeting.id == job.meetingID })
@@ -31,15 +35,36 @@ struct MeetingProcessor: JobExecutor {
                     Task { await onStatus(job.meetingID, .transcribing(progress: fraction)) }
                 }
                 try storage.saveTranscript(transcript, in: record)
-                // M8 inserts an enhance job here; until then transcription completes the meeting.
-                await onStatus(job.meetingID, .ready)
+                if enhancer.isAvailable {
+                    await onStatus(job.meetingID, .enhancing)
+                    await chain(ProcessingJob(kind: .enhance, meetingID: job.meetingID))
+                } else {
+                    // Apple Intelligence off → meeting completes transcript-only.
+                    await onStatus(job.meetingID, .ready)
+                }
             } catch {
                 await onStatus(job.meetingID, .error(message: "Transcription failed"))
             }
 
         case .enhance:
-            // Arrives with M8 (FoundationModels note enhancement).
-            break
+            guard
+                enhancer.isAvailable,
+                let transcript = try storage.loadTranscript(in: record),
+                !transcript.utterances.isEmpty
+            else {
+                await onStatus(job.meetingID, .ready)
+                return
+            }
+            await onStatus(job.meetingID, .enhancing)
+            let notes = (try? storage.loadNotes(in: record)) ?? ""
+            do {
+                let enhanced = try await enhancer.enhance(rawNotes: notes, transcript: transcript)
+                try storage.saveEnhancedNotes(enhanced, in: record)
+            } catch {
+                // Refused or failed twice — the meeting is still complete with
+                // its transcript; enhancement can be retried from the editor.
+            }
+            await onStatus(job.meetingID, .ready)
         }
     }
 }
@@ -54,16 +79,23 @@ public final class QueueStore {
     private var monitorTask: Task<Void, Never>?
 
     public init(library: LibraryStore, storage: LibraryStorage, models: WhisperModelManager) {
+        // Two-phase init: the processor's chain closure needs the queue.
+        let queueBox = QueueBox()
         let processor = MeetingProcessor(
             storage: storage,
             engineProvider: { @Sendable in await models.activeEngine() },
+            enhancer: FoundationModelEnhancer(),
             onStatus: { @Sendable id, status in
                 await library.updateStatus(id, to: status)
+            },
+            chain: { @Sendable job in
+                await queueBox.queue?.enqueue(job)
             }
         )
         let pausesOnBattery = UserDefaults.standard.object(forKey: "pauseOnBattery") as? Bool ?? true
         let queue = ProcessingQueue(executor: processor, pausesOnBattery: pausesOnBattery)
         self.queue = queue
+        Task { await queueBox.set(queue) }
 
         Task {
             await queue.setObserver { snapshot in
@@ -95,16 +127,30 @@ public final class QueueStore {
         Task { await queue.setPausesOnBattery(value) }
     }
 
-    /// Meetings that died mid-pipeline (app quit or crash) restart from the top.
+    /// Meetings that died mid-pipeline (app quit or crash) resume from where
+    /// their files left off: with a transcript on disk only enhancement is
+    /// missing; otherwise transcription restarts.
     private func recoverUnfinishedWork(in library: LibraryStore) {
         for record in library.meetings {
             switch record.meeting.status {
-            case .queued, .transcribing, .enhancing, .recording:
+            case .queued, .transcribing, .recording:
                 library.updateStatus(record.meeting.id, to: .queued)
                 enqueueTranscription(for: record.meeting.id)
+            case .enhancing:
+                library.updateStatus(record.meeting.id, to: .queued)
+                Task { await queue.enqueue(ProcessingJob(kind: .enhance, meetingID: record.meeting.id)) }
             case .ready, .error:
                 break
             }
         }
+    }
+}
+
+/// Breaks the processor ↔ queue construction cycle.
+private actor QueueBox {
+    private(set) var queue: ProcessingQueue?
+
+    func set(_ queue: ProcessingQueue) {
+        self.queue = queue
     }
 }

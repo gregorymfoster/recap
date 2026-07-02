@@ -12,6 +12,8 @@ struct MeetingDetailView: View {
     @State private var notes = ""
     @State private var showTranscript = false
     @State private var savedTranscript: Transcript?
+    @State private var enhancedNotes: String?
+    @State private var showingOriginal = false
 
     private var isLiveMeeting: Bool {
         session.activeRecord?.meeting.id == record.meeting.id
@@ -44,11 +46,18 @@ struct MeetingDetailView: View {
         .task(id: record.meeting.id) {
             notes = library.loadNotes(for: record)
             savedTranscript = library.loadTranscript(for: record)
+            enhancedNotes = library.loadEnhancedNotes(for: record)
+            showingOriginal = false
         }
         .task(id: record.meeting.status) {
-            // Refresh once transcription lands (status flips to ready).
-            if case .ready = record.meeting.status, savedTranscript == nil {
-                savedTranscript = library.loadTranscript(for: record)
+            // Refresh once the pipeline lands results (status flips to ready).
+            if case .ready = record.meeting.status {
+                if savedTranscript == nil {
+                    savedTranscript = library.loadTranscript(for: record)
+                }
+                if enhancedNotes == nil {
+                    enhancedNotes = library.loadEnhancedNotes(for: record)
+                }
             }
         }
         .onChange(of: notes) {
@@ -61,15 +70,42 @@ struct MeetingDetailView: View {
             header
                 .padding(.horizontal, 40)
                 .padding(.top, 26)
-            TextEditor(text: $notes)
-                .font(Tokens.body)
-                .foregroundStyle(Tokens.textBody)
-                .lineSpacing(7)
-                .scrollContentBackground(.hidden)
-                .padding(.horizontal, 34)
-                .padding(.top, 16)
+            if let enhancedNotes, !showingOriginal {
+                EnhancedNotesView(markdown: enhancedNotes)
+                    .padding(.top, 8)
+            } else {
+                TextEditor(text: $notes)
+                    .font(Tokens.body)
+                    .foregroundStyle(Tokens.textBody)
+                    .lineSpacing(7)
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 34)
+                    .padding(.top, 16)
+            }
         }
         .background(.white)
+    }
+
+    /// "✨ Enhanced / My original notes" switcher, shown once enhancement exists.
+    @ViewBuilder
+    private var notesModeToggle: some View {
+        if enhancedNotes != nil {
+            Button {
+                showingOriginal.toggle()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: showingOriginal ? "sparkles" : "pencil")
+                        .font(.system(size: 9))
+                    Text(showingOriginal ? "View enhanced" : "My original notes")
+                        .font(Tokens.microLabel)
+                }
+                .foregroundStyle(Tokens.accentBlue)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Tokens.accentBlue.opacity(0.08), in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private var header: some View {
@@ -85,10 +121,13 @@ struct MeetingDetailView: View {
                         .foregroundStyle(.orange)
                 }
             }
-            Text(record.meeting.title)
-                .font(Tokens.pageTitle)
-                .kerning(-0.4)
-                .foregroundStyle(Tokens.textPrimary)
+            HStack(spacing: 10) {
+                Text(record.meeting.title)
+                    .font(Tokens.pageTitle)
+                    .kerning(-0.4)
+                    .foregroundStyle(Tokens.textPrimary)
+                notesModeToggle
+            }
             if !record.meeting.attendees.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(record.meeting.attendees, id: \.self) { attendee in
