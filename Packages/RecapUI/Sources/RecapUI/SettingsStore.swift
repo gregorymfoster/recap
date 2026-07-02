@@ -44,6 +44,11 @@ public final class SettingsStore {
         didSet { defaults.set(obsidianVaultPath, forKey: "obsidianVaultPath") }
     }
 
+    /// POST finished meetings (JSON) to this URL; empty disables.
+    public var webhookURL: String {
+        didSet { defaults.set(webhookURL, forKey: "webhookURL") }
+    }
+
     /// Meeting library location. Applies to meetings created after a change.
     public var saveRootPath: String {
         didSet { defaults.set(saveRootPath, forKey: "saveRootPath") }
@@ -61,6 +66,7 @@ public final class SettingsStore {
             .flatMap(CalendarAutoRecordMode.init(rawValue:)) ?? .off
         syncsToObsidian = defaults.bool(forKey: "obsidianSync")
         obsidianVaultPath = defaults.string(forKey: "obsidianVaultPath") ?? ""
+        webhookURL = defaults.string(forKey: "webhookURL") ?? ""
         saveRootPath = defaults.string(forKey: "saveRootPath") ?? LibraryStorage.defaultRootURL.path
     }
 

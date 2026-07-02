@@ -80,6 +80,12 @@ struct SettingsView: View {
                 Text("Each meeting becomes one Markdown note — enhanced notes plus the speaker-labeled transcript. Notes are copies; the meetings folder stays the source of truth.")
                     .font(Tokens.caption)
                     .foregroundStyle(Tokens.textTertiary)
+                TextField("Webhook URL", text: $settings.webhookURL, prompt: Text("https://example.com/hook"))
+                    .textFieldStyle(.roundedBorder)
+                    .font(Tokens.meta)
+                Text("Finished meetings are also POSTed to this URL as JSON (title, notes, transcript). Leave empty to disable.")
+                    .font(Tokens.caption)
+                    .foregroundStyle(Tokens.textTertiary)
             }
 
             Section("Processing") {

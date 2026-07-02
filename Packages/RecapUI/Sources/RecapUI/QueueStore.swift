@@ -109,22 +109,38 @@ struct MeetingProcessor: JobExecutor {
         }
     }
 
-    /// Mirrors a finished meeting into the configured Obsidian vault.
-    /// Best-effort: a failed export never affects the meeting itself.
+    /// Mirrors a finished meeting to the configured sync destinations
+    /// (Obsidian vault, webhook). Best-effort: a failed export never affects
+    /// the meeting itself.
     private func exportToObsidianIfEnabled(_ record: MeetingRecord) {
         let defaults = UserDefaults.standard
+        let notes = try? storage.loadNotes(in: record)
+        let enhanced = (try? storage.loadEnhancedNotes(in: record)) ?? nil
+        let transcript = try? storage.loadTranscript(in: record)
+
         let path = defaults.string(forKey: "obsidianVaultPath") ?? ""
-        guard defaults.bool(forKey: "obsidianSync"), !path.isEmpty else { return }
-        let exporter = ObsidianExporter(vaultFolderURL: URL(fileURLWithPath: path))
-        do {
-            try exporter.export(
-                record,
-                notes: try? storage.loadNotes(in: record),
-                enhanced: (try? storage.loadEnhancedNotes(in: record)) ?? nil,
-                transcript: try? storage.loadTranscript(in: record)
-            )
-        } catch {
-            processorLog.error("Obsidian export failed: \(error, privacy: .public)")
+        if defaults.bool(forKey: "obsidianSync"), !path.isEmpty {
+            let exporter = ObsidianExporter(vaultFolderURL: URL(fileURLWithPath: path))
+            do {
+                try exporter.export(record, notes: notes, enhanced: enhanced, transcript: transcript)
+            } catch {
+                processorLog.error("Obsidian export failed: \(error, privacy: .public)")
+            }
+        }
+
+        if let webhook = defaults.string(forKey: "webhookURL"),
+           let url = URL(string: webhook), url.scheme?.hasPrefix("http") == true {
+            let exporter = WebhookExporter(endpoint: url)
+            let meeting = record.meeting
+            Task {
+                do {
+                    try await exporter.send(
+                        meeting, notes: notes, enhanced: enhanced, transcript: transcript
+                    )
+                } catch {
+                    processorLog.error("Webhook delivery failed: \(error, privacy: .public)")
+                }
+            }
         }
     }
 }
