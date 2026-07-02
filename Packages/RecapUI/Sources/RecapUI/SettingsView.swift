@@ -1,15 +1,49 @@
 import AppKit
+import AVFoundation
+import EventKit
 import SwiftUI
 
-/// The Settings section: save location, recording sources, processing.
+/// The Settings section: permissions, save location, recording sources, processing.
 struct SettingsView: View {
     @Environment(AppStores.self) private var stores: AppStores?
     @Environment(SettingsStore.self) private var settings
     @Environment(QueueStore.self) private var queue: QueueStore?
+    @State private var micStatus = AVAudioApplication.shared.recordPermission
+    @State private var calendarStatus = EKEventStore.authorizationStatus(for: .event)
 
     var body: some View {
         @Bindable var settings = settings
         Form {
+            Section("Permissions") {
+                PermissionRow(
+                    icon: "mic.fill",
+                    title: "Microphone",
+                    status: micStatus.permissionStatus
+                ) {
+                    PrivacyPane.open(PrivacyPane.microphone)
+                }
+                PermissionRow(
+                    icon: "speaker.wave.2.fill",
+                    title: "System Audio",
+                    status: systemAudioStatus
+                ) {
+                    PrivacyPane.open(PrivacyPane.systemAudio)
+                }
+                PermissionRow(
+                    icon: "calendar",
+                    title: "Calendar",
+                    status: calendarStatus.permissionStatus
+                ) {
+                    PrivacyPane.open(PrivacyPane.calendars)
+                }
+                Text("Recap re-checks these whenever this window comes forward, so a change in System Settings shows up here right away.")
+                    .font(Tokens.caption)
+                    .foregroundStyle(Tokens.textTertiary)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                refreshPermissionStatuses()
+            }
+
             Section("Storage") {
                 LabeledContent("Meetings folder") {
                     HStack(spacing: 10) {
@@ -133,5 +167,109 @@ struct SettingsView: View {
     private func tildePath(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+    }
+
+    /// There's no query API for the system-audio tap's permission — only the
+    /// outcome of the last attempt, persisted by `AppStores.startRecording()`.
+    private var systemAudioStatus: PermissionStatus {
+        switch settings.lastSystemAudioTapFailed {
+        case .some(true): .unavailable
+        case .some(false): .granted
+        case nil: .notDetermined
+        }
+    }
+
+    private func refreshPermissionStatuses() {
+        micStatus = AVAudioApplication.shared.recordPermission
+        calendarStatus = EKEventStore.authorizationStatus(for: .event)
+    }
+}
+
+/// A permission's status as shown in the Permissions section. Distinct from
+/// the raw system enums, since the system-audio tap has no query API and
+/// needs a third "last attempt failed" state the others don't.
+private enum PermissionStatus {
+    case granted
+    case denied
+    case notDetermined
+    /// System-audio only: the tap failed the last time a recording started.
+    case unavailable
+
+    var label: String {
+        switch self {
+        case .granted: "Granted"
+        case .denied: "Denied"
+        case .notDetermined: "Not yet asked"
+        case .unavailable: "Unavailable at last recording"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .granted: Tokens.successGreenText
+        case .denied, .unavailable: Tokens.warningAmberText
+        case .notDetermined: Tokens.textTertiary
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .granted: "checkmark.circle.fill"
+        case .denied, .unavailable: "exclamationmark.triangle.fill"
+        case .notDetermined: "circle.dashed"
+        }
+    }
+
+    /// Whether the row's "Open System Settings" button is worth showing.
+    var showsSettingsButton: Bool {
+        switch self {
+        case .denied, .unavailable: true
+        case .granted, .notDetermined: false
+        }
+    }
+}
+
+private extension AVAudioApplication.recordPermission {
+    var permissionStatus: PermissionStatus {
+        switch self {
+        case .granted: .granted
+        case .denied: .denied
+        default: .notDetermined
+        }
+    }
+}
+
+private extension EKAuthorizationStatus {
+    var permissionStatus: PermissionStatus {
+        switch self {
+        case .fullAccess: .granted
+        case .notDetermined: .notDetermined
+        default: .denied
+        }
+    }
+}
+
+/// One row in the Permissions section: icon, title, live status, and a deep
+/// link to the relevant System Settings pane when action is needed.
+private struct PermissionRow: View {
+    let icon: String
+    let title: String
+    let status: PermissionStatus
+    let openSettings: () -> Void
+
+    var body: some View {
+        LabeledContent {
+            HStack(spacing: 10) {
+                Label(status.label, systemImage: status.systemImage)
+                    .font(Tokens.caption)
+                    .foregroundStyle(status.color)
+                if status.showsSettingsButton {
+                    Button("Open System Settings") { openSettings() }
+                        .controlSize(.small)
+                }
+            }
+        } label: {
+            Label(title, systemImage: icon)
+        }
     }
 }

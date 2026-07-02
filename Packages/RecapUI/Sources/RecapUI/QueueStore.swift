@@ -154,7 +154,13 @@ public final class QueueStore {
     private let monitor = SystemPowerMonitor()
     private var monitorTask: Task<Void, Never>?
 
-    public init(library: LibraryStore, storage: LibraryStorage, models: WhisperModelManager) {
+    /// - Parameter onError: Fired once per meeting when the processing
+    ///   pipeline transitions it to `.error`, so the UI can surface a toast
+    ///   in addition to the row chip `updateStatus` already produces.
+    public init(
+        library: LibraryStore, storage: LibraryStorage, models: WhisperModelManager,
+        onError: (@MainActor (String) -> Void)? = nil
+    ) {
         // Two-phase init: the processor's chain closure needs the queue.
         let queueBox = QueueBox()
         let diarizer = SpeakerDiarizer()
@@ -168,6 +174,9 @@ public final class QueueStore {
             enhancer: FoundationModelEnhancer(),
             onStatus: { @Sendable id, status in
                 await library.updateStatus(id, to: status)
+                if case .error(let message) = status {
+                    await onError?(message)
+                }
             },
             onDurationRecovered: { @Sendable id, duration in
                 await library.updateDuration(id, to: duration)

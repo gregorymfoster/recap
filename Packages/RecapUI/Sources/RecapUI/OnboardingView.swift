@@ -108,7 +108,7 @@ struct OnboardingView: View {
                                 .font(Tokens.caption)
                         } else if micGranted == false {
                             Button("Open Settings") {
-                                openPrivacyPane("Privacy_Microphone")
+                                PrivacyPane.open(PrivacyPane.microphone)
                             }
                             .controlSize(.small)
                         } else {
@@ -149,12 +149,6 @@ struct OnboardingView: View {
             }
             Spacer()
             trailing()
-        }
-    }
-
-    private func openPrivacyPane(_ pane: String) {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
-            NSWorkspace.shared.open(url)
         }
     }
 

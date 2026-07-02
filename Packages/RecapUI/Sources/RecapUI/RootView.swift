@@ -9,7 +9,7 @@ import SwiftUI
 @MainActor
 @Observable
 public final class AppRouter {
-    var section: SidebarItem? = .library
+    public var section: SidebarItem? = .library
 
     public init() {}
 }
@@ -62,6 +62,9 @@ public struct RootView: View {
                         .padding(.top, 90)
                 }
             }
+        }
+        .overlay(alignment: .bottom) {
+            ToastOverlay(toasts: stores.toasts)
         }
         .background {
             // Global ⌘K without a visible control.

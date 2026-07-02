@@ -1,12 +1,12 @@
 import RecapTranscription
 import SwiftUI
 
-enum SidebarItem: String, CaseIterable, Identifiable {
+public enum SidebarItem: String, CaseIterable, Identifiable {
     case library
     case models
     case settings
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
     var label: String {
         switch self {

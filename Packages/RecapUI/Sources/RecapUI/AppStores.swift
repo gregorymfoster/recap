@@ -1,3 +1,4 @@
+import AppKit
 import Carbon.HIToolbox
 import Foundation
 import OSLog
@@ -24,6 +25,7 @@ public final class AppStores {
     public let session: MeetingSessionStore
     public let queue: QueueStore?
     public let router = AppRouter()
+    public let toasts = ToastCenter()
     /// nil in fixture/preview graphs, where nothing touches disk.
     private let storage: LibraryStorage?
 
@@ -56,7 +58,11 @@ public final class AppStores {
             self.models = models
             self.storage = storage
             session = MeetingSessionStore()
-            queue = QueueStore(library: library, storage: storage, models: models)
+            let toasts = toasts
+            queue = QueueStore(
+                library: library, storage: storage, models: models,
+                onError: { message in toasts.show(message) }
+            )
             recordHotKey = GlobalHotKey(keyCode: kVK_ANSI_R, modifiers: cmdKey | optionKey) { [weak self] in
                 self?.toggleRecording()
             }
@@ -69,6 +75,9 @@ public final class AppStores {
             // A recorder-initiated stop (disk full) still runs the normal
             // stop flow so the salvaged audio gets transcribed.
             session.onAutoStop = { [weak self] in
+                if let message = self?.session.recordingFailureMessage {
+                    self?.toasts.show(message)
+                }
                 self?.stopRecording()
             }
         }
@@ -100,8 +109,24 @@ public final class AppStores {
             )
             if session.permissionDenied {
                 library.markError(record, message: "Microphone access denied")
+                toasts.show(
+                    "Microphone access denied", actionTitle: "Open Settings"
+                ) { [weak self] in
+                    self?.router.section = .settings
+                    PrivacyPane.open(PrivacyPane.microphone)
+                }
             } else if let message = session.startFailureMessage {
                 library.markError(record, message: message)
+                toasts.show(message)
+            } else if session.systemAudioUnavailable {
+                settings.lastSystemAudioTapFailed = true
+                toasts.show(
+                    "Recording mic only — system audio unavailable", actionTitle: "Open Settings"
+                ) { [weak self] in
+                    self?.router.section = .settings
+                }
+            } else if settings.includeSystemAudio {
+                settings.lastSystemAudioTapFailed = false
             }
         }
     }
@@ -124,6 +149,18 @@ public final class AppStores {
     public func showMeeting(_ id: UUID) {
         router.section = .library
         library.selectedMeetingID = id
+    }
+
+    /// Routes to a section and brings the main window forward (recreating it
+    /// if it was closed). `openWindow` is a SwiftUI Environment value only
+    /// available in a view/scene context, so callers (the ⌘, command, the
+    /// menu bar extra) pass theirs in rather than this living on `AppStores`.
+    public func openMainWindow(section: SidebarItem? = nil, openWindow: (String) -> Void) {
+        if let section {
+            router.section = section
+        }
+        openWindow("main")
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: Calendar auto-record

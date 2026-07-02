@@ -65,11 +65,14 @@ public struct MenuBarContent: View {
         Button("Open Recap") {
             activateApp()
         }
+        Button("Settings…") {
+            stores.openMainWindow(section: .settings, openWindow: { openWindow(id: $0) })
+        }
+        .keyboardShortcut(",", modifiers: .command)
     }
 
     /// Brings the main window forward (recreating it if it was closed).
     private func activateApp() {
-        openWindow(id: "main")
-        NSApp.activate(ignoringOtherApps: true)
+        stores.openMainWindow(openWindow: { openWindow(id: $0) })
     }
 }

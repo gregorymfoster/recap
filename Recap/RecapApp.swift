@@ -23,6 +23,9 @@ struct RecapApp: App {
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updater: updaterController.updater)
             }
+            CommandGroup(replacing: .appSettings) {
+                SettingsCommand(stores: stores)
+            }
         }
 
         MenuBarExtra {
@@ -30,6 +33,20 @@ struct RecapApp: App {
         } label: {
             MenuBarLabel(stores: stores)
         }
+    }
+}
+
+/// "Settings…" (⌘,) — routes to the Settings sidebar section and brings the
+/// main window forward, matching the same entry point the menu bar exposes.
+private struct SettingsCommand: View {
+    @Environment(\.openWindow) private var openWindow
+    let stores: AppStores
+
+    var body: some View {
+        Button("Settings…") {
+            stores.openMainWindow(section: .settings, openWindow: { openWindow(id: $0) })
+        }
+        .keyboardShortcut(",", modifiers: .command)
     }
 }
 

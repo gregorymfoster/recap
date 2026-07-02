@@ -54,6 +54,19 @@ public final class SettingsStore {
         didSet { defaults.set(saveRootPath, forKey: "saveRootPath") }
     }
 
+    /// Outcome of the system-audio tap the last time a recording started.
+    /// There's no permission-query API for the tap, so this is the best
+    /// signal Settings can show: nil means it's never been attempted.
+    public var lastSystemAudioTapFailed: Bool? {
+        didSet {
+            if let lastSystemAudioTapFailed {
+                defaults.set(lastSystemAudioTapFailed, forKey: "lastSystemAudioTapFailed")
+            } else {
+                defaults.removeObject(forKey: "lastSystemAudioTapFailed")
+            }
+        }
+    }
+
     private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
@@ -68,6 +81,7 @@ public final class SettingsStore {
         obsidianVaultPath = defaults.string(forKey: "obsidianVaultPath") ?? ""
         webhookURL = defaults.string(forKey: "webhookURL") ?? ""
         saveRootPath = defaults.string(forKey: "saveRootPath") ?? LibraryStorage.defaultRootURL.path
+        lastSystemAudioTapFailed = defaults.object(forKey: "lastSystemAudioTapFailed") as? Bool
     }
 
     public var saveRootURL: URL {
