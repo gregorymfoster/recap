@@ -5,16 +5,19 @@ import SwiftUI
 
 /// Which top-level section is showing. Held in the environment so any view
 /// (e.g. a "needs model" library chip) can navigate without threading bindings.
+/// Owned by `AppStores` so the menu bar extra can navigate too.
+@MainActor
 @Observable
-final class AppRouter {
+public final class AppRouter {
     var section: SidebarItem? = .library
+
+    public init() {}
 }
 
 /// App root: sidebar navigation + the selected section. Never build stores
 /// here — view values re-initialize freely; the graph lives in `AppStores`.
 public struct RootView: View {
     private let stores: AppStores
-    @State private var router = AppRouter()
     @State private var showSearch = false
 
     private var library: LibraryStore { stores.library }
@@ -22,6 +25,7 @@ public struct RootView: View {
     private var models: WhisperModelManager { stores.models }
     private var settings: SettingsStore { stores.settings }
     private var queue: QueueStore? { stores.queue }
+    private var router: AppRouter { stores.router }
 
     public init(stores: AppStores) {
         self.stores = stores
@@ -43,12 +47,7 @@ public struct RootView: View {
         .overlay(alignment: .bottom) {
             if let startedAt = session.startedAt {
                 RecordingPill(startedAt: startedAt, levels: session.levels) {
-                    Task {
-                        if let (record, duration) = await session.stop() {
-                            library.finishRecording(record, duration: duration)
-                            queue?.enqueueTranscription(for: record.meeting.id)
-                        }
-                    }
+                    stores.stopRecording()
                 }
                 .padding(.bottom, 22)
             }
@@ -79,6 +78,7 @@ public struct RootView: View {
         .onChange(of: models.activeModelID) { _, active in
             if active != nil { queue?.retryMeetingsAwaitingModel(in: library) }
         }
+        .environment(stores)
         .environment(library)
         .environment(session)
         .environment(models)

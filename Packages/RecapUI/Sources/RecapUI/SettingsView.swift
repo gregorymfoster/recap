@@ -29,6 +29,10 @@ struct SettingsView: View {
                 Text("Uses macOS's System Audio Recording permission. Turn off to record only your microphone.")
                     .font(Tokens.caption)
                     .foregroundStyle(Tokens.textTertiary)
+                LabeledContent("Start or stop recording anywhere", value: "⌥⌘R")
+                Text("Works even when Recap isn't the active app — also available from the menu bar icon.")
+                    .font(Tokens.caption)
+                    .foregroundStyle(Tokens.textTertiary)
             }
 
             Section("Processing") {

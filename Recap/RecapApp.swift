@@ -15,7 +15,7 @@ struct RecapApp: App {
     )
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
             RootView(stores: stores)
         }
         .defaultSize(width: 1060, height: 660)
@@ -23,6 +23,12 @@ struct RecapApp: App {
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updater: updaterController.updater)
             }
+        }
+
+        MenuBarExtra {
+            MenuBarContent(stores: stores)
+        } label: {
+            MenuBarLabel(stores: stores)
         }
     }
 }
