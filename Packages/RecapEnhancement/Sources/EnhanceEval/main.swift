@@ -17,6 +17,8 @@ import RecapEnhancement
 //               expectations.mustNotContain strings
 //   numbers   — every number in the output also appears in the transcript
 //               or notes (cheap hallucination signal)
+//   subtitle  — a one-line subtitle was generated: non-nil, non-empty,
+//               <= 120 chars, and free of meta-narration phrases
 
 struct Expectations: Decodable {
     var mustContain: [String]?
@@ -25,7 +27,7 @@ struct Expectations: Decodable {
 
 // --json: in addition to the normal human-readable output, prints exactly one
 // JSON object as the LAST line of stdout, e.g.:
-//   {"ok":false,"cases":[{"name":"budget-sync","structure":true,"recall":true,"meta":true,"numbers":false}]}
+//   {"ok":false,"cases":[{"name":"budget-sync","structure":true,"recall":true,"meta":true,"numbers":false,"subtitle":true}]}
 // `structure` is omitted (null) for cases with no rough notes, matching the
 // human "structure —" line. Exit codes are unchanged.
 
@@ -36,6 +38,7 @@ struct CaseSummary: Codable {
     var recall: Bool
     var meta: Bool
     var numbers: Bool
+    var subtitle: Bool
 }
 
 struct EvalResult: Codable {
@@ -56,6 +59,7 @@ struct CaseResult {
     var recallTotal: Int
     var metaOK: Bool
     var numbersOK: Bool
+    var subtitleOK: Bool
     /// "Also discussed" bullets that restate a rewritten-notes bullet.
     var duplicateExtras: Int
     var seconds: Double
@@ -151,9 +155,20 @@ func evaluate(name: String, dir: URL, enhancer: some NoteEnhancer) async throws 
     )) ?? Expectations()
 
     let started = Date.now
-    let output = try await enhancer.enhance(rawNotes: notes, transcript: transcript)
+    let result = try await enhancer.enhance(rawNotes: notes, transcript: transcript)
     let seconds = Date.now.timeIntervalSince(started)
+    let output = result.notes
     let lowered = output.lowercased()
+
+    // Subtitle: generated, non-empty, short enough for a list row, and free
+    // of the same meta-narration phrases the notes are checked for.
+    let subtitleOK: Bool
+    if let subtitle = result.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !subtitle.isEmpty {
+        let loweredSubtitle = subtitle.lowercased()
+        subtitleOK = subtitle.count <= 120 && !metaPhrases.contains { loweredSubtitle.contains($0) }
+    } else {
+        subtitleOK = false
+    }
 
     let noteLines = notes
         .components(separatedBy: .newlines)
@@ -207,7 +222,8 @@ func evaluate(name: String, dir: URL, enhancer: some NoteEnhancer) async throws 
     return CaseResult(
         name: name, structureOK: structureOK,
         recallHits: recallHits, recallTotal: mustContain.count,
-        metaOK: metaOK, numbersOK: numbersOK, duplicateExtras: duplicateExtras,
+        metaOK: metaOK, numbersOK: numbersOK, subtitleOK: subtitleOK,
+        duplicateExtras: duplicateExtras,
         seconds: seconds, output: output
     )
 }
@@ -254,10 +270,11 @@ for run in 1...runs {
             let result = try await evaluate(name: name, dir: dir, enhancer: enhancer)
             let structure = result.structureOK.map { "structure \(mark($0))" } ?? "structure —"
             let line = String(
-                format: "%-18s %@  recall %d/%d  meta %@  numbers %@  dupes %d  (%.1fs)",
+                format: "%-18s %@  recall %d/%d  meta %@  numbers %@  subtitle %@  dupes %d  (%.1fs)",
                 (name as NSString).utf8String!, structure,
                 result.recallHits, result.recallTotal,
-                mark(result.metaOK), mark(result.numbersOK), result.duplicateExtras,
+                mark(result.metaOK), mark(result.numbersOK), mark(result.subtitleOK),
+                result.duplicateExtras,
                 result.seconds
             )
             print(line)
@@ -266,17 +283,18 @@ for run in 1...runs {
             }
             let recallOK = result.recallHits >= result.recallTotal
             if result.structureOK == false || !recallOK
-                || !result.metaOK || !result.numbersOK || result.duplicateExtras > 0 {
+                || !result.metaOK || !result.numbersOK || !result.subtitleOK
+                || result.duplicateExtras > 0 {
                 failures += 1
             }
             caseSummaries.append(CaseSummary(
                 name: name, structure: result.structureOK, recall: recallOK,
-                meta: result.metaOK, numbers: result.numbersOK
+                meta: result.metaOK, numbers: result.numbersOK, subtitle: result.subtitleOK
             ))
         } catch {
             print("\(name): FAILED — \(error)")
             failures += 1
-            caseSummaries.append(CaseSummary(name: name, structure: nil, recall: false, meta: false, numbers: false))
+            caseSummaries.append(CaseSummary(name: name, structure: nil, recall: false, meta: false, numbers: false, subtitle: false))
         }
     }
 }

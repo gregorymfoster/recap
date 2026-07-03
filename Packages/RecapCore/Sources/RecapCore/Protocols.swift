@@ -95,9 +95,22 @@ public protocol TranscriptionEngine: Sendable {
     func transcribe(file: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> Transcript
 }
 
+/// Result of an enhancement pass: the enhanced notes plus an optional
+/// one-line meeting subtitle.
+public struct EnhancementResult: Sendable, Equatable {
+    /// Enhanced notes markdown.
+    public let notes: String
+    /// One-line meeting subtitle, nil when generation failed or was skipped.
+    public let subtitle: String?
+    public init(notes: String, subtitle: String? = nil) {
+        self.notes = notes
+        self.subtitle = subtitle
+    }
+}
+
 /// Merges the user's rough notes with the transcript into enhanced notes.
 /// Implementations: Apple FoundationModels (v1); local llama.cpp/MLX backends later.
 public protocol NoteEnhancer: Sendable {
     var isAvailable: Bool { get }
-    func enhance(rawNotes: String, transcript: Transcript) async throws -> String
+    func enhance(rawNotes: String, transcript: Transcript) async throws -> EnhancementResult
 }

@@ -41,8 +41,10 @@ struct RecapApp: App {
     var body: some Scene {
         WindowGroup(id: "main") {
             RootView(stores: stores)
+                .frame(minWidth: 800, minHeight: 500)
         }
         .defaultSize(width: 1060, height: 660)
+        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(after: .appInfo) {
                 if let updater {

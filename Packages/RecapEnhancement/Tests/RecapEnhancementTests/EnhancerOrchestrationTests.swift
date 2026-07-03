@@ -15,12 +15,14 @@ private actor FakeEnhancerModel: EnhancerModel {
     var summarizeCalls: [String] = []
     var rewriteCalls: [(line: String, digestText: String)] = []
     var extraFactsCalls: [(digestText: String, notesBlock: String)] = []
+    var subtitleCalls: [String] = []
 
     private var digestImpl: (@Sendable (String) async throws -> ChunkDigest)?
     private var mergeImpl: (@Sendable (String) async throws -> ChunkDigest)?
     private var summarizeImpl: (@Sendable (String) async throws -> String)?
     private var rewriteImpl: (@Sendable (String, String) async throws -> String)?
     private var extraFactsImpl: (@Sendable (String, String) async throws -> [String])?
+    private var subtitleImpl: (@Sendable (String) async throws -> String)?
 
     init(
         isAvailable: Bool = true,
@@ -28,7 +30,8 @@ private actor FakeEnhancerModel: EnhancerModel {
         merge: (@Sendable (String) async throws -> ChunkDigest)? = nil,
         summarize: (@Sendable (String) async throws -> String)? = nil,
         rewrite: (@Sendable (String, String) async throws -> String)? = nil,
-        extraFacts: (@Sendable (String, String) async throws -> [String])? = nil
+        extraFacts: (@Sendable (String, String) async throws -> [String])? = nil,
+        subtitle: (@Sendable (String) async throws -> String)? = nil
     ) {
         self.isAvailable = isAvailable
         self.digestImpl = digest
@@ -36,6 +39,7 @@ private actor FakeEnhancerModel: EnhancerModel {
         self.summarizeImpl = summarize
         self.rewriteImpl = rewrite
         self.extraFactsImpl = extraFacts
+        self.subtitleImpl = subtitle
     }
 
     func digest(chunkText: String) async throws -> ChunkDigest {
@@ -76,6 +80,14 @@ private actor FakeEnhancerModel: EnhancerModel {
             return try await extraFactsImpl(digestText, notesBlock)
         }
         return []
+    }
+
+    func subtitle(digestText: String) async throws -> String {
+        subtitleCalls.append(digestText)
+        if let subtitleImpl {
+            return try await subtitleImpl(digestText)
+        }
+        return "Fake subtitle about the meeting"
     }
 }
 
@@ -157,7 +169,7 @@ private actor FakeEnhancerModel: EnhancerModel {
         let model = FakeEnhancerModel(summarize: { _ in "## Summary\nfinal summary text" })
         let enhancer = FoundationModelEnhancer(model: model)
         let result = try await enhancer.enhance(rawNotes: "   \n  \n", transcript: transcript(["Hello there."]))
-        #expect(result == "## Summary\nfinal summary text")
+        #expect(result.notes == "## Summary\nfinal summary text")
         let summarizeCount = await model.summarizeCalls.count
         let rewriteCount = await model.rewriteCalls.count
         #expect(summarizeCount == 1)
@@ -176,7 +188,7 @@ private actor FakeEnhancerModel: EnhancerModel {
         #expect(calls.count == 3)
         #expect(calls.map(\.line) == ["first line", "second line", "third line"])
 
-        let bulletsSection = result.components(separatedBy: "\n\n## Also discussed").first ?? result
+        let bulletsSection = result.notes.components(separatedBy: "\n\n## Also discussed").first ?? result.notes
         let bullets = bulletsSection.components(separatedBy: "\n")
         #expect(bullets.count == 3)
         #expect(bullets == [
@@ -198,7 +210,7 @@ private actor FakeEnhancerModel: EnhancerModel {
         let model = FakeEnhancerModel(rewrite: { _, _ in rewriteResponse })
         let enhancer = FoundationModelEnhancer(model: model)
         let result = try await enhancer.enhance(rawNotes: "- original line text", transcript: transcript(["Hello."]))
-        #expect(result == "- original line text")
+        #expect(result.notes == "- original line text")
     }
 
     // MARK: 6. Overlap dedup
@@ -215,9 +227,9 @@ private actor FakeEnhancerModel: EnhancerModel {
         let enhancer = FoundationModelEnhancer(model: model)
         let result = try await enhancer.enhance(rawNotes: "- budget", transcript: transcript(["Hello."]))
 
-        #expect(result.contains("## Also discussed"))
-        #expect(result.contains("Legal review starts Monday morning."))
-        #expect(!result.contains("Budget approved launch project."))
+        #expect(result.notes.contains("## Also discussed"))
+        #expect(result.notes.contains("Legal review starts Monday morning."))
+        #expect(!result.notes.contains("Budget approved launch project."))
     }
 
     @Test func overlapDedupDropsSectionWhenAllCovered() async throws {
@@ -227,7 +239,7 @@ private actor FakeEnhancerModel: EnhancerModel {
         )
         let enhancer = FoundationModelEnhancer(model: model)
         let result = try await enhancer.enhance(rawNotes: "- budget", transcript: transcript(["Hello."]))
-        #expect(!result.contains("## Also discussed"))
+        #expect(!result.notes.contains("## Also discussed"))
     }
 
     // MARK: 7. Retry
@@ -243,7 +255,7 @@ private actor FakeEnhancerModel: EnhancerModel {
         })
         let enhancer = FoundationModelEnhancer(model: model)
         let result = try await enhancer.enhance(rawNotes: "", transcript: transcript(["Hello there."]))
-        #expect(!result.isEmpty)
+        #expect(!result.notes.isEmpty)
         let calls = await model.digestCalls.count
         #expect(calls == 2)
     }
@@ -274,6 +286,38 @@ private actor FakeEnhancerModel: EnhancerModel {
         await #expect(throws: EnhancementError.emptyTranscript) {
             _ = try await enhancer.enhance(rawNotes: "- notes", transcript: transcript([]))
         }
+    }
+
+    // MARK: 9. Subtitle
+
+    @Test func subtitleLandsInResultTrimmedAndPeriodStripped() async throws {
+        let model = FakeEnhancerModel(subtitle: { _ in "  Q3 budget approved, launch moves to Sept 12. \n" })
+        let enhancer = FoundationModelEnhancer(model: model)
+        let result = try await enhancer.enhance(rawNotes: "", transcript: transcript(["Hello there."]))
+        #expect(result.subtitle == "Q3 budget approved, launch moves to Sept 12")
+        let calls = await model.subtitleCalls.count
+        #expect(calls == 1)
+    }
+
+    @Test func subtitleFailureStillReturnsNotesWithNilSubtitle() async throws {
+        let model = FakeEnhancerModel(
+            summarize: { _ in "## Summary\nstill here" },
+            subtitle: { _ in throw TestError.failed }
+        )
+        let enhancer = FoundationModelEnhancer(model: model)
+        let result = try await enhancer.enhance(rawNotes: "", transcript: transcript(["Hello there."]))
+        #expect(result.notes == "## Summary\nstill here")
+        #expect(result.subtitle == nil)
+        // The retry wrapper gives the subtitle call two attempts before giving up.
+        let calls = await model.subtitleCalls.count
+        #expect(calls == 2)
+    }
+
+    @Test func whitespaceOnlySubtitleBecomesNil() async throws {
+        let model = FakeEnhancerModel(subtitle: { _ in " . " })
+        let enhancer = FoundationModelEnhancer(model: model)
+        let result = try await enhancer.enhance(rawNotes: "", transcript: transcript(["Hello there."]))
+        #expect(result.subtitle == nil)
     }
 }
 

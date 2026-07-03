@@ -51,7 +51,7 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         model.isAvailable
     }
 
-    public func enhance(rawNotes: String, transcript: RecapCore.Transcript) async throws -> String {
+    public func enhance(rawNotes: String, transcript: RecapCore.Transcript) async throws -> EnhancementResult {
         guard isAvailable else { throw EnhancementError.unavailable }
 
         let chunks = TranscriptChunker.chunk(transcript)
@@ -73,7 +73,36 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         }
 
         enhancementLog.info("reduce: \(digests.count, privacy: .public) digest(s)")
-        return try await reduce(rawNotes: rawNotes, digests: digests)
+        let notes = try await reduce(rawNotes: rawNotes, digests: digests)
+
+        // Best-effort: a failed subtitle must never fail enhancement, since the
+        // notes themselves are already done at this point.
+        let subtitle: String?
+        do {
+            subtitle = try await generateSubtitle(digests: digests)
+        } catch {
+            enhancementLog.error("subtitle generation failed")
+            subtitle = nil
+        }
+
+        return EnhancementResult(notes: notes, subtitle: subtitle)
+    }
+
+    // MARK: Subtitle
+
+    /// Returns nil (rather than throwing) when the model's answer trims down
+    /// to nothing, so callers only ever see a usable subtitle or none.
+    private func generateSubtitle(digests: [ChunkDigest]) async throws -> String? {
+        let digestText = render(digests)
+        let raw = try await respondWithRetry {
+            try await model.subtitle(digestText: digestText)
+        }
+        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasSuffix(".") {
+            trimmed.removeLast()
+            trimmed = trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     // MARK: Map
@@ -153,6 +182,12 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         var items: [String]
     }
 
+    @Generable
+    struct MeetingSubtitle {
+        @Guide(description: "A concrete, specific one-line meeting subtitle, 6-10 words, sentence fragment, no trailing period")
+        var text: String
+    }
+
     private func rewrite(line: String, digestText: String) async throws -> String {
         let text = try await respondWithRetry {
             try await model.rewrite(line: line, digestText: digestText)
@@ -219,7 +254,7 @@ public struct UnavailableEnhancer: NoteEnhancer {
 
     public var isAvailable: Bool { false }
 
-    public func enhance(rawNotes: String, transcript: RecapCore.Transcript) async throws -> String {
+    public func enhance(rawNotes: String, transcript: RecapCore.Transcript) async throws -> EnhancementResult {
         throw EnhancementError.unavailable
     }
 }

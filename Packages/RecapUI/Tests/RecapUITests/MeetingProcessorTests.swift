@@ -25,10 +25,10 @@ private struct FakeEngine: TranscriptionEngine {
 /// Fake `NoteEnhancer` with configurable availability/result.
 private struct FakeEnhancer: NoteEnhancer {
     var isAvailable: Bool
-    var result: String = "enhanced!"
+    var result: EnhancementResult = EnhancementResult(notes: "enhanced!")
     var failure: Error?
 
-    func enhance(rawNotes: String, transcript: Transcript) async throws -> String {
+    func enhance(rawNotes: String, transcript: Transcript) async throws -> EnhancementResult {
         if let failure { throw failure }
         return result
     }
@@ -66,6 +66,15 @@ private actor BackupCollector {
     }
 }
 
+/// Collects subtitles reported by the enhance job's `onSubtitle`.
+private actor SubtitleCollector {
+    private(set) var subtitles: [(UUID, String)] = []
+
+    func record(_ id: UUID, _ subtitle: String) {
+        subtitles.append((id, subtitle))
+    }
+}
+
 @Suite struct MeetingProcessorTests {
     private func makeStorage() -> LibraryStorage {
         let root = FileManager.default.temporaryDirectory
@@ -95,6 +104,7 @@ private actor BackupCollector {
         statusCollector: StatusCollector,
         chainCollector: ChainCollector,
         backupCollector: BackupCollector? = nil,
+        subtitleCollector: SubtitleCollector? = nil,
         changeBus: LibraryChangeBus = LibraryChangeBus()
     ) -> MeetingProcessor {
         MeetingProcessor(
@@ -107,7 +117,8 @@ private actor BackupCollector {
             onDurationRecovered: { @Sendable _, _ in },
             onBackedUp: { @Sendable id in await backupCollector?.record(id) },
             chain: { @Sendable job in await chainCollector.record(job) },
-            changeBus: changeBus
+            changeBus: changeBus,
+            onSubtitle: { @Sendable id, subtitle in await subtitleCollector?.record(id, subtitle) }
         )
     }
 
@@ -248,7 +259,7 @@ private actor BackupCollector {
         let chainCollector = ChainCollector()
         let processor = makeProcessor(
             storage: storage,
-            enhancer: FakeEnhancer(isAvailable: true, result: "## Notes\nShipped it."),
+            enhancer: FakeEnhancer(isAvailable: true, result: EnhancementResult(notes: "## Notes\nShipped it.")),
             statusCollector: statusCollector,
             chainCollector: chainCollector
         )
@@ -260,6 +271,67 @@ private actor BackupCollector {
         let statuses = await statusCollector.all
         #expect(statuses.last == .ready)
         #expect(try storage.loadEnhancedNotes(in: record) == "## Notes\nShipped it.")
+    }
+
+    // MARK: 6b. Enhance job reports the generated subtitle
+
+    @Test func enhanceJobReportsSubtitle() async throws {
+        let storage = makeStorage()
+        let record = try storage.create(Meeting(title: "Standup", date: .now))
+        try storage.saveTranscript(makeTranscript(), in: record)
+        let statusCollector = StatusCollector()
+        let chainCollector = ChainCollector()
+        let subtitleCollector = SubtitleCollector()
+        let processor = makeProcessor(
+            storage: storage,
+            enhancer: FakeEnhancer(
+                isAvailable: true,
+                result: EnhancementResult(notes: "## Notes\nShipped it.", subtitle: "Ship decision made, launch set for Friday")
+            ),
+            statusCollector: statusCollector,
+            chainCollector: chainCollector,
+            subtitleCollector: subtitleCollector
+        )
+
+        try await processor.execute(
+            ProcessingJob(kind: .enhance, meetingID: record.meeting.id), progress: { _ in }
+        )
+
+        let subtitles = await subtitleCollector.subtitles
+        #expect(subtitles.count == 1)
+        #expect(subtitles.first?.0 == record.meeting.id)
+        #expect(subtitles.first?.1 == "Ship decision made, launch set for Friday")
+        #expect(try storage.loadEnhancedNotes(in: record) == "## Notes\nShipped it.")
+    }
+
+    @Test func enhanceJobSkipsNilOrEmptySubtitle() async throws {
+        for subtitle in [nil, "", "   \n"] as [String?] {
+            let storage = makeStorage()
+            let record = try storage.create(Meeting(title: "Standup", date: .now))
+            try storage.saveTranscript(makeTranscript(), in: record)
+            let statusCollector = StatusCollector()
+            let chainCollector = ChainCollector()
+            let subtitleCollector = SubtitleCollector()
+            let processor = makeProcessor(
+                storage: storage,
+                enhancer: FakeEnhancer(
+                    isAvailable: true,
+                    result: EnhancementResult(notes: "notes", subtitle: subtitle)
+                ),
+                statusCollector: statusCollector,
+                chainCollector: chainCollector,
+                subtitleCollector: subtitleCollector
+            )
+
+            try await processor.execute(
+                ProcessingJob(kind: .enhance, meetingID: record.meeting.id), progress: { _ in }
+            )
+
+            let subtitles = await subtitleCollector.subtitles
+            #expect(subtitles.isEmpty)
+            let statuses = await statusCollector.all
+            #expect(statuses.last == .ready)
+        }
     }
 
     // MARK: 7. Enhance job, enhancer throws

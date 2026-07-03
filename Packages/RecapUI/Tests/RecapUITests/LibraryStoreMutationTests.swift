@@ -250,6 +250,23 @@ private actor ChangeCollector {
         #expect(store.record(for: record.meeting.id)?.meeting.preferredNotesView == nil)
     }
 
+    // MARK: updateSubtitle
+
+    @Test func updateSubtitlePersistsAndPostsChange() async throws {
+        let (store, storage, changeBus) = makeStore()
+        let record = try #require(store.startNewMeeting(title: "Meeting"))
+        let collector = ChangeCollector.make(changeBus)
+
+        store.updateSubtitle("Q3 budget approved, launch slips a week", for: record.meeting.id)
+
+        #expect(store.record(for: record.meeting.id)?.meeting.subtitle == "Q3 budget approved, launch slips a week")
+        let onDisk = try #require(try storage.loadAll().first { $0.meeting.id == record.meeting.id })
+        #expect(onDisk.meeting.subtitle == "Q3 budget approved, launch slips a week")
+
+        let changes = await collector.waitForCount(1)
+        #expect(changes == [.meetingChanged(record.meeting.id)])
+    }
+
     // MARK: renameSpeaker / loadSpeakerNames
 
     @Test func renameSpeakerPersistsAndPostsChange() async throws {

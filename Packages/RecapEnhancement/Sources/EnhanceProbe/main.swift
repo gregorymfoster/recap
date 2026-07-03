@@ -29,9 +29,12 @@ func run() async {
 
         print("enhancing (\(transcript.utterances.count) utterances, notes: \(notes.isEmpty ? "empty" : "\(notes.count) chars"))…")
         let started = Date.now
-        let enhanced = try await enhancer.enhance(rawNotes: notes, transcript: transcript)
+        let result = try await enhancer.enhance(rawNotes: notes, transcript: transcript)
         print(String(format: "done in %.1fs\n", Date.now.timeIntervalSince(started)))
-        print(enhanced)
+        if let subtitle = result.subtitle {
+            print("subtitle: \(subtitle)\n")
+        }
+        print(result.notes)
         exit(0)
     } catch {
         print("FAIL: \(error)")

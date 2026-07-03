@@ -44,6 +44,11 @@ public struct Meeting: Codable, Equatable, Identifiable, Sendable {
     /// for this meeting. Optional so pre-existing `meeting.json` files decode
     /// unchanged; nil defaults to showing Enhanced whenever it's available.
     public var preferredNotesView: NotesViewPreference?
+    /// A short, model-generated one-line subtitle summarizing the meeting,
+    /// produced during on-device enhancement. Optional so pre-existing
+    /// `meeting.json` files decode unchanged; nil when enhancement hasn't run
+    /// yet or subtitle generation failed/was skipped.
+    public var subtitle: String?
 
     public init(
         id: UUID = UUID(),
@@ -54,7 +59,8 @@ public struct Meeting: Codable, Equatable, Identifiable, Sendable {
         status: MeetingStatus = .recording,
         updatedAt: Date? = nil,
         lastBackupDate: Date? = nil,
-        preferredNotesView: NotesViewPreference? = nil
+        preferredNotesView: NotesViewPreference? = nil,
+        subtitle: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -65,5 +71,6 @@ public struct Meeting: Codable, Equatable, Identifiable, Sendable {
         self.updatedAt = updatedAt
         self.lastBackupDate = lastBackupDate
         self.preferredNotesView = preferredNotesView
+        self.subtitle = subtitle
     }
 }

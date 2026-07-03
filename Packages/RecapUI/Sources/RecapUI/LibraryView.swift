@@ -99,9 +99,11 @@ struct LibraryView: View {
                     .padding(.vertical, 1)
                     .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: 4))
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: 7))
+            .padding(.leading, 10)
+            .padding(.trailing, 8)
+            .frame(width: 220, height: 28)
+            .background(Tokens.chipBackground, in: Capsule())
+            .overlay(Capsule().stroke(Tokens.hairline, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .help("Search titles, notes, and transcripts")
@@ -119,9 +121,9 @@ struct LibraryView: View {
             }
             // stays: white text on the red Record button in both modes
             .foregroundStyle(.white)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 4)
-            .background(Tokens.recordRed, in: RoundedRectangle(cornerRadius: Tokens.radiusButton - 1))
+            .padding(.horizontal, 14)
+            .frame(height: 28)
+            .background(Tokens.recordRed, in: Capsule())
         }
         .buttonStyle(.plain)
         .keyboardShortcut("n", modifiers: .command)
@@ -142,16 +144,27 @@ struct LibraryView: View {
                 set: { library.filter.minDuration = $0 ? 900 : nil }
             ))
         } label: {
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Tokens.textSecondary)
-                if library.filter.isActive {
+            HStack(spacing: 4) {
+                ZStack(alignment: .topTrailing) {
                     Circle()
-                        .fill(Tokens.accentBlue)
-                        .frame(width: 6, height: 6)
-                        .offset(x: 7, y: -6)
+                        .fill(Tokens.chipBackground)
+                        .overlay(Circle().stroke(Tokens.hairline, lineWidth: 1))
+                        .frame(width: 28, height: 28)
+                        .overlay {
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(Tokens.textSecondary)
+                        }
+                    if library.filter.isActive {
+                        Circle()
+                            .fill(Tokens.accentBlue)
+                            .frame(width: 6, height: 6)
+                            .offset(x: 2, y: -2)
+                    }
                 }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Tokens.textTertiary)
             }
         }
         .menuStyle(.borderlessButton)
@@ -351,6 +364,12 @@ private struct MeetingRow: View {
                     .foregroundStyle(Tokens.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                if let subtitle = record.meeting.subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Tokens.textSecondary)
+                        .lineLimit(1)
+                }
                 Text(record.meeting.metaLine)
                     .font(.system(size: 11))
                     .foregroundStyle(Tokens.textSecondary)

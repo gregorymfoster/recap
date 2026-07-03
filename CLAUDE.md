@@ -99,7 +99,7 @@ scraping prose:
 
 - `transcribe-probe`: `{"ok":true,"mode":"file","utterances":12,"duration":31.2,"text":"…first 200 chars…"}`
 - `diarize-probe`: `{"ok":true,"speakers":2,"turns":9}`
-- `enhance-eval`: `{"ok":false,"cases":[{"name":"budget-sync","structure":true,"recall":true,"meta":true,"numbers":false}]}`
+- `enhance-eval`: `{"ok":false,"cases":[{"name":"budget-sync","structure":true,"recall":true,"meta":true,"numbers":false,"subtitle":true}]}`
 - `transcribe-eval`: `{"ok":true,"cases":[{"name":"meeting-fixture","wer":0.024,"maxWER":0.25,"passed":true}]}`
 
 Exit codes are unchanged by `--json`: `0` success, `1` failure, `64` usage error (`diarize-probe`

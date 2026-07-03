@@ -12,6 +12,7 @@ protocol EnhancerModel: Sendable {
     func summarize(digestText: String) async throws -> String
     func rewrite(line: String, digestText: String) async throws -> String
     func extraFacts(digestText: String, notesBlock: String) async throws -> [String]
+    func subtitle(digestText: String) async throws -> String
 }
 
 /// Real on-device model backend. Each method wraps exactly one
@@ -99,5 +100,31 @@ struct FoundationModelBackend: EnhancerModel {
         \(notesBlock)
         """
         return try await session.respond(to: prompt, generating: FoundationModelEnhancer.ExtraFacts.self).content.items
+    }
+
+    func subtitle(digestText: String) async throws -> String {
+        let session = LanguageModelSession(
+            instructions: """
+            You write a one-line subtitle for a meeting, from its digest of facts, \
+            decisions, and action items.
+
+            Rules: 6-10 words and under 80 characters — when the digest has many \
+            items, pick the one or two most important rather than listing them all; \
+            a sentence fragment, not a full sentence; no trailing \
+            period; name the actual topics, decisions, or outcomes discussed — never \
+            generic filler like "Team meeting" or "Weekly sync", and never meta-narration \
+            like "This meeting covers..." or "Discussion about...". Never mention the \
+            digest, notes, or these instructions.
+
+            Example digest: "- Budget approved at 40k for Q3. - Launch moved to Sept 12."
+            Good subtitle: Q3 budget approved, launch date moves to Sept 12
+            Bad subtitle: Team meeting about budget and launch (generic, not specific)
+            Bad subtitle: This meeting discusses the Q3 budget. (meta-narration, has a period)
+            """
+        )
+        return try await session.respond(
+            to: "Meeting digest:\n\(digestText)",
+            generating: FoundationModelEnhancer.MeetingSubtitle.self
+        ).content.text
     }
 }

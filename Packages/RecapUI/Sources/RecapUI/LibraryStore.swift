@@ -207,6 +207,14 @@ public final class LibraryStore {
         replace(record)
     }
 
+    /// Persists the one-line subtitle generated during on-device enhancement,
+    /// through the same metadata save path as every other mutation.
+    public func updateSubtitle(_ subtitle: String, for id: UUID) {
+        guard var record = record(for: id) else { return }
+        record.meeting.subtitle = subtitle
+        replace(record)
+    }
+
     private func replace(_ record: MeetingRecord) {
         var record = record
         record.meeting.updatedAt = .now
@@ -341,16 +349,20 @@ extension LibraryStore {
     /// Sample library matching the states in design mock 1c.
     public static func fixture() -> LibraryStore {
         let now = Date.now
-        func record(_ title: String, hoursAgo: Double, duration: TimeInterval, attendees: [String], status: MeetingStatus) -> MeetingRecord {
+        func record(_ title: String, hoursAgo: Double, duration: TimeInterval, attendees: [String], status: MeetingStatus, subtitle: String? = nil) -> MeetingRecord {
             MeetingRecord(
                 meeting: Meeting(
                     title: title, date: now.addingTimeInterval(-hoursAgo * 3600),
-                    duration: duration, attendees: attendees, status: status
+                    duration: duration, attendees: attendees, status: status,
+                    subtitle: subtitle
                 ),
                 folderURL: URL(filePath: "/dev/null")
             )
         }
-        let standup = record("Weekly standup", hoursAgo: 6, duration: 900, attendees: ["Maya", "Sam"], status: .ready)
+        let standup = record(
+            "Weekly standup", hoursAgo: 6, duration: 900, attendees: ["Maya", "Sam"], status: .ready,
+            subtitle: "Q3 draft shipped, onboarding usability pass assigned"
+        )
         // Canned transcript for the first ready meeting, so fixture runs can
         // exercise the transcript pane (avatars, speaker rename, seek UI).
         let standupTranscript = Transcript(
@@ -369,8 +381,14 @@ extension LibraryStore {
                 record("Customer call — Meridian", hoursAgo: 3, duration: 1_800, attendees: ["Alex"], status: .queued),
                 record("Budget review", hoursAgo: 4, duration: 1_320, attendees: ["Priya"], status: .needsModel),
                 standup,
-                record("1:1 with Sam", hoursAgo: 26, duration: 1_680, attendees: ["Sam"], status: .ready),
-                record("Pricing brainstorm", hoursAgo: 30, duration: 2_400, attendees: ["Maya", "Alex", "Priya"], status: .ready),
+                record(
+                    "1:1 with Sam", hoursAgo: 26, duration: 1_680, attendees: ["Sam"], status: .ready,
+                    subtitle: "Promotion timeline agreed, mentorship pairing starts next sprint"
+                ),
+                record(
+                    "Pricing brainstorm", hoursAgo: 30, duration: 2_400, attendees: ["Maya", "Alex", "Priya"], status: .ready,
+                    subtitle: "Usage-based tier wins, enterprise floor set at 20 seats"
+                ),
             ],
             queueSummary: QueueSummary(jobCount: 2, progress: 0.42),
             transcripts: [standup.meeting.id: standupTranscript]

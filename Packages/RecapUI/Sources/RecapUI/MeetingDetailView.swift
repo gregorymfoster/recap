@@ -279,8 +279,16 @@ struct MeetingDetailView: View {
                     .font(.system(size: 22, weight: .bold))
                     .kerning(-0.3)
                     .foregroundStyle(Tokens.textPrimary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
                 Spacer(minLength: 12)
                 notesModeToggle
+            }
+            if let subtitle = record.meeting.subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Tokens.textSecondary)
+                    .lineLimit(2)
             }
             if !record.meeting.attendees.isEmpty {
                 HStack(spacing: 6) {

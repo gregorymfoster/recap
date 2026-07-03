@@ -30,6 +30,9 @@ struct MeetingProcessor: JobExecutor {
     /// Announces a meeting is about to be exported, so other subscribers
     /// (folder mirror, future CloudKit sync) see the same completion signal.
     let changeBus: LibraryChangeBus
+    /// A one-line subtitle was generated for the meeting during enhancement;
+    /// nil subtitles from a failed/skipped generation never call this.
+    let onSubtitle: @Sendable (UUID, String) async -> Void
 
     func execute(_ job: ProcessingJob, progress: @escaping @Sendable (Double) -> Void) async throws {
         guard let record = try storage.loadAll().first(where: { $0.meeting.id == job.meetingID })
@@ -107,8 +110,14 @@ struct MeetingProcessor: JobExecutor {
             await onStatus(job.meetingID, .enhancing)
             let notes = (try? storage.loadNotes(in: record)) ?? ""
             do {
-                let enhanced = try await enhancer.enhance(rawNotes: notes, transcript: transcript)
-                try storage.saveEnhancedNotes(enhanced, in: record)
+                let result = try await enhancer.enhance(rawNotes: notes, transcript: transcript)
+                try storage.saveEnhancedNotes(result.notes, in: record)
+                // Defensive: other NoteEnhancer implementations might hand
+                // back an empty string; never persist one.
+                let subtitle = result.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let subtitle, !subtitle.isEmpty {
+                    await onSubtitle(job.meetingID, subtitle)
+                }
             } catch {
                 // Refused or failed twice — the meeting is still complete with
                 // its transcript; enhancement can be retried from the editor.
@@ -228,7 +237,10 @@ public final class QueueStore {
             chain: { @Sendable job in
                 await queueBox.queue?.enqueue(job)
             },
-            changeBus: changeBus
+            changeBus: changeBus,
+            onSubtitle: { @Sendable id, subtitle in
+                await library.updateSubtitle(subtitle, for: id)
+            }
         )
         let queue = ProcessingQueue(executor: processor, pausesOnBattery: settings.pausesOnBattery)
         self.queue = queue
