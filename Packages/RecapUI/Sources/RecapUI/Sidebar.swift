@@ -4,7 +4,6 @@ import SwiftUI
 public enum SidebarItem: String, CaseIterable, Identifiable {
     case library
     case models
-    case settings
 
     public var id: String { rawValue }
 
@@ -12,7 +11,6 @@ public enum SidebarItem: String, CaseIterable, Identifiable {
         switch self {
         case .library: "Library"
         case .models: "Models"
-        case .settings: "Settings"
         }
     }
 
@@ -20,17 +18,11 @@ public enum SidebarItem: String, CaseIterable, Identifiable {
         switch self {
         case .library: "rectangle.stack"
         case .models: "arrow.down.circle"
-        case .settings: "gearshape"
         }
     }
 }
 
 struct Sidebar: View {
-    /// Sidebar items that are actually navigable from the list (excludes
-    /// `.settings`, which per the v2 design lives in its own window — the
-    /// `SidebarItem` case itself stays, since `AppRouter`/menu-bar/toast "Open
-    /// Settings" actions outside this file still route through
-    /// `router.section = .settings`).
     private static let visibleItems: [SidebarItem] = [.library, .models]
 
     @Binding var selection: SidebarItem?

@@ -115,8 +115,6 @@ public struct RootView: View {
             }
         case .models:
             ModelManagerView()
-        case .settings:
-            SettingsView()
         }
     }
 }

@@ -28,8 +28,12 @@ struct TranscriptPane: View {
     /// fight the user. Simple wall-clock check rather than a running timer —
     /// no per-frame work, just a timestamp compared on the next position tick.
     @State private var lastManualScrollAt: Date?
+    /// Stamped by `followPlayback` right before its own `scrollTo`, so the
+    /// offset change *we* cause isn't misread as the user scrolling away.
+    @State private var lastAutoScrollAt: Date?
 
     private static let manualScrollGrace: TimeInterval = 3
+    private static let autoScrollSettle: TimeInterval = 0.5
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -76,12 +80,9 @@ struct TranscriptPane: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
+                    // No standalone speaker-change label — every row carries
+                    // its own avatar + name per design handoff v2 §6b.
                     ForEach(Array(utterances.enumerated()), id: \.element.id) { index, utterance in
-                        let previous = index > 0 ? utterances[index - 1].speakerID : nil
-                        if let speaker = utterance.speakerID, speaker != previous {
-                            speakerLabel(speaker)
-                                .padding(.top, index > 0 ? 6 : 0)
-                        }
                         row(utterance, isCurrent: index == currentUtteranceIndex)
                             .id(utterance.id)
                     }
@@ -99,6 +100,7 @@ struct TranscriptPane: View {
                 .padding(.bottom, 16)
                 .background(scrollDetector)
             }
+            .coordinateSpace(name: "transcriptScroll")
             .onChange(of: utterances.count) {
                 withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
             }
@@ -121,10 +123,14 @@ struct TranscriptPane: View {
             Color.clear
                 .onChange(of: proxy.frame(in: .named("transcriptScroll")).minY) { oldValue, newValue in
                     guard isFollowingPlayback, abs(newValue - oldValue) > 1 else { return }
+                    // Offset moved because followPlayback just scrolled —
+                    // not the user; don't start the manual-scroll grace.
+                    if let lastAutoScrollAt, Date.now.timeIntervalSince(lastAutoScrollAt) < Self.autoScrollSettle {
+                        return
+                    }
                     lastManualScrollAt = .now
                 }
         }
-        .coordinateSpace(name: "transcriptScroll")
     }
 
     /// True once we've established the transcript is being driven by
@@ -139,6 +145,7 @@ struct TranscriptPane: View {
         if let lastManualScrollAt, Date.now.timeIntervalSince(lastManualScrollAt) < Self.manualScrollGrace {
             return
         }
+        lastAutoScrollAt = .now
         withAnimation(.easeOut(duration: 0.25)) {
             proxy.scrollTo(utterances[index].id, anchor: .center)
         }

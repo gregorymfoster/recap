@@ -276,7 +276,7 @@ public struct MenuBarContent: View {
     }
 
     private func openSettings() {
-        stores.openMainWindow(section: .settings, openWindow: { openWindow(id: $0) })
+        SettingsOpener.open()
         dismiss()
     }
 

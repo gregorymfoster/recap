@@ -306,8 +306,8 @@ public final class AppStores {
                 // all; there's nothing worth transcribing.
                 toasts.show(
                     RecapCopy.noAudioAccessMessage, actionTitle: "Open Settings"
-                ) { [weak self] in
-                    self?.router.section = .settings
+                ) {
+                    SettingsOpener.open()
                     PrivacyPane.open(PrivacyPane.microphone)
                 }
             case .proceed(let includeMic, let includeSystemAudio):
@@ -329,8 +329,8 @@ public final class AppStores {
                     library.markError(record, message: "Microphone access denied")
                     toasts.show(
                         "Microphone access denied", actionTitle: "Open Settings"
-                    ) { [weak self] in
-                        self?.router.section = .settings
+                    ) {
+                        SettingsOpener.open()
                         PrivacyPane.open(PrivacyPane.microphone)
                     }
                 } else if let message = session.startFailureMessage {
@@ -342,16 +342,16 @@ public final class AppStores {
                     toasts.show(
                         "Microphone access off — recording system audio only",
                         actionTitle: "Open Settings"
-                    ) { [weak self] in
-                        self?.router.section = .settings
+                    ) {
+                        SettingsOpener.open()
                         PrivacyPane.open(PrivacyPane.microphone)
                     }
                 } else if session.systemAudioUnavailable {
                     settings.lastSystemAudioTapFailed = true
                     toasts.show(
                         RecapCopy.systemAudioUnavailableMessage, actionTitle: "Open Settings"
-                    ) { [weak self] in
-                        self?.router.section = .settings
+                    ) {
+                        SettingsOpener.open()
                         PrivacyPane.open(PrivacyPane.systemAudio)
                     }
                 } else if includeSystemAudio {

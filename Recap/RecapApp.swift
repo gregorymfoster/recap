@@ -23,6 +23,10 @@ struct RecapApp: App {
     /// as prod — no dev-build special-casing needed.
     private let floatingIndicator: FloatingIndicatorController
 
+    /// Backs the Settings window's launch-at-login toggle (a thin
+    /// `SMAppService` wrapper with no shared state).
+    private let launchAtLogin = LaunchAtLoginController()
+
     init() {
         let stores = AppStores()
         _stores = State(initialValue: stores)
@@ -45,9 +49,6 @@ struct RecapApp: App {
                     CheckForUpdatesView(updater: updater.updater)
                 }
             }
-            CommandGroup(replacing: .appSettings) {
-                SettingsCommand(stores: stores)
-            }
             CommandGroup(after: .newItem) {
                 Button("Import Audio…") {
                     let panel = NSOpenPanel()
@@ -63,11 +64,29 @@ struct RecapApp: App {
             }
         }
 
+        // Native ⌘, Settings window (design handoff 7c) — toolbar icon tabs,
+        // window title tracks the active tab. Injects the same environment
+        // values `RootView` provides, since the tabs read stores the same way.
+        Settings {
+            SettingsWindowView()
+                .environment(stores)
+                .environment(stores.library)
+                .environment(stores.session)
+                .environment(stores.models)
+                .environment(stores.settings)
+                .environment(stores.queue)
+                .environment(stores.router)
+                .environment(launchAtLogin)
+        }
+
         MenuBarExtra {
             MenuBarContent(stores: stores)
         } label: {
             MenuBarLabel(stores: stores)
         }
+        // Rich popover content (design handoff 8a) — `.menu` style can't
+        // render the header block, progress rows, or quick actions.
+        .menuBarExtraStyle(.window)
     }
 }
 
@@ -128,28 +147,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // `stopRecording()` is fire-and-forget internally (it awaits
                 // the recorder inside its own Task); give it a beat to reach
                 // `session.activeRecord == nil` before replying, so a slow
-                // write never races app exit.
-                while stores.session.activeRecord != nil {
+                // write never races app exit. Bounded so a wedged stop flow
+                // can't leave the app hung in terminate-later forever — the
+                // spool on disk is salvageable at next launch either way.
+                let deadline = ContinuousClock.now + .seconds(15)
+                while stores.session.activeRecord != nil, ContinuousClock.now < deadline {
                     try? await Task.sleep(for: .milliseconds(50))
                 }
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
             return .terminateLater
         }
-    }
-}
-
-/// "Settings…" (⌘,) — routes to the Settings sidebar section and brings the
-/// main window forward, matching the same entry point the menu bar exposes.
-private struct SettingsCommand: View {
-    @Environment(\.openWindow) private var openWindow
-    let stores: AppStores
-
-    var body: some View {
-        Button("Settings…") {
-            stores.openMainWindow(section: .settings, openWindow: { openWindow(id: $0) })
-        }
-        .keyboardShortcut(",", modifiers: .command)
     }
 }
 

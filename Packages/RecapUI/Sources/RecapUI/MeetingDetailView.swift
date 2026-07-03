@@ -102,6 +102,11 @@ struct MeetingDetailView: View {
                 if savedTranscript?.utterances.isEmpty == false {
                     showTranscript = true
                 }
+                // A meeting that finishes while open gains playable audio —
+                // dock the player without requiring a navigate-away-and-back.
+                if !playback.hasAudio, hasPlayableAudio {
+                    playback.load(url: record.audioURL)
+                }
             }
         }
         .onChange(of: notes) {
