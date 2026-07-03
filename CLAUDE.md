@@ -35,8 +35,10 @@ writes, no processing queue. Use for UI work and screenshots.
 Debug builds produce a fully independent **Recap Dev.app** (`com.gregfoster.recap.dev`) so a prod
 install and a dev build can coexist: separate TCC permission grants, separate UserDefaults,
 meetings in `~/Recap Dev` instead of `~/Recap`, and its own search index. Sparkle auto-update is
-never constructed in dev — a dev build must never update itself into the prod app. Release builds
-(and `Scripts/release.sh`) are unchanged: `com.gregfoster.recap`, plain `Recap.app`.
+never constructed in dev — a dev build must never update itself into the prod app. It also carries
+a distinct orange "DEV" app icon (`AppIcon-Dev` asset, Debug-only via
+`ASSETCATALOG_COMPILER_APPICON_NAME`) so the two are tellable apart in the Dock. Release builds
+(and `Scripts/release.sh`) are unchanged: `com.gregfoster.recap`, plain `Recap.app`, blue icon.
 
 Install/update it as a normal app (builds signed — unsigned binaries won't launch on Apple
 Silicon, and a stable signature keeps the dev app's TCC grants across rebuilds):
