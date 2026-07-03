@@ -101,18 +101,36 @@ xcrun notarytool submit "$DMG" \
   --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER" --wait
 xcrun stapler staple "$DMG"
 
+echo "==> GitHub release"
+# Publish the release BEFORE pushing the appcast: the appcast goes live the
+# moment it lands on GitHub Pages, and a draft release's assets 404 publicly —
+# every installed app would hit "Update Error!" until the draft is published.
+git add project.yml Recap/Info.plist
+git commit -m "Release v$VERSION"
+git tag "v$VERSION"
+git push origin main "v$VERSION"
+gh release create "v$VERSION" "$DMG" --title "Recap $VERSION" --generate-notes
+
+echo "==> Verify download URL"
+DOWNLOAD_URL="https://github.com/gregorymfoster/recap/releases/download/v$VERSION/Recap-$VERSION.dmg"
+for i in $(seq 1 30); do
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" -L -r 0-0 "$DOWNLOAD_URL")
+  [[ "$CODE" == 200 || "$CODE" == 206 ]] && break
+  echo "  $DOWNLOAD_URL -> $CODE, retrying ($i/30)…"
+  sleep 10
+done
+if [[ "$CODE" != 200 && "$CODE" != 206 ]]; then
+  echo "Release asset never became downloadable ($CODE); NOT publishing appcast." >&2
+  exit 1
+fi
+
 echo "==> Appcast"
 "$SPARKLE_BIN/generate_appcast" dist/ --download-url-prefix \
   "https://github.com/gregorymfoster/recap/releases/download/v$VERSION/"
 cp dist/appcast.xml docs/appcast.xml
-
-echo "==> Draft GitHub release"
-git add project.yml Recap/Info.plist docs/appcast.xml
-git commit -m "Release v$VERSION"
-git tag "v$VERSION"
-git push origin main "v$VERSION"
-gh release create "v$VERSION" "$DMG" --draft --title "Recap $VERSION" --generate-notes
+git add docs/appcast.xml
+git commit -m "Publish appcast for v$VERSION"
+git push origin main
 
 echo
-echo "Draft release created. Test the DMG on a clean account, then publish:"
-echo "  gh release edit v$VERSION --draft=false"
+echo "Release v$VERSION published; appcast is live."
