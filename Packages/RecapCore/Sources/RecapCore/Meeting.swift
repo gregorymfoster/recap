@@ -15,6 +15,15 @@ public enum MeetingStatus: Codable, Equatable, Sendable {
     case error(message: String)
 }
 
+/// Which notes view the user last chose to look at for a meeting with
+/// enhanced notes. `nil` (the default, both on a fresh `Meeting` and when
+/// decoding older `meeting.json` files written before this field existed)
+/// means "default to Enhanced whenever it's available."
+public enum NotesViewPreference: String, Codable, Equatable, Sendable {
+    case enhanced
+    case original
+}
+
 public struct Meeting: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
     public var title: String
@@ -31,6 +40,10 @@ public struct Meeting: Codable, Equatable, Identifiable, Sendable {
     /// it never has. Optional so pre-existing `meeting.json` files decode
     /// unchanged.
     public var lastBackupDate: Date?
+    /// The user's last explicit choice between enhanced and original notes
+    /// for this meeting. Optional so pre-existing `meeting.json` files decode
+    /// unchanged; nil defaults to showing Enhanced whenever it's available.
+    public var preferredNotesView: NotesViewPreference?
 
     public init(
         id: UUID = UUID(),
@@ -40,7 +53,8 @@ public struct Meeting: Codable, Equatable, Identifiable, Sendable {
         attendees: [String] = [],
         status: MeetingStatus = .recording,
         updatedAt: Date? = nil,
-        lastBackupDate: Date? = nil
+        lastBackupDate: Date? = nil,
+        preferredNotesView: NotesViewPreference? = nil
     ) {
         self.id = id
         self.title = title
@@ -50,5 +64,6 @@ public struct Meeting: Codable, Equatable, Identifiable, Sendable {
         self.status = status
         self.updatedAt = updatedAt
         self.lastBackupDate = lastBackupDate
+        self.preferredNotesView = preferredNotesView
     }
 }

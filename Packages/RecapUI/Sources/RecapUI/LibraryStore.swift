@@ -191,6 +191,14 @@ public final class LibraryStore {
         replace(record)
     }
 
+    /// Persists the user's explicit Enhanced/My notes choice (design handoff
+    /// v2 §8c) through the same metadata save path as every other mutation.
+    public func setPreferredNotesView(_ preference: NotesViewPreference?, for id: UUID) {
+        guard var record = record(for: id) else { return }
+        record.meeting.preferredNotesView = preference
+        replace(record)
+    }
+
     private func replace(_ record: MeetingRecord) {
         var record = record
         record.meeting.updatedAt = .now

@@ -26,6 +26,19 @@ struct MeetingDetailView: View {
         session.activeRecord?.meeting.id == record.meeting.id
     }
 
+    /// True once this meeting is done recording and its audio file is a real,
+    /// playable file on disk (fixture records point at `/dev/null`, which
+    /// exists but isn't a regular file — treated as "no audio").
+    private var hasPlayableAudio: Bool {
+        guard !isLiveMeeting else { return false }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: record.audioURL.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
+            return false
+        }
+        let resourceValues = try? record.audioURL.resourceValues(forKeys: [.isRegularFileKey])
+        return resourceValues?.isRegularFile ?? false
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
@@ -42,10 +55,13 @@ struct MeetingDetailView: View {
                 editor
                     .frame(minWidth: 320)
             }
-            statusBar
+            bottomBar
         }
         .environment(playback)
         .toolbar {
+            ToolbarItem {
+                copyNotesButton
+            }
             ToolbarItem {
                 Toggle(isOn: $showTranscript) {
                     Label("Transcript", systemImage: "text.quote")
@@ -57,12 +73,22 @@ struct MeetingDetailView: View {
             notes = library.loadNotes(for: record)
             savedTranscript = library.loadTranscript(for: record)
             enhancedNotes = library.loadEnhancedNotes(for: record)
-            showingOriginal = false
+            showingOriginal = record.meeting.preferredNotesView == .original
             // Default to the split view whenever there's a transcript to show —
             // live meetings (text appears as it's spoken) and finished ones
             // (transcript lands next to the summary without hunting for the
             // toggle). The toolbar toggle still hides it.
             showTranscript = isLiveMeeting || savedTranscript?.utterances.isEmpty == false
+
+            // Playback docking (design handoff v2 §8d): a finished meeting
+            // with real audio on disk loads into the shared PlaybackStore so
+            // the player bar can dock where the status bar sits; anything
+            // else (still recording, or no audio file) unloads it.
+            if hasPlayableAudio {
+                playback.load(url: record.audioURL)
+            } else {
+                playback.unload()
+            }
         }
         .task(id: record.meeting.status) {
             // Refresh once the pipeline lands results (status flips to ready).
@@ -100,13 +126,21 @@ struct MeetingDetailView: View {
             header
                 .padding(.horizontal, 40)
                 .padding(.top, 26)
+            if case .enhancing = record.meeting.status {
+                enhancingBanner
+                    .padding(.horizontal, 40)
+                    .padding(.top, 16)
+            }
             if let enhancedNotes, !showingOriginal {
                 EnhancedNotesView(markdown: enhancedNotes)
                     .padding(.top, 8)
+                enhancedCaption
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 16)
             } else {
                 TextEditor(text: $notes)
                     .font(Tokens.body)
-                    .foregroundStyle(Tokens.textBody)
+                    .foregroundStyle(enhancedNotes != nil ? Tokens.textSecondary : Tokens.textBody)
                     .lineSpacing(7)
                     .scrollContentBackground(.hidden)
                     .padding(.horizontal, 34)
@@ -123,7 +157,8 @@ struct MeetingDetailView: View {
     }
 
     /// Copies whatever the editor pane is showing right now: the enhanced
-    /// summary markdown, or the raw notes.
+    /// summary markdown, or the raw notes. Lives in the window toolbar next
+    /// to the transcript toggle (design handoff v2 §6b).
     @ViewBuilder
     private var copyNotesButton: some View {
         let displayed = isShowingEnhanced ? (enhancedNotes ?? "") : notes
@@ -134,54 +169,109 @@ struct MeetingDetailView: View {
         }
     }
 
-    /// "✨ Enhanced / My original notes" switcher, shown once enhancement exists.
-    @ViewBuilder
-    private var notesModeToggle: some View {
-        if enhancedNotes != nil {
+    /// Blue-tinted banner shown while this meeting's notes are being
+    /// enhanced on-device; raw notes remain visible/editable below at
+    /// reduced emphasis. Design handoff v2 §8c.
+    private var enhancingBanner: some View {
+        HStack(spacing: 9) {
+            ProgressView()
+                .controlSize(.small)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Enhancing your notes from the transcript")
+                    .font(Tokens.caption.weight(.semibold))
+                    .foregroundStyle(Tokens.accentBlue)
+                Text("On-device · your notes stay untouched below")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Tokens.textSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
+        .background(Tokens.accentBlue.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
+        .overlay {
+            RoundedRectangle(cornerRadius: 9)
+                .strokeBorder(Tokens.accentBlue.opacity(0.2))
+        }
+    }
+
+    /// "✨ Enhanced from the transcript" + Undo, shown under the enhanced
+    /// content. Undo is non-destructive — it only switches the active view
+    /// back to My notes; the enhanced notes stay one click away.
+    private var enhancedCaption: some View {
+        HStack(spacing: 6) {
+            Text("✨ Enhanced from the transcript")
+                .font(.system(size: 10.5))
+                .foregroundStyle(Tokens.textTertiary)
+                .fixedSize(horizontal: true, vertical: false)
             Button {
-                showingOriginal.toggle()
+                setNotesView(.original)
             } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: showingOriginal ? "sparkles" : "pencil")
-                        .font(.system(size: 9))
-                    Text(showingOriginal ? "View enhanced" : "My original notes")
-                        .font(Tokens.microLabel)
-                }
-                .foregroundStyle(Tokens.accentBlue)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Tokens.accentBlue.opacity(0.08), in: Capsule())
+                Text("Undo")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(Tokens.accentBlue)
             }
             .buttonStyle(.plain)
         }
+    }
+
+    /// "✨ Enhanced / My notes" native segmented control, top-right of the
+    /// notes column once enhanced notes exist. Design handoff v2 §8c.
+    @ViewBuilder
+    private var notesModeToggle: some View {
+        if enhancedNotes != nil {
+            Picker("", selection: Binding(
+                get: { showingOriginal ? NotesViewPreference.original : .enhanced },
+                set: { setNotesView($0) }
+            )) {
+                Text("✨ Enhanced").tag(NotesViewPreference.enhanced)
+                Text("My notes").tag(NotesViewPreference.original)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+        }
+    }
+
+    /// Switches the active notes view and persists the choice per meeting
+    /// (nil default means "prefer Enhanced whenever available" — selecting
+    /// Enhanced explicitly stores nil rather than `.enhanced` so a later
+    /// meeting without enhancement doesn't inherit a stale "original" habit
+    /// while still recording today's explicit choice).
+    private func setNotesView(_ preference: NotesViewPreference) {
+        showingOriginal = preference == .original
+        library.setPreferredNotesView(preference == .original ? .original : nil, for: record.meeting.id)
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Text(record.meeting.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
-                    .font(Tokens.caption)
+                    .font(.system(size: 11))
                     .foregroundStyle(Tokens.textSecondary)
+                    .lineLimit(1)
+                    .fixedSize()
                 OnDeviceBadge()
+                    .fixedSize()
                 if session.systemAudioUnavailable, isLiveMeeting {
                     Text(RecapCopy.systemAudioUnavailableMessage)
                         .font(Tokens.microLabel)
                         .foregroundStyle(Tokens.warningAmberText)
                 }
             }
-            HStack(spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(record.meeting.title)
-                    .font(Tokens.pageTitle)
-                    .kerning(-0.4)
+                    .font(.system(size: 22, weight: .bold))
+                    .kerning(-0.3)
                     .foregroundStyle(Tokens.textPrimary)
+                Spacer(minLength: 12)
                 notesModeToggle
-                copyNotesButton
             }
             if !record.meeting.attendees.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(record.meeting.attendees, id: \.self) { attendee in
                         Text(attendee)
-                            .font(Tokens.caption)
+                            .font(.system(size: 11))
                             .foregroundStyle(Tokens.textSecondary)
                             .padding(.horizontal, 9)
                             .padding(.vertical, 3)
@@ -196,8 +286,9 @@ struct MeetingDetailView: View {
         }
     }
 
-    /// Input-device selector + a transient note when a mid-recording switch
-    /// lands, shown only in the live meeting's header.
+    /// Input-device selector, shown only in the live meeting's header. The
+    /// transient input-switch note is now routed to a toast by another
+    /// package; `session.inputSwitchNote` itself stays for that consumer.
     private var liveInputRow: some View {
         @Bindable var settings = settings
         return HStack(spacing: 10) {
@@ -216,29 +307,40 @@ struct MeetingDetailView: View {
             .onChange(of: settings.preferredInputUID) {
                 session.setPreferredInputUID(settings.preferredInputUID)
             }
-            if let note = session.inputSwitchNote {
-                Text(note)
-                    .font(Tokens.microLabel)
-                    .foregroundStyle(Tokens.successGreenText)
-                    .transition(.opacity)
-            } else if let name = session.activeInputDeviceName {
+            if let name = session.activeInputDeviceName {
                 Text(name)
                     .font(Tokens.caption)
                     .foregroundStyle(Tokens.textTertiary)
             }
         }
-        .animation(.easeOut(duration: 0.2), value: session.inputSwitchNote)
         .padding(.top, 2)
     }
 
+    /// Docks the player bar where the status bar sits once this meeting has
+    /// playable audio (design handoff v2 §8d); otherwise the quiet status
+    /// bar. Both hide entirely while this meeting is actively recording —
+    /// the in-window recording pill overlays that area.
+    @ViewBuilder
+    private var bottomBar: some View {
+        if isLiveMeeting {
+            EmptyView()
+        } else if playback.hasAudio {
+            PlayerBar(playback: playback)
+                .background(Tokens.subtleBackground.opacity(0.9))
+                .overlay(alignment: .top) { Divider() }
+        } else {
+            statusBar
+        }
+    }
+
+    /// Quiet single-line status bar (global decision #5): active model name
+    /// + priority on the left, save location on the right. No status chips.
     private var statusBar: some View {
         HStack(spacing: 14) {
-            Text(models.activeModel.map { "\($0.displayName) · \($0.languages)" } ?? "No model installed")
-            Text("·")
-            Text("CPU: low-priority")
+            Text(models.activeModel.map { "\($0.displayName) · low priority" } ?? "No model installed")
             Spacer()
             if case .ready = record.meeting.status {
-                persistenceChips
+                Text("Saved · \(library.saveLocationLabel)")
             } else {
                 Text("Saving to \(library.saveLocationLabel)")
             }
@@ -249,46 +351,6 @@ struct MeetingDetailView: View {
         .padding(.vertical, 6)
         .background(Tokens.subtleBackground.opacity(0.9))
         .overlay(alignment: .top) { Divider() }
-    }
-
-    /// Once a meeting is `.ready`, the trailing "Saving to …" text upgrades to
-    /// truthful chips: always a "Saved" chip (the folder exists on disk), plus
-    /// "Backed up" only after the folder mirror actually succeeded. With
-    /// backup disabled, a quiet "Local only" note — informative, not alarming.
-    private var persistenceChips: some View {
-        HStack(spacing: 8) {
-            persistenceChip("Saved")
-                .help("Saved in \(record.folderURL.path)")
-            if let backupDate = record.meeting.lastBackupDate {
-                persistenceChip("Backed up")
-                    .help("Backed up to \(backupLocationLabel) · \(backupDate.formatted(.relative(presentation: .named)))")
-            } else if !settings.mirrorBackupEnabled || settings.mirrorFolderPath.isEmpty {
-                Text("Local only")
-                    .foregroundStyle(Tokens.textTertiary)
-            }
-        }
-    }
-
-    /// Green-check chip, styled after `MeetingStatusView`'s chips.
-    private func persistenceChip(_ label: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 9))
-            Text(label)
-                .font(Tokens.caption.weight(.semibold))
-        }
-        .foregroundStyle(Tokens.successGreenText)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(Tokens.successGreenTint, in: RoundedRectangle(cornerRadius: Tokens.radiusChip))
-    }
-
-    /// "~/…"-abbreviated mirror-backup destination, like `saveLocationLabel`.
-    private var backupLocationLabel: String {
-        let path = settings.mirrorFolderPath
-        guard !path.isEmpty else { return "backup folder" }
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 }
 
