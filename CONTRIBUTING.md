@@ -28,7 +28,9 @@ Each package tests independently:
 cd Packages/RecapCore && swift test
 ```
 
-Anything below the UI (storage, queue logic, chunking, download state machines) should be protocol-isolated and unit-tested. Audio-hardware and LLM layers are verified manually — describe your manual test in the PR.
+Or run every package's suite at once with `./Scripts/test.sh`.
+
+Anything below the UI (storage, queue logic, chunking, download state machines) should be protocol-isolated and unit-tested. Audio-hardware and LLM layers are verified manually with the probes under `Packages/*/Sources/*Probe` (e.g. `capture-probe`, `transcribe-probe`, `diarize-probe`, `enhance-probe`, `enhance-eval` — see `Fixtures/README.md` and `CLAUDE.md` for exact commands) — describe your manual test in the PR.
 
 ## Pull requests
 

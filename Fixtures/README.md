@@ -28,3 +28,11 @@
   Metrics: structure (one bullet per note line), recall (expected specifics
   present), meta (no narration), numbers (no digits absent from the source —
   hallucination proxy), dupes ("Also discussed" restating a note bullet).
+
+  To enhance a single transcript/notes pair manually (e.g. one of the
+  `enhance/` cases) and inspect the raw output, use `enhance-probe` instead —
+  needs Apple Intelligence enabled on this Mac (exits 2 if unavailable):
+
+  ```sh
+  swift run --package-path Packages/RecapEnhancement enhance-probe <transcript.json> [notes.md]
+  ```

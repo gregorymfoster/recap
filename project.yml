@@ -83,3 +83,11 @@ schemes:
       config: Debug
     archive:
       config: Release
+  Recap (Fixtures):
+    build:
+      targets:
+        Recap: all
+    run:
+      config: Debug
+      commandLineArguments:
+        "-fixtures": true

@@ -18,6 +18,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Select Xcode 26
         run: sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+      - name: Cache SPM build
+        uses: actions/cache@v4
+        with:
+          path: |
+            Packages/${{ matrix.package }}/.build
+          key: spm-${{ matrix.package }}-${{ hashFiles(format('Packages/{0}/Package.swift', matrix.package)) }}
       - name: Test ${{ matrix.package }}
         run: swift test --package-path Packages/${{ matrix.package }}
 
@@ -28,6 +34,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Select Xcode 26
         run: sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+      - name: Cache build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData
+            .build
+          key: app-build-${{ hashFiles('project.yml', 'Packages/*/Package.swift') }}
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate project
