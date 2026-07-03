@@ -7,6 +7,28 @@ import RecapTranscription
 
 private let storesLog = Logger(subsystem: "com.gregfoster.recap", category: "AppStores")
 
+/// Seam over `CalendarWatcher`, matching its real `start()`/`stop()` shape.
+/// `CalendarWatcher` conforms below; tests inject a fake to drive
+/// `meetingEventStarting` without EventKit permissions.
+@MainActor
+public protocol MeetingEventWatching: AnyObject {
+    /// Requests calendar access if needed and begins watching. Returns false
+    /// when the user has denied access.
+    @discardableResult
+    func start() async -> Bool
+    func stop()
+}
+
+/// Seam over `RecordPrompter`, matching its real shape. Tests inject a fake
+/// to observe prompt calls without posting real notifications.
+@MainActor
+public protocol RecordPrompting: AnyObject {
+    func promptToRecord(_ event: CalendarEventSnapshot)
+}
+
+extension CalendarWatcher: MeetingEventWatching {}
+extension RecordPrompter: RecordPrompting {}
+
 /// App-lifetime store graph, constructed exactly once (held by the App struct).
 ///
 /// SwiftUI re-initializes view values freely, so building stores in a view's
@@ -37,17 +59,23 @@ public final class AppStores {
 
     /// ⌥⌘R anywhere toggles recording. nil when another app owns the combo.
     @ObservationIgnored private var recordHotKey: GlobalHotKey?
-    @ObservationIgnored private var calendarWatcher: CalendarWatcher?
-    @ObservationIgnored private var recordPrompter: RecordPrompter?
+    @ObservationIgnored private var calendarWatcher: MeetingEventWatching?
+    @ObservationIgnored private var recordPrompter: RecordPrompting?
+    /// Factories for the calendar seam, defaulting to the real types in the
+    /// production path; tests substitute fakes via the injected init.
+    @ObservationIgnored private let makeCalendarWatcher: (@escaping @MainActor (CalendarEventSnapshot) -> Void) -> MeetingEventWatching
+    @ObservationIgnored private let makeRecordPrompter: (@escaping @MainActor (CalendarEventSnapshot) -> Void) -> RecordPrompting
     /// True when calendar auto-record is enabled in Settings but macOS
     /// calendar access was denied — surfaced as a warning there.
     public private(set) var calendarAccessDenied = false
     /// Per-meeting debounce for the change-bus-driven re-export consumer:
-    /// each `.meetingChanged` cancels and restarts a ~5s sleep before the
-    /// enabled exporters actually run, so rapid edits coalesce into one
-    /// export instead of one per keystroke-flush.
+    /// each `.meetingChanged` cancels and restarts a debounce sleep
+    /// (`exportDebounce`, 5s in production) before the enabled exporters
+    /// actually run, so rapid edits coalesce into one export instead of one
+    /// per keystroke-flush.
     @ObservationIgnored private var exportDebounceTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var changeBusConsumerTask: Task<Void, Never>?
+    @ObservationIgnored private let exportDebounce: Duration
 
     /// Disk-backed graph used by the app. `-fixtures` swaps in sample data
     /// for UI work and screenshots (no queue — fixtures never process).
@@ -60,6 +88,9 @@ public final class AppStores {
             queue = nil
             storage = nil
             changeBus = LibraryChangeBus()
+            exportDebounce = .seconds(5)
+            makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
+            makeRecordPrompter = { RecordPrompter(onRecord: $0) }
         } else {
             let settings = SettingsStore()
             let storage = LibraryStorage(rootURL: settings.saveRootURL)
@@ -73,6 +104,9 @@ public final class AppStores {
             self.storage = storage
             self.changeBus = changeBus
             session = MeetingSessionStore()
+            exportDebounce = .seconds(5)
+            makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
+            makeRecordPrompter = { RecordPrompter(onRecord: $0) }
             let toasts = toasts
             queue = QueueStore(
                 library: library, storage: storage, models: models, changeBus: changeBus,
@@ -109,6 +143,64 @@ public final class AppStores {
         queue = nil
         storage = nil
         changeBus = LibraryChangeBus()
+        exportDebounce = .seconds(5)
+        makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
+        makeRecordPrompter = { RecordPrompter(onRecord: $0) }
+    }
+
+    /// Test/fixture seam: every dependency injectable, side-effectful
+    /// registrations (hot key, calendar watcher) optional. The disk-backed
+    /// `init()` above keeps its own construction (it needs the hot-key and
+    /// `onAutoStop` wiring the production path relies on) but shares this
+    /// initializer's storage/behavior contract — the change-bus consumer
+    /// runs here too whenever `storage != nil`, which is what `AppStoresTests`
+    /// exercises.
+    init(
+        settings: SettingsStore,
+        storage: LibraryStorage?,
+        library: LibraryStore,
+        models: WhisperModelManager,
+        session: MeetingSessionStore,
+        queue: QueueStore?,
+        changeBus: LibraryChangeBus,
+        registersHotKey: Bool = false,
+        exportDebounce: Duration = .seconds(5),
+        makeCalendarWatcher: @escaping (@escaping @MainActor (CalendarEventSnapshot) -> Void) -> MeetingEventWatching = { CalendarWatcher(onMeetingStarting: $0) },
+        makeRecordPrompter: @escaping (@escaping @MainActor (CalendarEventSnapshot) -> Void) -> RecordPrompting = { RecordPrompter(onRecord: $0) }
+    ) {
+        self.settings = settings
+        self.storage = storage
+        self.library = library
+        self.models = models
+        self.session = session
+        self.queue = queue
+        self.changeBus = changeBus
+        self.exportDebounce = exportDebounce
+        self.makeCalendarWatcher = makeCalendarWatcher
+        self.makeRecordPrompter = makeRecordPrompter
+
+        if registersHotKey {
+            recordHotKey = GlobalHotKey(keyCode: kVK_ANSI_R, modifiers: cmdKey | optionKey) { [weak self] in
+                self?.toggleRecording()
+            }
+            if recordHotKey == nil {
+                storesLog.error("⌥⌘R global hot key registration failed (taken by another app?)")
+            } else {
+                storesLog.info("⌥⌘R global hot key registered")
+            }
+            applyCalendarAutoRecordSetting()
+            let toasts = toasts
+            let session = session
+            session.onAutoStop = { [weak self] in
+                if let message = session.recordingFailureMessage {
+                    toasts.show(message)
+                }
+                self?.stopRecording()
+            }
+        }
+        if storage != nil {
+            startChangeBusConsumer()
+        }
     }
 
     // MARK: Recording control
@@ -252,12 +344,12 @@ public final class AppStores {
             return
         }
         if calendarWatcher == nil {
-            calendarWatcher = CalendarWatcher { [weak self] event in
+            calendarWatcher = makeCalendarWatcher { [weak self] event in
                 self?.meetingEventStarting(event)
             }
         }
         if recordPrompter == nil {
-            recordPrompter = RecordPrompter { [weak self] event in
+            recordPrompter = makeRecordPrompter { [weak self] event in
                 self?.startRecording(for: event)
             }
         }
@@ -267,7 +359,9 @@ public final class AppStores {
         }
     }
 
-    private func meetingEventStarting(_ event: CalendarEventSnapshot) {
+    /// Internal (not private) so tests can invoke it directly without going
+    /// through the real `CalendarWatcher`'s EventKit polling.
+    func meetingEventStarting(_ event: CalendarEventSnapshot) {
         guard !session.isRecording else { return }
         switch settings.calendarAutoRecord {
         case .off:
@@ -341,8 +435,9 @@ public final class AppStores {
 
     private func scheduleDebouncedExport(for meetingID: UUID) {
         exportDebounceTasks[meetingID]?.cancel()
+        let exportDebounce = exportDebounce
         exportDebounceTasks[meetingID] = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            try? await Task.sleep(for: exportDebounce)
             guard !Task.isCancelled, let self else { return }
             self.exportDebounceTasks.removeValue(forKey: meetingID)
             self.runEnabledExporters(for: meetingID)
