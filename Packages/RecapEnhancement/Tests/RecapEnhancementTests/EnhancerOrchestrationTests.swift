@@ -1,0 +1,291 @@
+import Foundation
+import Testing
+import RecapCore
+@testable import RecapEnhancement
+
+/// Fake `EnhancerModel` — an actor so its mutable call counters/recorders are
+/// safe to touch from the orchestrator's concurrent-looking `async` calls
+/// while staying a clean `Sendable` conformer (no `@unchecked`). Never
+/// imports/calls FoundationModels — this is the whole point of the seam.
+private actor FakeEnhancerModel: EnhancerModel {
+    nonisolated let isAvailable: Bool
+
+    var digestCalls: [String] = []
+    var mergeCalls: [String] = []
+    var summarizeCalls: [String] = []
+    var rewriteCalls: [(line: String, digestText: String)] = []
+    var extraFactsCalls: [(digestText: String, notesBlock: String)] = []
+
+    private var digestImpl: (@Sendable (String) async throws -> ChunkDigest)?
+    private var mergeImpl: (@Sendable (String) async throws -> ChunkDigest)?
+    private var summarizeImpl: (@Sendable (String) async throws -> String)?
+    private var rewriteImpl: (@Sendable (String, String) async throws -> String)?
+    private var extraFactsImpl: (@Sendable (String, String) async throws -> [String])?
+
+    init(
+        isAvailable: Bool = true,
+        digest: (@Sendable (String) async throws -> ChunkDigest)? = nil,
+        merge: (@Sendable (String) async throws -> ChunkDigest)? = nil,
+        summarize: (@Sendable (String) async throws -> String)? = nil,
+        rewrite: (@Sendable (String, String) async throws -> String)? = nil,
+        extraFacts: (@Sendable (String, String) async throws -> [String])? = nil
+    ) {
+        self.isAvailable = isAvailable
+        self.digestImpl = digest
+        self.mergeImpl = merge
+        self.summarizeImpl = summarize
+        self.rewriteImpl = rewrite
+        self.extraFactsImpl = extraFacts
+    }
+
+    func digest(chunkText: String) async throws -> ChunkDigest {
+        digestCalls.append(chunkText)
+        if let digestImpl {
+            return try await digestImpl(chunkText)
+        }
+        return ChunkDigest(keyPoints: ["point"], decisions: [], actionItems: [])
+    }
+
+    func merge(renderedPair: String) async throws -> ChunkDigest {
+        mergeCalls.append(renderedPair)
+        if let mergeImpl {
+            return try await mergeImpl(renderedPair)
+        }
+        return ChunkDigest(keyPoints: ["merged"], decisions: [], actionItems: [])
+    }
+
+    func summarize(digestText: String) async throws -> String {
+        summarizeCalls.append(digestText)
+        if let summarizeImpl {
+            return try await summarizeImpl(digestText)
+        }
+        return "## Summary\nsummarized"
+    }
+
+    func rewrite(line: String, digestText: String) async throws -> String {
+        rewriteCalls.append((line, digestText))
+        if let rewriteImpl {
+            return try await rewriteImpl(line, digestText)
+        }
+        return line
+    }
+
+    func extraFacts(digestText: String, notesBlock: String) async throws -> [String] {
+        extraFactsCalls.append((digestText, notesBlock))
+        if let extraFactsImpl {
+            return try await extraFactsImpl(digestText, notesBlock)
+        }
+        return []
+    }
+}
+
+@Suite struct EnhancerOrchestrationTests {
+    private func transcript(_ texts: [String]) -> Transcript {
+        var utterances: [Utterance] = []
+        var t: TimeInterval = 0
+        for text in texts {
+            utterances.append(Utterance(start: t, end: t + 5, text: text))
+            t += 5
+        }
+        return Transcript(utterances: utterances, engine: "test", model: "test", language: "en")
+    }
+
+    // MARK: 1. Digest per chunk
+
+    @Test func digestCalledOncePerChunk() async throws {
+        // `enhance` chunks internally with the default 2_000-token budget; use
+        // enough utterances to force multiple chunks and confirm digest is
+        // called exactly once per chunk the real chunker produces.
+        let bigUtterance = String(repeating: "word ", count: 1_800) // ~9000 chars ≈ 2250 tokens > 2000 budget alone
+        let utterances = Array(repeating: bigUtterance, count: 3)
+        let expectedChunks = TranscriptChunker.chunk(transcript(utterances)).count
+        #expect(expectedChunks == 3)
+
+        let model = FakeEnhancerModel()
+        let enhancer = FoundationModelEnhancer(model: model)
+        _ = try await enhancer.enhance(rawNotes: "", transcript: transcript(utterances))
+        let calls = await model.digestCalls.count
+        #expect(calls == expectedChunks)
+    }
+
+    // MARK: 2. Merge loop
+
+    @Test func mergeLoopReducesEightToFour() async throws {
+        // Force 8 chunks by using 8 utterances that each exceed a tiny implicit
+        // budget isn't controllable from here (TranscriptChunker's 2_000 budget is
+        // hardcoded inside `enhance`), so instead we drive mergeInPairs indirectly:
+        // craft a transcript with 8 utterances, each large enough to force its own
+        // chunk under the real 2_000-token budget (~8000 chars each).
+        let bigUtterance = String(repeating: "word ", count: 1_800) // ~9000 chars ≈ 2250 tokens > 2000 budget alone
+        let eightUtterances = Array(repeating: bigUtterance, count: 8)
+        let expectedChunks = TranscriptChunker.chunk(transcript(eightUtterances)).count
+        #expect(expectedChunks == 8)
+
+        let model = FakeEnhancerModel()
+        let enhancer = FoundationModelEnhancer(model: model)
+        _ = try await enhancer.enhance(rawNotes: "", transcript: transcript(eightUtterances))
+
+        let digestCount = await model.digestCalls.count
+        let mergeCount = await model.mergeCalls.count
+        #expect(digestCount == 8)
+        // 8 -> 4 in one merge pass (4 pairs merged), loop exits since 4 <= 6.
+        #expect(mergeCount == 4)
+    }
+
+    @Test func mergeLoopCarriesOddTail() async throws {
+        // 7 chunks: merge pass produces ceil(7/2) = 4 (3 merged pairs + 1 carried
+        // tail unmerged) -> loop exits at 4 (<=6). Expect 3 merge calls (the
+        // unpaired tail digest doesn't call merge).
+        let bigUtterance = String(repeating: "word ", count: 1_800)
+        let sevenUtterances = Array(repeating: bigUtterance, count: 7)
+        let expectedChunks = TranscriptChunker.chunk(transcript(sevenUtterances)).count
+        #expect(expectedChunks == 7)
+
+        let model = FakeEnhancerModel()
+        let enhancer = FoundationModelEnhancer(model: model)
+        _ = try await enhancer.enhance(rawNotes: "", transcript: transcript(sevenUtterances))
+
+        let digestCount = await model.digestCalls.count
+        let mergeCount = await model.mergeCalls.count
+        #expect(digestCount == 7)
+        #expect(mergeCount == 3)
+    }
+
+    // MARK: 3. Empty notes -> summarize path
+
+    @Test func emptyNotesUsesSummarizePath() async throws {
+        let model = FakeEnhancerModel(summarize: { _ in "## Summary\nfinal summary text" })
+        let enhancer = FoundationModelEnhancer(model: model)
+        let result = try await enhancer.enhance(rawNotes: "   \n  \n", transcript: transcript(["Hello there."]))
+        #expect(result == "## Summary\nfinal summary text")
+        let summarizeCount = await model.summarizeCalls.count
+        let rewriteCount = await model.rewriteCalls.count
+        #expect(summarizeCount == 1)
+        #expect(rewriteCount == 0)
+    }
+
+    // MARK: 4. One bullet per note line, order preserved
+
+    @Test func oneRewriteCallPerNoteLineInOrder() async throws {
+        let model = FakeEnhancerModel(rewrite: { line, _ in "Rewritten: \(line)" })
+        let enhancer = FoundationModelEnhancer(model: model)
+        let rawNotes = "- first line\n\n• second line\nthird line"
+        let result = try await enhancer.enhance(rawNotes: rawNotes, transcript: transcript(["Hello there."]))
+
+        let calls = await model.rewriteCalls
+        #expect(calls.count == 3)
+        #expect(calls.map(\.line) == ["first line", "second line", "third line"])
+
+        let bulletsSection = result.components(separatedBy: "\n\n## Also discussed").first ?? result
+        let bullets = bulletsSection.components(separatedBy: "\n")
+        #expect(bullets.count == 3)
+        #expect(bullets == [
+            "- Rewritten: first line",
+            "- Rewritten: second line",
+            "- Rewritten: third line",
+        ])
+    }
+
+    // MARK: 5. Meta-commentary fallback
+
+    @Test(arguments: [
+        "The note refers to a budget discussion.",
+        "This digest doesn't mention that topic.",
+        "",
+        "   ",
+    ])
+    func metaCommentaryFallsBackToOriginalLine(rewriteResponse: String) async throws {
+        let model = FakeEnhancerModel(rewrite: { _, _ in rewriteResponse })
+        let enhancer = FoundationModelEnhancer(model: model)
+        let result = try await enhancer.enhance(rawNotes: "- original line text", transcript: transcript(["Hello."]))
+        #expect(result == "- original line text")
+    }
+
+    // MARK: 6. Overlap dedup
+
+    @Test func overlapDedupDropsCoveredExtraFacts() async throws {
+        // Content-word containment (>3-char words, minus stopwords, trailing-s
+        // folded) must find "Budget approved Q3 launch" >= 0.7 contained in the
+        // rewritten bullet below to be dropped; the second extra fact shares no
+        // content words with the bullet, so it survives.
+        let model = FakeEnhancerModel(
+            rewrite: { line, _ in line == "budget" ? "Budget approved launch for Q3 project timeline." : line },
+            extraFacts: { _, _ in ["Budget approved launch project.", "Legal review starts Monday morning."] }
+        )
+        let enhancer = FoundationModelEnhancer(model: model)
+        let result = try await enhancer.enhance(rawNotes: "- budget", transcript: transcript(["Hello."]))
+
+        #expect(result.contains("## Also discussed"))
+        #expect(result.contains("Legal review starts Monday morning."))
+        #expect(!result.contains("Budget approved launch project."))
+    }
+
+    @Test func overlapDedupDropsSectionWhenAllCovered() async throws {
+        let model = FakeEnhancerModel(
+            rewrite: { line, _ in line == "budget" ? "Budget approved launch for Q3 project timeline." : line },
+            extraFacts: { _, _ in ["Budget approved launch project."] }
+        )
+        let enhancer = FoundationModelEnhancer(model: model)
+        let result = try await enhancer.enhance(rawNotes: "- budget", transcript: transcript(["Hello."]))
+        #expect(!result.contains("## Also discussed"))
+    }
+
+    // MARK: 7. Retry
+
+    @Test func retrySucceedsOnSecondAttempt() async throws {
+        let attemptCount = Counter()
+        let model = FakeEnhancerModel(digest: { _ in
+            let n = await attemptCount.increment()
+            if n == 1 {
+                throw TestError.failed
+            }
+            return ChunkDigest(keyPoints: ["ok"], decisions: [], actionItems: [])
+        })
+        let enhancer = FoundationModelEnhancer(model: model)
+        let result = try await enhancer.enhance(rawNotes: "", transcript: transcript(["Hello there."]))
+        #expect(!result.isEmpty)
+        let calls = await model.digestCalls.count
+        #expect(calls == 2)
+    }
+
+    @Test func retryFailsTwiceThrowsGenerationFailed() async throws {
+        let model = FakeEnhancerModel(digest: { _ in throw TestError.failed })
+        let enhancer = FoundationModelEnhancer(model: model)
+        await #expect(throws: EnhancementError.generationFailed) {
+            _ = try await enhancer.enhance(rawNotes: "", transcript: transcript(["Hello there."]))
+        }
+        let calls = await model.digestCalls.count
+        #expect(calls == 2)
+    }
+
+    // MARK: 8. Unavailable / empty transcript errors
+
+    @Test func unavailableModelThrowsUnavailable() async {
+        let model = FakeEnhancerModel(isAvailable: false)
+        let enhancer = FoundationModelEnhancer(model: model)
+        await #expect(throws: EnhancementError.unavailable) {
+            _ = try await enhancer.enhance(rawNotes: "- notes", transcript: transcript(["Hello."]))
+        }
+    }
+
+    @Test func emptyTranscriptThrowsEmptyTranscript() async {
+        let model = FakeEnhancerModel()
+        let enhancer = FoundationModelEnhancer(model: model)
+        await #expect(throws: EnhancementError.emptyTranscript) {
+            _ = try await enhancer.enhance(rawNotes: "- notes", transcript: transcript([]))
+        }
+    }
+}
+
+private enum TestError: Error {
+    case failed
+}
+
+/// Small actor to count attempts across retry closures without data races.
+private actor Counter {
+    private var value = 0
+    func increment() -> Int {
+        value += 1
+        return value
+    }
+}

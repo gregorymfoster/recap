@@ -11,6 +11,15 @@ struct ChunkDigest {
     var decisions: [String]
     @Guide(description: "Action items with owner when mentioned, if any")
     var actionItems: [String]
+
+    // The @Generable macro's synthesized memberwise init isn't guaranteed to
+    // be usable from test code in another module boundary within this
+    // package; add an explicit one so tests can construct fixtures directly.
+    init(keyPoints: [String], decisions: [String], actionItems: [String]) {
+        self.keyPoints = keyPoints
+        self.decisions = decisions
+        self.actionItems = actionItems
+    }
 }
 
 /// Enhances rough meeting notes with Apple's on-device language model.
@@ -19,11 +28,24 @@ struct ChunkDigest {
 /// utterance boundaries → digest each chunk (guided generation) → merge
 /// digests if there are too many → one final pass that expands the user's
 /// notes with digest specifics.
+///
+/// All LLM calls go through `model` (`EnhancerModel`); this type owns only
+/// the map/merge/reduce orchestration around it, so it's testable with a
+/// fake model and no Apple Intelligence.
 public struct FoundationModelEnhancer: NoteEnhancer {
-    public init() {}
+    var model: EnhancerModel
+
+    public init() {
+        self.model = FoundationModelBackend()
+    }
+
+    /// Test seam — production callers use `init()`.
+    init(model: EnhancerModel) {
+        self.model = model
+    }
 
     public var isAvailable: Bool {
-        SystemLanguageModel.default.availability == .available
+        model.isAvailable
     }
 
     public func enhance(rawNotes: String, transcript: RecapCore.Transcript) async throws -> String {
@@ -49,17 +71,8 @@ public struct FoundationModelEnhancer: NoteEnhancer {
     // MARK: Map
 
     private func digest(chunkText: String) async throws -> ChunkDigest {
-        let session = LanguageModelSession(
-            instructions: """
-            You extract structured facts from a portion of a meeting transcript. \
-            Be specific and faithful — never invent details. Prefer fewer, denser points.
-            """
-        )
-        return try await respondWithRetry {
-            try await session.respond(
-                to: "Transcript portion:\n\n\(chunkText)",
-                generating: ChunkDigest.self
-            ).content
+        try await respondWithRetry {
+            try await model.digest(chunkText: chunkText)
         }
     }
 
@@ -68,15 +81,9 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         for pair in stride(from: 0, to: digests.count, by: 2) {
             if pair + 1 < digests.count {
                 let combined = render([digests[pair], digests[pair + 1]])
-                let session = LanguageModelSession(
-                    instructions: """
-                    You condense meeting summaries. Merge the two digests into one, \
-                    keeping every decision and action item, deduplicating and tightening key points.
-                    """
-                )
                 merged.append(
                     try await respondWithRetry {
-                        try await session.respond(to: combined, generating: ChunkDigest.self).content
+                        try await model.merge(renderedPair: combined)
                     }
                 )
             } else {
@@ -99,16 +106,8 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         let digestText = render(digests)
 
         if noteLines.isEmpty {
-            let session = LanguageModelSession(
-                instructions: """
-                You summarize a meeting digest as concise Markdown with a "## Summary" \
-                section and, when there are any, an "## Action items" section. State only \
-                facts from the digest. Never invent outcomes, reactions, or evaluations. \
-                No preamble.
-                """
-            )
             return try await respondWithRetry {
-                try await session.respond(to: "Meeting digest:\n\(digestText)").content
+                try await model.summarize(digestText: digestText)
             }
         }
 
@@ -147,31 +146,11 @@ public struct FoundationModelEnhancer: NoteEnhancer {
     }
 
     private func rewrite(line: String, digestText: String) async throws -> String {
-        let session = LanguageModelSession(
-            instructions: """
-            You rewrite one rough meeting-note line as ONE clear sentence, using the \
-            meeting digest only when it has facts about the note's own topic.
-
-            Example digest: "- Budget approved at 40k for Q3. - Launch moved to Sept 12."
-            Note: "budget ok??" → "Budget approved at 40k for Q3."
-            Note: "launch date" → "Launch moved to September 12."
-            Note: "ask legal re trademark" → "Ask legal about the trademark." \
-            (digest says nothing about it, so only the wording is cleaned)
-
-            Rules: one short sentence; keep the user's question marks; never mention the \
-            digest or notes themselves; never invent outcomes or reactions; never import \
-            digest facts about other topics.
-            """
-        )
-        let response = try await respondWithRetry {
-            try await session.respond(
-                to: "Meeting digest:\n\(digestText)\n\nRough note to rewrite:\n\(line)",
-                generating: RewrittenLine.self
-            ).content
+        let text = try await respondWithRetry {
+            try await model.rewrite(line: line, digestText: digestText)
         }
-        let text = response.text
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "\n", with: " ")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
         // A small model occasionally narrates instead of rewriting; keep the
         // user's own words rather than shipping meta-commentary.
         let lowered = text.lowercased()
@@ -182,26 +161,11 @@ public struct FoundationModelEnhancer: NoteEnhancer {
     }
 
     private func alsoDiscussed(noteLines: [String], digestText: String) async throws -> [String] {
-        let session = LanguageModelSession(
-            instructions: """
-            You compare meeting-digest facts against a user's notes and return only the \
-            important digest facts the notes do not mention. Exclude anything the notes \
-            already say, even in different words. Return them as short standalone \
-            sentences. Return an empty list when the notes already cover everything \
-            important. Never invent facts.
-            """
-        )
-        let prompt = """
-        Meeting digest:
-        \(digestText)
-
-        User's notes:
-        \(noteLines.map { "- \($0)" }.joined(separator: "\n"))
-        """
-        let response = try await respondWithRetry {
-            try await session.respond(to: prompt, generating: ExtraFacts.self).content
+        let notesBlock = noteLines.map { "- \($0)" }.joined(separator: "\n")
+        let items = try await respondWithRetry {
+            try await model.extraFacts(digestText: digestText, notesBlock: notesBlock)
         }
-        return response.items
+        return items
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
     }
