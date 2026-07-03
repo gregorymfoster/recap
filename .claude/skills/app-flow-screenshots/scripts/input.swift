@@ -28,6 +28,19 @@ func die(_ msg: String) -> Never {
     exit(64)
 }
 
+// The synthetic HID event stream tracks modifier state independently of any one event's
+// `.flags` field: a keyDown posted with .maskCommand set latches Cmd in that stream until
+// something explicitly clears it, regardless of what flags later events carry. Without this,
+// a ⌘K chord leaves Cmd stuck "down" and subsequent plain-letter keystrokes (e.g. from `type`)
+// get delivered as ⌘-shortcuts. Call this after any chord/shortcut so the stream returns to a
+// known zero-modifier state before the command returns.
+func clearModifiers() {
+    let e = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
+    e?.type = .flagsChanged
+    e?.flags = []
+    post(e)
+}
+
 let args = CommandLine.arguments
 guard args.count >= 2 else { die("usage: input activate|click|doubleclick|key|type|scroll ...") }
 
@@ -75,17 +88,28 @@ case "key":
         e?.flags = flags
         post(e)
     }
+    // Always end on an explicit zero-flags state, even for bare (no-modifier) keys — cheap
+    // insurance against a stuck flag from this or any earlier command in the process.
+    clearModifiers()
 
 case "type":
     guard args.count >= 3 else { die("type <text>") }
+    // Text entry must never inherit ambient modifier state left over from a previous chord:
+    // clear it up front, then give every keyDown/keyUp exactly the flags that character needs
+    // (shift for uppercase/symbols, nothing otherwise) rather than whatever flags happen to be
+    // latched in the synthetic event stream.
+    clearModifiers()
     for scalar in args[2].unicodeScalars {
+        let charFlags: CGEventFlags = scalar.properties.isUppercase ? [.maskShift] : []
         var chars = Array(String(scalar).utf16)
         for down in [true, false] {
             let e = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: down)
+            e?.flags = charFlags
             e?.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: &chars)
             post(e)
         }
     }
+    clearModifiers()
 
 case "scroll":
     guard args.count >= 5, let x = Double(args[2]), let y = Double(args[3]), let dy = Int32(args[4])

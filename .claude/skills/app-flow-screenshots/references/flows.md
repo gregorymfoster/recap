@@ -28,6 +28,19 @@ with identical window names, and by-name matching can pick the wrong instance.
                                              #   key 121 does not scroll SwiftUI Forms)
 ```
 
+**Stuck-modifier failure mode (fixed, don't re-add workarounds):** the CGEvent synthetic
+input stream tracks modifier state independently of any single event's `.flags` field.
+`input key 40 cmd` (⌘K) used to leave Cmd latched "down" in that stream after returning, so
+a following `input type "standup"` delivered plain letters as ⌘-shortcuts — the "n" fired
+⌘N and created a stray "Untitled meeting" in the library. It reproduced across typing
+strategies and only cleared with a manual, out-of-band cmd key-up. The helper now
+self-clears: every `key` invocation posts a final zero-flags `flagsChanged` event before
+returning, and `type` clears modifiers up front and sets explicit per-event flags for each
+character (e.g. shift for uppercase) instead of inheriting ambient state. You should not
+need to send manual modifier-releases before or after `key`/`type` calls — if you see
+stray shortcut-triggered side effects again, treat it as a regression in `input.swift`,
+not something to paper over with extra keystrokes here.
+
 **`activate` does not always take effect** — a fullscreen app on another Space can hold
 focus through several attempts, and input sent then lands in the wrong app (this has
 opened System Settings by accident). After every `activate`, verify before sending input:
