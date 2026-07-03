@@ -38,9 +38,11 @@ meetings in `~/Recap Dev` instead of `~/Recap`, and its own search index. Sparkl
 never constructed in dev — a dev build must never update itself into the prod app. Release builds
 (and `Scripts/release.sh`) are unchanged: `com.gregfoster.recap`, plain `Recap.app`.
 
+Install/update it as a normal app (builds signed — unsigned binaries won't launch on Apple
+Silicon, and a stable signature keeps the dev app's TCC grants across rebuilds):
+
 ```
-xcodegen && xcodebuild build -project Recap.xcodeproj -scheme Recap -destination 'platform=macOS' -derivedDataPath build/dev CODE_SIGNING_ALLOWED=NO
-open "build/dev/Build/Products/Debug/Recap Dev.app"
+./Scripts/install-dev.sh    # → /Applications/Recap Dev.app, launchable like any app
 ```
 
 Reset permissions for a clean slate — only touches the dev app, prod is untouched:
