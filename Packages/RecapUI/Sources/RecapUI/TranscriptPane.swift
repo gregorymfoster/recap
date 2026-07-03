@@ -3,6 +3,13 @@ import SwiftUI
 
 /// Left pane of the split meeting view (design mock 1b): live or saved
 /// transcript with the in-progress utterance at 40% opacity.
+///
+/// Playback follow, click-to-seek, and speaker avatars (design handoff v2
+/// §6b/§8d) read `PlaybackStore` and `LibraryStore` from the environment
+/// rather than as init parameters — the initializer is a pinned surface
+/// another package's `MeetingDetailView` builds against, so it must not
+/// change shape. Both environment values are optional-tolerant: previews (or
+/// any future host) that don't inject them just get the pre-playback look.
 struct TranscriptPane: View {
     var utterances: [Utterance]
     var partial: Utterance?
@@ -11,69 +18,130 @@ struct TranscriptPane: View {
     var liveState: LiveState?
     var onDownloadStreamingModel: (() -> Void)?
 
+    @Environment(PlaybackStore.self) private var playback: PlaybackStore?
+    @Environment(LibraryStore.self) private var library: LibraryStore?
+
+    /// Row currently under the pointer — swaps its avatar for a ▶ glyph and
+    /// tints the row (§8d), only meaningful when `playback?.hasAudio` is true.
+    @State private var hoveredUtteranceID: Utterance.ID?
+    /// Debounces auto-scroll after a manual scroll so playback-follow doesn't
+    /// fight the user. Simple wall-clock check rather than a running timer —
+    /// no per-frame work, just a timestamp compared on the next position tick.
+    @State private var lastManualScrollAt: Date?
+
+    private static let manualScrollGrace: TimeInterval = 3
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text(isLive ? "LIVE TRANSCRIPT" : "TRANSCRIPT")
-                    .font(Tokens.microLabel)
-                    .kerning(0.5)
-                    .foregroundStyle(Tokens.textTertiary)
-                if isLive {
-                    liveStatusBadge
-                } else {
-                    OnDeviceBadge(label: "on-device")
-                }
-                Spacer()
-                if !utterances.isEmpty {
-                    // Confirmed utterances only — the in-progress partial is
-                    // deliberately excluded from copies.
-                    CopyButton(help: "Copy transcript") {
-                        TranscriptFormatter.plainText(utterances: utterances)
-                    }
-                }
-            }
-            .padding(.horizontal, 22)
-            .padding(.top, 18)
-            .padding(.bottom, 10)
+            header
+                .padding(.horizontal, 22)
+                .padding(.top, 18)
+                .padding(.bottom, 10)
 
             if utterances.isEmpty && partial == nil {
                 emptyState
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 14) {
-                            ForEach(Array(utterances.enumerated()), id: \.element.id) { index, utterance in
-                                let previous = index > 0 ? utterances[index - 1].speakerID : nil
-                                if let speaker = utterance.speakerID, speaker != previous {
-                                    speakerLabel(speaker)
-                                        .padding(.top, index > 0 ? 6 : 0)
-                                }
-                                row(utterance)
-                            }
-                            if let partial {
-                                // Left at 0.4 for both modes (see Milestone K plan §4);
-                                // flagged for the visual dark-mode pass — may need a
-                                // dark-only bump toward 0.5 if it reads too faint.
-                                row(partial)
-                                    .opacity(0.4)
-                                    .id("partial")
-                            }
-                            Color.clear.frame(height: 1).id("bottom")
-                        }
-                        .padding(.horizontal, 22)
-                        .padding(.bottom, 16)
-                    }
-                    .onChange(of: utterances.count) {
-                        withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
-                    }
-                    .onChange(of: partial?.text) {
-                        withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
-                    }
+                transcriptList
+            }
+
+            transcribingFooter
+        }
+        .background(Tokens.subtleBackground)
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text(isLive ? "LIVE TRANSCRIPT" : "TRANSCRIPT")
+                .font(Tokens.microLabel)
+                .kerning(0.5)
+                .foregroundStyle(Tokens.textTertiary)
+            if isLive {
+                liveStatusBadge
+            } else {
+                OnDeviceBadge(label: "on-device")
+            }
+            Spacer()
+            if !utterances.isEmpty {
+                // Confirmed utterances only — the in-progress partial is
+                // deliberately excluded from copies.
+                CopyButton(help: "Copy transcript") {
+                    TranscriptFormatter.plainText(utterances: utterances)
                 }
             }
         }
-        .background(Tokens.subtleBackground)
+    }
+
+    private var transcriptList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    ForEach(Array(utterances.enumerated()), id: \.element.id) { index, utterance in
+                        let previous = index > 0 ? utterances[index - 1].speakerID : nil
+                        if let speaker = utterance.speakerID, speaker != previous {
+                            speakerLabel(speaker)
+                                .padding(.top, index > 0 ? 6 : 0)
+                        }
+                        row(utterance, isCurrent: index == currentUtteranceIndex)
+                            .id(utterance.id)
+                    }
+                    if let partial {
+                        // Left at 0.4 for both modes (see Milestone K plan §4);
+                        // flagged for the visual dark-mode pass — may need a
+                        // dark-only bump toward 0.5 if it reads too faint.
+                        row(partial, isCurrent: false)
+                            .opacity(0.4)
+                            .id("partial")
+                    }
+                    Color.clear.frame(height: 1).id("bottom")
+                }
+                .padding(.horizontal, 22)
+                .padding(.bottom, 16)
+                .background(scrollDetector)
+            }
+            .onChange(of: utterances.count) {
+                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+            .onChange(of: partial?.text) {
+                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+            .onChange(of: currentUtteranceIndex) { _, newIndex in
+                followPlayback(to: newIndex, proxy: proxy)
+            }
+        }
+    }
+
+    /// Invisible probe that flips `lastManualScrollAt` when the scroll offset
+    /// moves for a reason other than our own `scrollTo` calls. SwiftUI has no
+    /// direct "user scrolled" signal on macOS `ScrollView`, so this uses a
+    /// `GeometryReader` position read — cheap (one geometry read per layout
+    /// pass, no timer) and only feeds a stored timestamp, never a loop.
+    private var scrollDetector: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onChange(of: proxy.frame(in: .named("transcriptScroll")).minY) { oldValue, newValue in
+                    guard isFollowingPlayback, abs(newValue - oldValue) > 1 else { return }
+                    lastManualScrollAt = .now
+                }
+        }
+        .coordinateSpace(name: "transcriptScroll")
+    }
+
+    /// True once we've established the transcript is being driven by
+    /// playback (auto-scroll only happens then, per §8d: "only auto-scroll
+    /// while playing").
+    private var isFollowingPlayback: Bool {
+        playback?.isPlaying == true
+    }
+
+    private func followPlayback(to index: Int?, proxy: ScrollViewProxy) {
+        guard isFollowingPlayback, let index, utterances.indices.contains(index) else { return }
+        if let lastManualScrollAt, Date.now.timeIntervalSince(lastManualScrollAt) < Self.manualScrollGrace {
+            return
+        }
+        withAnimation(.easeOut(duration: 0.25)) {
+            proxy.scrollTo(utterances[index].id, anchor: .center)
+        }
     }
 
     /// Small header badge showing exactly where the live pipeline stands —
@@ -190,18 +258,100 @@ struct TranscriptPane: View {
         }
     }
 
-    private func row(_ utterance: Utterance) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(timestamp(utterance.start))
-                .font(.system(size: 10).monospacedDigit())
-                .foregroundStyle(Tokens.textTertiary)
-                .frame(width: 38, alignment: .trailing)
-            Text(utterance.text)
-                .font(Tokens.transcript)
-                .lineSpacing(4)
-                .foregroundStyle(Tokens.textBody)
-                .frame(maxWidth: .infinity, alignment: .leading)
+    private func row(_ utterance: Utterance, isCurrent: Bool) -> some View {
+        let isHovered = hoveredUtteranceID == utterance.id
+        let seekable = playback?.hasAudio == true
+
+        return HStack(alignment: .top, spacing: 10) {
+            avatar(for: utterance, isHovered: isHovered && seekable)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    if let speakerID = utterance.speakerID {
+                        Text(displayName(for: speakerID))
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(color(for: speakerID))
+                    }
+                    Spacer()
+                    Text(timestamp(utterance.start))
+                        .font(.system(size: 9.5).monospacedDigit())
+                        .foregroundStyle(isCurrent ? Tokens.accentBlue : Tokens.textTertiary)
+                }
+                Text(utterance.text)
+                    .font(Tokens.transcript)
+                    .lineSpacing(4)
+                    .foregroundStyle(Tokens.textBody.opacity(0.85))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .padding(.leading, isCurrent ? 6 : 8)
+        .background(rowBackground(isCurrent: isCurrent, isHovered: isHovered && seekable))
+        .overlay(alignment: .leading) {
+            if isCurrent {
+                Rectangle()
+                    .fill(Tokens.accentBlue)
+                    .frame(width: 2)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Tokens.radiusRow))
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            guard seekable else { return }
+            hoveredUtteranceID = hovering ? utterance.id : nil
+        }
+        .onTapGesture {
+            guard seekable else { return }
+            playback?.seek(to: utterance.start)
+        }
+    }
+
+    @ViewBuilder
+    private func rowBackground(isCurrent: Bool, isHovered: Bool) -> some View {
+        if isCurrent {
+            Tokens.accentBlue.opacity(0.1)
+        } else if isHovered {
+            Tokens.chipBackground.opacity(0.6)
+        } else {
+            Color.clear
+        }
+    }
+
+    /// 22pt round avatar with speaker initials, colored from
+    /// `Tokens.speakerPalette`. Swaps to a ▶ glyph on hover when the row is
+    /// seekable (§8d).
+    @ViewBuilder
+    private func avatar(for utterance: Utterance, isHovered: Bool) -> some View {
+        let tint = utterance.speakerID.map(color(for:)) ?? Tokens.textTertiary
+        ZStack {
+            Circle()
+                .fill(tint.opacity(0.18))
+            if isHovered {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(tint)
+            } else {
+                Text(initials(for: utterance.speakerID))
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
+        }
+        .frame(width: 22, height: 22)
+    }
+
+    /// "S1" → "S1" — first letters of the display name ("Speaker 1"),
+    /// uppercased, max two characters.
+    private func initials(for speakerID: String?) -> String {
+        guard let speakerID else { return "?" }
+        let name = displayName(for: speakerID)
+        let letters = name
+            .split(separator: " ")
+            .compactMap { $0.first }
+            .map(String.init)
+            .joined()
+            .uppercased()
+        if letters.isEmpty { return "?" }
+        return String(letters.prefix(2))
     }
 
     /// "S1" → "Speaker 1", colored consistently per speaker (mock 1b).
@@ -210,7 +360,53 @@ struct TranscriptPane: View {
             .font(Tokens.microLabel)
             .kerning(0.4)
             .foregroundStyle(color(for: speakerID))
-            .padding(.leading, 48)  // aligns with the text column
+            .padding(.leading, 40)  // aligns with the text column (22pt avatar + spacing)
+    }
+
+    /// Footer shown only while the meeting behind this pane is actively
+    /// transcribing: "Transcribing · N%" + a thin progress bar (§6b).
+    ///
+    /// `TranscriptPane`'s initializer can't grow a new parameter (pinned API
+    /// another package builds against), so progress is read from
+    /// `LibraryStore` — `selectedMeetingID` cross-referenced against
+    /// `meetings` gives the per-meeting `.transcribing(progress:)` fraction
+    /// that's already live-updated by the processing queue. If the pane is
+    /// hosted without a `LibraryStore` in the environment (e.g. an isolated
+    /// preview), the footer simply doesn't show — no crash, no stale guess.
+    @ViewBuilder
+    private var transcribingFooter: some View {
+        if let progress = transcribingProgress {
+            VStack(spacing: 6) {
+                HStack {
+                    Text("Transcribing · \(Int((progress * 100).rounded()))%")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(Tokens.accentBlue)
+                    Spacer()
+                }
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .tint(Tokens.accentBlue)
+                    .frame(height: 3)
+            }
+            .padding(.horizontal, 22)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+        }
+    }
+
+    private var transcribingProgress: Double? {
+        guard let library, let id = library.selectedMeetingID,
+              let record = library.record(for: id),
+              case .transcribing(let progress) = record.meeting.status
+        else { return nil }
+        return progress
+    }
+
+    /// Index of the utterance currently under the playhead, or nil when
+    /// there's no audio loaded or position precedes the first utterance.
+    private var currentUtteranceIndex: Int? {
+        guard let playback, playback.hasAudio else { return nil }
+        return TranscriptPlaybackIndex.currentIndex(for: playback.position, in: utterances)
     }
 
     // Naming/timestamp conventions live in TranscriptFormatter (RecapCore) so
@@ -243,20 +439,45 @@ struct TranscriptPane: View {
         isLive: true,
         liveState: .live
     )
+    .environment(PlaybackStore())
+    .environment(LibraryStore.fixture())
+    .frame(width: 420, height: 500)
+}
+
+#Preview("Saved with playback") {
+    let playback = PlaybackStore()
+    return TranscriptPane(
+        utterances: [
+            Utterance(speakerID: "S1", start: 0, end: 4, text: "Hello everyone, thanks for joining."),
+            Utterance(speakerID: "S1", start: 4, end: 9, text: "Today we're walking through the Q3 roadmap and the onboarding revamp."),
+            Utterance(speakerID: "S2", start: 9, end: 14, text: "Sounds good — I have the metrics from last week ready to share."),
+        ],
+        partial: nil,
+        isLive: false,
+        liveState: nil
+    )
+    .environment(playback)
+    .environment(LibraryStore.fixture())
     .frame(width: 420, height: 500)
 }
 
 #Preview("No model installed") {
     TranscriptPane(utterances: [], partial: nil, isLive: true, liveState: .noModelInstalled, onDownloadStreamingModel: {})
+        .environment(PlaybackStore())
+        .environment(LibraryStore.fixture())
         .frame(width: 420, height: 500)
 }
 
 #Preview("Loading") {
     TranscriptPane(utterances: [], partial: nil, isLive: true, liveState: .loadingModel)
+        .environment(PlaybackStore())
+        .environment(LibraryStore.fixture())
         .frame(width: 420, height: 500)
 }
 
 #Preview("Failed") {
     TranscriptPane(utterances: [], partial: nil, isLive: true, liveState: .failed(reason: "load error"))
+        .environment(PlaybackStore())
+        .environment(LibraryStore.fixture())
         .frame(width: 420, height: 500)
 }
