@@ -96,3 +96,18 @@ struct SearchOverlay: View {
         isPresented = false
     }
 }
+
+#Preview("Light") {
+    SearchOverlay(isPresented: .constant(true))
+        .environment(LibraryStore.fixture())
+        .padding(40)
+        .background(Tokens.subtleBackground)
+}
+
+#Preview("Dark") {
+    SearchOverlay(isPresented: .constant(true))
+        .environment(LibraryStore.fixture())
+        .padding(40)
+        .background(Tokens.subtleBackground)
+        .preferredColorScheme(.dark)
+}

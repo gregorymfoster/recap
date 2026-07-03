@@ -17,6 +17,7 @@ struct EnhancedNotesView: View {
                         Text(inline(heading))
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(Tokens.textPrimary)
+                            .tint(Tokens.accentBlue)
                             .padding(.top, 8)
                     } else if let bullet = strippedPrefix(line, prefixes: ["- ", "* ", "• "]) {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -26,6 +27,7 @@ struct EnhancedNotesView: View {
                                 .font(Tokens.body)
                                 .lineSpacing(6)
                                 .foregroundStyle(Tokens.textBody)
+                                .tint(Tokens.accentBlue)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     } else {
@@ -33,6 +35,7 @@ struct EnhancedNotesView: View {
                             .font(Tokens.body)
                             .lineSpacing(6)
                             .foregroundStyle(Tokens.textBody)
+                            .tint(Tokens.accentBlue)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
@@ -64,5 +67,18 @@ struct EnhancedNotesView: View {
     - Setup time drops from ten minutes to about three.
     """)
     .frame(width: 560, height: 400)
-    .background(.white)
+    .background(Tokens.surface)
+}
+
+#Preview("Dark") {
+    EnhancedNotesView(markdown: """
+    - Maya confirmed the onboarding revision ships at the end of the month after one more round of user testing.
+    - Performance regressions on older laptops — Sam follows up with numbers next week.
+
+    ## Also discussed
+    - Setup time drops from ten minutes to about three.
+    """)
+    .frame(width: 560, height: 400)
+    .background(Tokens.surface)
+    .preferredColorScheme(.dark)
 }

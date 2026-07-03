@@ -36,7 +36,7 @@ struct LibraryView: View {
                 Color.clear.frame(height: 28)
             }
         }
-        .background(.white)
+        .background(Tokens.surface)
         .dropDestination(for: URL.self) { urls, _ in
             handleDrop(urls)
         } isTargeted: { dropTargeted = $0 }
@@ -67,7 +67,8 @@ struct LibraryView: View {
                 .foregroundStyle(Tokens.accentBlue)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .background(.white, in: Capsule())
+                .background(Tokens.surface, in: Capsule())
+                // stays: shadow stays black in both modes (drop shadows read fine on dark surfaces)
                 .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
         }
         .padding(10)
@@ -112,7 +113,7 @@ struct LibraryView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             // Opaque background so pinned headers don't show rows scrolling
             // underneath them.
-            .background(.white)
+            .background(Tokens.surface)
     }
 
     private var emptyState: some View {
@@ -155,10 +156,12 @@ struct LibraryView: View {
                 stores?.startRecording()
             } label: {
                 HStack(spacing: 7) {
+                    // stays: white dot/text on the red Record button in both modes
                     Circle().fill(.white).frame(width: 8, height: 8)
                     Text("Record")
                         .font(.system(size: 13, weight: .semibold))
                 }
+                // stays: white text on the red Record button in both modes
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
@@ -227,8 +230,8 @@ private struct MeetingRow: View {
         .padding(.vertical, 14)
         .background(
             RoundedRectangle(cornerRadius: Tokens.radiusCard)
-                .fill(hovering ? Tokens.subtleBackground : .white)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                .fill(hovering ? Tokens.subtleBackground : Tokens.surface)
+                .stroke(Tokens.cardStroke, lineWidth: 1)
         )
         .contentShape(RoundedRectangle(cornerRadius: Tokens.radiusCard))
         .onHover { hovering = $0 }
@@ -246,6 +249,7 @@ private struct MeetingRow: View {
     }
 
     private var tint: Color {
+        // stays: flat accent palette (icon-tile fill), same as accentBlue/successGreen — not appearance-dependent
         let palette: [Color] = [Tokens.accentBlue, Color(red: 0x8E / 255, green: 0x7C / 255, blue: 0xC3 / 255), Tokens.successGreen, .orange]
         return palette[abs(record.meeting.id.hashValue) % palette.count]
     }
@@ -256,4 +260,12 @@ private struct MeetingRow: View {
         .environment(LibraryStore.fixture())
         .environment(AppRouter())
         .frame(width: 820, height: 620)
+}
+
+#Preview("Dark") {
+    LibraryView()
+        .environment(LibraryStore.fixture())
+        .environment(AppRouter())
+        .frame(width: 820, height: 620)
+        .preferredColorScheme(.dark)
 }

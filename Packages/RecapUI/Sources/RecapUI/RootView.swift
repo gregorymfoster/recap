@@ -59,7 +59,7 @@ public struct RootView: View {
         .overlay {
             if showSearch {
                 ZStack(alignment: .top) {
-                    Color.black.opacity(0.15)
+                    Tokens.scrim
                         .ignoresSafeArea()
                         .onTapGesture { showSearch = false }
                     SearchOverlay(isPresented: $showSearch)

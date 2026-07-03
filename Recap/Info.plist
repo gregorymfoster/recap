@@ -47,8 +47,6 @@
 	<string>© 2026 Greg Foster. MIT License.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Recap records your microphone during meetings you start. Audio never leaves your Mac.</string>
-	<key>NSRequiresAquaSystemAppearance</key>
-	<true/>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>

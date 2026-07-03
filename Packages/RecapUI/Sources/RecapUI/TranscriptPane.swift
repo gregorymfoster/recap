@@ -45,6 +45,9 @@ struct TranscriptPane: View {
                                 row(utterance)
                             }
                             if let partial {
+                                // Left at 0.4 for both modes (see Milestone K plan §4);
+                                // flagged for the visual dark-mode pass — may need a
+                                // dark-only bump toward 0.5 if it reads too faint.
                                 row(partial)
                                     .opacity(0.4)
                                     .id("partial")

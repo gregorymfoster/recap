@@ -26,7 +26,7 @@ struct ModelManagerView: View {
             }
             .padding(28)
         }
-        .background(.white)
+        .background(Tokens.surface)
         .onAppear { manager.refresh() }
     }
 }
@@ -63,8 +63,8 @@ private struct ModelRow: View {
         .padding(.vertical, 14)
         .background(
             RoundedRectangle(cornerRadius: Tokens.radiusCard)
-                .fill(.white)
-                .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                .fill(Tokens.surface)
+                .stroke(Tokens.cardStroke, lineWidth: 1)
         )
     }
 

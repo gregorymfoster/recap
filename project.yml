@@ -54,8 +54,6 @@ targets:
             LSHandlerRank: Alternate
             LSItemContentTypes:
               - public.audio
-        # The design system is light-only (hardcoded token colors); render Aqua in dark mode too.
-        NSRequiresAquaSystemAppearance: true
         SUFeedURL: https://gregorymfoster.github.io/recap/appcast.xml
         SUPublicEDKey: WsqMrsc1Rv980zEPBuwQtawmJ0em/FshzcflTky6naY=
         SUEnableAutomaticChecks: true

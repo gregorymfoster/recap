@@ -110,6 +110,6 @@ struct QueueWidget: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+        .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: 9))
     }
 }

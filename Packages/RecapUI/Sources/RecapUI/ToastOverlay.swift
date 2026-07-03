@@ -33,6 +33,7 @@ private struct ToastBanner: View {
         HStack(spacing: 12) {
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundStyle(Tokens.warningAmber)
+            // stays: white text on the dark toast surface in both modes
             Text(toast.message)
                 .font(Tokens.body)
                 .foregroundStyle(.white)
@@ -49,6 +50,7 @@ private struct ToastBanner: View {
             Button {
                 onDismiss()
             } label: {
+                // stays: white-on-dark dismiss glyph in both modes
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.6))
@@ -58,6 +60,12 @@ private struct ToastBanner: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Tokens.darkSurface, in: RoundedRectangle(cornerRadius: Tokens.radiusCard))
+        .overlay {
+            // Separates the dark toast from an equally-dark window behind it.
+            RoundedRectangle(cornerRadius: Tokens.radiusCard)
+                .stroke(Tokens.darkSurfaceStroke, lineWidth: 1)
+        }
+        // stays: shadow stays black in both modes
         .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
         .frame(maxWidth: 440)
     }
@@ -69,4 +77,13 @@ private struct ToastBanner: View {
     return ToastOverlay(toasts: toasts)
         .frame(width: 700, height: 400)
         .background(Color.gray.opacity(0.2))
+}
+
+#Preview("Dark") {
+    let toasts = ToastCenter()
+    toasts.show("Recording mic only — system audio unavailable", actionTitle: "Open Settings") {}
+    return ToastOverlay(toasts: toasts)
+        .frame(width: 700, height: 400)
+        .background(Color.gray.opacity(0.2))
+        .preferredColorScheme(.dark)
 }

@@ -25,7 +25,7 @@ struct OnboardingView: View {
         }
         .padding(32)
         .frame(width: 560, height: 480)
-        .background(.white)
+        .background(Tokens.surface)
         .interactiveDismissDisabled()
     }
 
@@ -168,7 +168,7 @@ struct OnboardingView: View {
             HStack(spacing: 6) {
                 ForEach(0..<3, id: \.self) { dot in
                     Circle()
-                        .fill(dot == step ? Tokens.textPrimary : Color.black.opacity(0.15))
+                        .fill(dot == step ? Tokens.textPrimary : Tokens.cardStroke)
                         .frame(width: 6, height: 6)
                 }
             }
@@ -188,4 +188,17 @@ struct OnboardingView: View {
             }
         }
     }
+}
+
+#Preview("Light") {
+    OnboardingView()
+        .environment(WhisperModelManager())
+        .environment(SettingsStore())
+}
+
+#Preview("Dark") {
+    OnboardingView()
+        .environment(WhisperModelManager())
+        .environment(SettingsStore())
+        .preferredColorScheme(.dark)
 }

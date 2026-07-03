@@ -1,33 +1,98 @@
+import AppKit
 import SwiftUI
 
 /// Design tokens from the Recap design handoff. Prefer semantic system colors and
 /// materials where they visually match; these constants cover the bespoke values.
+///
+/// Recap follows the system appearance (no in-app light/dark picker). Every
+/// token that needs to differ between modes is built with `dynamic(light:dark:)`,
+/// which wraps an `NSColor(name:dynamicProvider:)` — the provider re-resolves
+/// live when the system appearance flips, so nothing here may cache a
+/// resolved `CGColor` or capture mutable state.
 public enum Tokens {
+    // MARK: Dynamic color helper
+
+    /// Builds a `Color` that resolves `light` or `dark` based on the current
+    /// drawing appearance. The provider closure must stay pure (Sendable-safe:
+    /// no captured mutable state) so it can be invoked repeatedly and safely
+    /// as the system appearance changes.
+    private static func dynamic(light: NSColor, dark: NSColor) -> Color {
+        Color(
+            NSColor(name: nil) { appearance in
+                appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+            }
+        )
+    }
+
+    private static func dynamic(light: Color, dark: Color) -> Color {
+        dynamic(light: NSColor(light), dark: NSColor(dark))
+    }
+
     // MARK: Colors
-    public static let textPrimary = Color(red: 0x1C / 255, green: 0x1C / 255, blue: 0x1E / 255)  // #1c1c1e
-    public static let textBody = Color(red: 0x2C / 255, green: 0x2C / 255, blue: 0x2E / 255)  // #2c2c2e
-    public static let textSecondary = Color.black.opacity(0.45)
-    public static let textTertiary = Color.black.opacity(0.35)
-    public static let subtleBackground = Color(red: 0xFA / 255, green: 0xFA / 255, blue: 0xF8 / 255)  // #fafaf8
-    public static let hairline = Color.black.opacity(0.07)
+    public static let textPrimary = dynamic(
+        light: NSColor(red: 0x1C / 255, green: 0x1C / 255, blue: 0x1E / 255, alpha: 1),  // #1c1c1e
+        dark: NSColor(red: 0xF2 / 255, green: 0xF2 / 255, blue: 0xF4 / 255, alpha: 1)  // #f2f2f4
+    )
+    public static let textBody = dynamic(
+        light: NSColor(red: 0x2C / 255, green: 0x2C / 255, blue: 0x2E / 255, alpha: 1),  // #2c2c2e
+        dark: NSColor(red: 0xE4 / 255, green: 0xE4 / 255, blue: 0xE6 / 255, alpha: 1)  // #e4e4e6
+    )
+    public static let textSecondary = dynamic(light: NSColor.black.withAlphaComponent(0.45), dark: NSColor.white.withAlphaComponent(0.55))
+    public static let textTertiary = dynamic(light: NSColor.black.withAlphaComponent(0.35), dark: NSColor.white.withAlphaComponent(0.38))
+    /// Replaces `.background(.white)` across the app; the app's primary
+    /// surface color, light window background → near-black in dark mode.
+    public static let surface = dynamic(
+        light: .white,
+        dark: NSColor(red: 0x1E / 255, green: 0x1E / 255, blue: 0x20 / 255, alpha: 1)  // #1e1e20
+    )
+    public static let subtleBackground = dynamic(
+        light: NSColor(red: 0xFA / 255, green: 0xFA / 255, blue: 0xF8 / 255, alpha: 1),  // #fafaf8
+        dark: NSColor(red: 0x26 / 255, green: 0x26 / 255, blue: 0x28 / 255, alpha: 1)  // #262628
+    )
+    public static let hairline = dynamic(light: NSColor.black.withAlphaComponent(0.07), dark: NSColor.white.withAlphaComponent(0.10))
     public static let accentBlue = Color(red: 0x0A / 255, green: 0x84 / 255, blue: 0xFF / 255)  // #0a84ff
     public static let recordRed = Color(red: 0xFF / 255, green: 0x45 / 255, blue: 0x3A / 255)  // #ff453a
     public static let recordRedDark = Color(red: 0xD6 / 255, green: 0x3A / 255, blue: 0x30 / 255)  // #d63a30
     public static let successGreen = Color(red: 0x30 / 255, green: 0xB3 / 255, blue: 0x52 / 255)  // #30b352
-    public static let successGreenText = Color(red: 0x2A / 255, green: 0x7D / 255, blue: 0x43 / 255)  // #2a7d43
-    public static let successGreenTint = successGreen.opacity(0.12)
+    public static let successGreenText = dynamic(
+        light: NSColor(red: 0x2A / 255, green: 0x7D / 255, blue: 0x43 / 255, alpha: 1),  // #2a7d43
+        dark: NSColor(red: 0x4C / 255, green: 0xD0 / 255, blue: 0x74 / 255, alpha: 1)  // #4cd074
+    )
+    public static let successGreenTint = dynamic(light: successGreen.opacity(0.12), dark: successGreen.opacity(0.20))
     public static let warningAmber = Color(red: 0xFF / 255, green: 0x9F / 255, blue: 0x0A / 255)  // #ff9f0a
-    public static let warningAmberText = Color(red: 0x9A / 255, green: 0x63 / 255, blue: 0x00 / 255)  // #9a6300
-    public static let warningAmberTint = warningAmber.opacity(0.14)
-    public static let darkSurface = Color(red: 0x1C / 255, green: 0x1C / 255, blue: 0x1E / 255).opacity(0.96)
-    public static let chipBackground = Color.black.opacity(0.05)
+    public static let warningAmberText = dynamic(
+        light: NSColor(red: 0x9A / 255, green: 0x63 / 255, blue: 0x00 / 255, alpha: 1),  // #9a6300
+        dark: NSColor(red: 0xFF / 255, green: 0xB3 / 255, blue: 0x40 / 255, alpha: 1)  // #ffb340
+    )
+    public static let warningAmberTint = dynamic(light: warningAmber.opacity(0.14), dark: warningAmber.opacity(0.22))
+    /// Fixed dark surface used by elements that stay dark-on-light-or-dark
+    /// (the recording pill, toast banner): near-black in light mode, a
+    /// slightly lighter near-black in dark mode so it still separates from
+    /// the (now dark) window behind it.
+    public static let darkSurface = dynamic(
+        light: NSColor(red: 0x1C / 255, green: 0x1C / 255, blue: 0x1E / 255, alpha: 1).withAlphaComponent(0.96),
+        dark: NSColor(red: 0x2C / 255, green: 0x2C / 255, blue: 0x2E / 255, alpha: 1).withAlphaComponent(0.96)
+    )
+    public static let chipBackground = dynamic(light: NSColor.black.withAlphaComponent(0.05), dark: NSColor.white.withAlphaComponent(0.08))
+    /// 1pt stroke that separates a `darkSurface` element from the window
+    /// behind it — invisible-enough in light (a hairline on near-black) but
+    /// load-bearing in dark, where the window can be nearly the same color.
+    /// Applied unconditionally rather than only in dark mode.
+    public static let darkSurfaceStroke = Color.white.opacity(0.12)
+    /// Card/row hairline stroke — replaces ad hoc `Color.black.opacity(...)` strokes.
+    public static let cardStroke = dynamic(light: NSColor.black.withAlphaComponent(0.08), dark: NSColor.white.withAlphaComponent(0.10))
+    /// Dimming scrim behind modal overlays (e.g. the search overlay).
+    public static let scrim = dynamic(light: NSColor.black.withAlphaComponent(0.15), dark: NSColor.black.withAlphaComponent(0.45))
     /// Speaker-label colors for diarized transcripts, cycled by speaker index.
     public static let speakerPalette: [Color] = [
         accentBlue,
         successGreenText,
         Color(red: 0xAF / 255, green: 0x52 / 255, blue: 0xDE / 255),  // #af52de purple
         warningAmberText,
-        Color(red: 0x00 / 255, green: 0x7A / 255, blue: 0x8A / 255),  // #007a8a teal
+        dynamic(
+            light: NSColor(red: 0x00 / 255, green: 0x7A / 255, blue: 0x8A / 255, alpha: 1),  // #007a8a teal
+            dark: NSColor(red: 0x3F / 255, green: 0xB2 / 255, blue: 0xC4 / 255, alpha: 1)  // #3fb2c4
+        ),
         recordRedDark,
     ]
 
@@ -66,9 +131,20 @@ public struct RecapLogo: View {
         self.size = size
     }
 
+    // Pinned rather than following `Tokens.textPrimary` (which flips to a
+    // near-white in dark mode) — the brand square should stay a dark chip in
+    // both appearances rather than inverting to a light square.
+    private static let fill = Color(
+        NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(red: 0x3A / 255, green: 0x3A / 255, blue: 0x3C / 255, alpha: 1)  // #3a3a3c
+                : NSColor(red: 0x1C / 255, green: 0x1C / 255, blue: 0x1E / 255, alpha: 1)  // #1c1c1e
+        }
+    )
+
     public var body: some View {
         RoundedRectangle(cornerRadius: size * 0.27)
-            .fill(Tokens.textPrimary)
+            .fill(Self.fill)
             .frame(width: size, height: size)
             .overlay {
                 HStack(alignment: .bottom, spacing: size * 0.07) {
@@ -82,6 +158,7 @@ public struct RecapLogo: View {
 
     private func bar(height fraction: CGFloat) -> some View {
         RoundedRectangle(cornerRadius: 1)
+            // stays: white bars read against the pinned-dark logo square in both modes
             .fill(.white)
             .frame(width: size * 0.09, height: size * fraction)
     }

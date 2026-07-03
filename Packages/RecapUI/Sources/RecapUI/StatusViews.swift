@@ -13,9 +13,10 @@ struct MeetingStatusView: View {
     var body: some View {
         switch status {
         case .recording:
+            // stays: white text on the solid red "Recording" chip in both modes
             chip("Recording", foreground: .white, background: Tokens.recordRed)
         case .queued:
-            chip("Queued", foreground: Tokens.textSecondary, background: Color.black.opacity(0.06))
+            chip("Queued", foreground: Tokens.textSecondary, background: Tokens.chipBackground)
         case .transcribing(let progress):
             HStack(spacing: 10) {
                 Text("Transcribing")

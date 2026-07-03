@@ -51,18 +51,22 @@ struct RecordingPill: View {
                             .frame(maxWidth: 110, alignment: .leading)
                     }
                 }
+                // stays: white-on-darkSurface pill internals in both modes
                 .foregroundStyle(.white.opacity(0.55))
                 .padding(.leading, 12)
                 .overlay(alignment: .leading) {
+                    // stays: white-on-darkSurface pill internals in both modes
                     Rectangle()
                         .fill(.white.opacity(0.15))
                         .frame(width: 1, height: 18)
                 }
                 .help(inputDeviceName.map { "Recording from \($0)" } ?? "")
                 Button(action: onPauseToggle) {
+                    // stays: dark glyph pinned to black on a solid white control-button
+                    // in both modes (Tokens.textPrimary would invert to near-white here)
                     Image(systemName: isPaused ? "play.fill" : "pause.fill")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Tokens.textPrimary)
+                        .foregroundStyle(.black)
                         .frame(width: 27, height: 27)
                         .background(.white, in: Circle())
                 }
@@ -70,9 +74,11 @@ struct RecordingPill: View {
                 .keyboardShortcut("p", modifiers: [.command, .option])
                 .help(isPaused ? "Resume recording (⌥⌘P)" : "Pause recording (⌥⌘P)")
                 Button(action: onStop) {
+                    // stays: dark text pinned to black on a solid white control-button
+                    // in both modes (Tokens.textPrimary would invert to near-white here)
                     Text("Stop")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Tokens.textPrimary)
+                        .foregroundStyle(.black)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 6)
                         .background(.white, in: Capsule())
@@ -81,6 +87,7 @@ struct RecordingPill: View {
                 .keyboardShortcut(".", modifiers: .command)
             }
             if let lastHeardText, !lastHeardText.isEmpty {
+                // stays: white-on-darkSurface pill internals in both modes
                 Text(lastHeardText)
                     .font(Tokens.caption)
                     .foregroundStyle(.white.opacity(0.5))
@@ -98,6 +105,12 @@ struct RecordingPill: View {
         // ends would look increasingly stretched, so use a fixed radius that
         // stays pill-like at both heights.
         .background(Tokens.darkSurface, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay {
+            // Separates the dark pill from an equally-dark window behind it.
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(Tokens.darkSurfaceStroke, lineWidth: 1)
+        }
+        // stays: shadow stays black in both modes
         .shadow(color: .black.opacity(0.25), radius: 14, y: 8)
         // The bottom overlay proposes a narrow width; without this the HStack
         // compresses — "local" wraps and the Stop label truncates to "…".
@@ -109,12 +122,14 @@ struct RecordingPill: View {
     /// (so pauses already served are folded in). Paused: a static string.
     @ViewBuilder private var timer: some View {
         if isPaused {
+            // stays: white-on-darkSurface pill internals in both modes
             Text(Self.elapsedLabel(seconds: Int(clock.elapsed(at: .now))))
                 .font(Tokens.timer)
                 .foregroundStyle(.white.opacity(0.7))
         } else {
             let start = clock.syntheticStartDate(at: .now)
             TimelineView(.periodic(from: start, by: 1)) { context in
+                // stays: white-on-darkSurface pill internals in both modes
                 Text(Self.elapsedLabel(seconds: max(0, Int(context.date.timeIntervalSince(start)))))
                     .font(Tokens.timer)
                     .foregroundStyle(.white)
@@ -125,6 +140,7 @@ struct RecordingPill: View {
     private var waveform: some View {
         HStack(spacing: 2.5) {
             ForEach(levels.indices, id: \.self) { i in
+                // stays: white-on-darkSurface pill internals in both modes
                 Capsule()
                     .fill(.white.opacity(0.75))
                     .frame(width: 2.5, height: max(3, CGFloat(levels[i]) * 18))
@@ -199,5 +215,42 @@ struct PulsingDot: View {
         )
     }
     .padding(40)
-    .background(.white)
+    .background(Tokens.surface)
+}
+
+#Preview("Dark") {
+    VStack(spacing: 24) {
+        RecordingPill(
+            clock: RecordingClock(startedAt: .now.addingTimeInterval(-1453)),
+            isPaused: false,
+            levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
+            inputDeviceName: "AirPods Pro",
+            lastHeardText: "…so I think we should ship the onboarding revamp next sprint.",
+            onPauseToggle: {},
+            onStop: {}
+        )
+        RecordingPill(
+            clock: RecordingClock(startedAt: .now.addingTimeInterval(-1453)),
+            isPaused: false,
+            levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
+            inputDeviceName: "AirPods Pro",
+            onPauseToggle: {},
+            onStop: {}
+        )
+        RecordingPill(
+            clock: {
+                var clock = RecordingClock(startedAt: .now.addingTimeInterval(-1453))
+                clock.pause(at: .now)
+                return clock
+            }(),
+            isPaused: true,
+            levels: [Float](repeating: 0, count: 16),
+            inputDeviceName: "AirPods Pro",
+            onPauseToggle: {},
+            onStop: {}
+        )
+    }
+    .padding(40)
+    .background(Tokens.surface)
+    .preferredColorScheme(.dark)
 }

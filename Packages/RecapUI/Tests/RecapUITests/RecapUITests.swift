@@ -3,7 +3,7 @@ import Testing
 @testable import RecapUI
 
 @Suite struct DesignTokenTests {
-    @Test func tokensResolveToExpectedHex() {
+    @Test @MainActor func tokensResolveToExpectedHex() {
         #expect(Tokens.textPrimary.resolvedHex == "1C1C1E")
         #expect(Tokens.accentBlue.resolvedHex == "0A84FF")
         #expect(Tokens.recordRed.resolvedHex == "FF453A")

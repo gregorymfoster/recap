@@ -108,7 +108,7 @@ struct MeetingDetailView: View {
                     .padding(.top, 16)
             }
         }
-        .background(.white)
+        .background(Tokens.surface)
     }
 
     /// "✨ Enhanced / My original notes" switcher, shown once enhancement exists.
@@ -158,7 +158,7 @@ struct MeetingDetailView: View {
                     ForEach(record.meeting.attendees, id: \.self) { attendee in
                         Text(attendee)
                             .font(Tokens.caption)
-                            .foregroundStyle(.black.opacity(0.6))
+                            .foregroundStyle(Tokens.textSecondary)
                             .padding(.horizontal, 9)
                             .padding(.vertical, 3)
                             .background(Tokens.chipBackground, in: Capsule())
@@ -219,7 +219,41 @@ struct MeetingDetailView: View {
         .foregroundStyle(Tokens.textSecondary)
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(Color(red: 0xF8 / 255, green: 0xF8 / 255, blue: 0xF6 / 255).opacity(0.9))
+        .background(Tokens.subtleBackground.opacity(0.9))
         .overlay(alignment: .top) { Divider() }
     }
 }
+
+#if DEBUG
+private func previewRecord() -> MeetingRecord {
+    MeetingRecord(
+        meeting: Meeting(
+            title: "Design sync — Q3 roadmap",
+            date: .now.addingTimeInterval(-3600),
+            duration: 1_453,
+            attendees: ["Maya", "Sam", "Priya"],
+            status: .ready
+        ),
+        folderURL: URL(filePath: "/dev/null")
+    )
+}
+
+#Preview("Light") {
+    MeetingDetailView(record: previewRecord())
+        .environment(LibraryStore.fixture())
+        .environment(MeetingSessionStore())
+        .environment(WhisperModelManager())
+        .environment(SettingsStore())
+        .frame(width: 900, height: 640)
+}
+
+#Preview("Dark") {
+    MeetingDetailView(record: previewRecord())
+        .environment(LibraryStore.fixture())
+        .environment(MeetingSessionStore())
+        .environment(WhisperModelManager())
+        .environment(SettingsStore())
+        .frame(width: 900, height: 640)
+        .preferredColorScheme(.dark)
+}
+#endif
