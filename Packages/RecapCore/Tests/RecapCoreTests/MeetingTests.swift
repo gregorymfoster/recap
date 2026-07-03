@@ -36,6 +36,35 @@ import Testing
         #expect(meeting.title == "Weekly standup")
     }
 
+    @Test func decodesLegacyJSONWithoutPreferredNotesView() throws {
+        // A meeting.json written before `preferredNotesView` existed must
+        // still decode, defaulting to nil (Enhanced-when-available).
+        let legacyJSON = """
+        {
+          "id": "6F1E2D3C-4B5A-6978-8899-AABBCCDDEEFF",
+          "title": "Weekly standup",
+          "date": 700000000,
+          "duration": 900,
+          "attendees": ["Maya"],
+          "status": {"ready": {}}
+        }
+        """
+        let meeting = try JSONDecoder().decode(Meeting.self, from: Data(legacyJSON.utf8))
+        #expect(meeting.preferredNotesView == nil)
+    }
+
+    @Test func preferredNotesViewRoundTripsThroughJSON() throws {
+        let meeting = Meeting(
+            title: "Weekly standup",
+            date: Date(timeIntervalSince1970: 1_780_000_000),
+            status: .ready,
+            preferredNotesView: .original
+        )
+        let data = try JSONEncoder().encode(meeting)
+        let decoded = try JSONDecoder().decode(Meeting.self, from: data)
+        #expect(decoded.preferredNotesView == .original)
+    }
+
     @Test func transcriptFullTextJoinsUtterances() {
         let transcript = Transcript(
             utterances: [
