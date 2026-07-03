@@ -8,6 +8,7 @@ struct OnboardingView: View {
     @Environment(SettingsStore.self) private var settings
     @State private var step = 0
     @State private var micGranted: Bool?
+    @State private var systemAudioResult: SystemAudioProbeResult?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -126,12 +127,36 @@ struct OnboardingView: View {
                 permissionRow(
                     icon: "speaker.wave.2.fill",
                     title: "System Audio Recording",
-                    detail: "The other participants, without a bot in the call. macOS asks the first time you record.",
-                    trailing: { EmptyView() }
+                    detail: systemAudioDetail,
+                    trailing: {
+                        if systemAudioResult == .captured {
+                            Label("Granted", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(Tokens.successGreenText)
+                                .font(Tokens.caption)
+                        } else {
+                            SystemAudioProbeButton { result in
+                                systemAudioResult = result
+                                settings.lastSystemAudioTapFailed = (result != .captured)
+                            }
+                        }
+                    }
                 )
             }
             .padding(16)
             .background(Tokens.subtleBackground, in: RoundedRectangle(cornerRadius: Tokens.radiusCard))
+        }
+    }
+
+    /// Detail text under the System Audio row: sets expectations up front,
+    /// then reports the probe's outcome once tried.
+    private var systemAudioDetail: String {
+        switch systemAudioResult {
+        case .captured:
+            "The other participants, without a bot in the call."
+        case .denied, .failed:
+            RecapCopy.systemAudioDeniedHint
+        case nil:
+            "The other participants, without a bot in the call. \(RecapCopy.systemAudioNotDeterminedHint)"
         }
     }
 

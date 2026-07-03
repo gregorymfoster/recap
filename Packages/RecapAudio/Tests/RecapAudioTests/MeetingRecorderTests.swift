@@ -288,3 +288,122 @@ private struct FakeError: Error {}
         #expect(collected.contains { $0 > 0 })
     }
 }
+
+// MARK: - SystemAudioProbeResult error mapping
+
+@Suite struct SystemAudioProbeResultMappingTests {
+    @Test func tapCreationFailedMapsToDenied() {
+        let result = SystemAudioProbeResult(mappingError: SystemAudioTap.TapError.tapCreationFailed(-1))
+        #expect(result == .denied)
+    }
+
+    @Test func aggregateCreationFailedMapsToFailedWithMessage() {
+        let result = SystemAudioProbeResult(mappingError: SystemAudioTap.TapError.aggregateCreationFailed(-2))
+        #expect(result == .failed("aggregateCreationFailed(-2)"))
+    }
+
+    @Test func ioSetupFailedMapsToFailedWithMessage() {
+        let result = SystemAudioProbeResult(mappingError: SystemAudioTap.TapError.ioSetupFailed(-3))
+        #expect(result == .failed("ioSetupFailed(-3)"))
+    }
+
+    @Test func formatUnsupportedMapsToFailed() {
+        let result = SystemAudioProbeResult(mappingError: SystemAudioTap.TapError.formatUnsupported)
+        #expect(result == .failed("formatUnsupported"))
+    }
+
+    @Test func unknownErrorMapsToFailed() {
+        let result = SystemAudioProbeResult(mappingError: FakeError())
+        guard case .failed = result else {
+            Issue.record("expected .failed, got \(result)")
+            return
+        }
+    }
+}
+
+// MARK: - MeetingRecorder.probeSystemAudio behavior
+
+@MainActor
+@Suite struct SystemAudioProbeTests {
+    @Test func succeedsOnFirstAttemptWithoutSleeping() async {
+        let tap = FakeSystemAudioSource()
+        var sleepCalls = 0
+
+        let result = await MeetingRecorder.probeSystemAudio(
+            makeTap: { tap },
+            sleep: { sleepCalls += 1 }
+        )
+
+        #expect(result == .captured)
+        #expect(sleepCalls == 0)
+        #expect(tap.stopCalled)
+    }
+
+    @Test func deniedFirstAttemptRetriesOnceAndSucceeds() async {
+        var attempt = 0
+        var sleepCalls = 0
+
+        let result = await MeetingRecorder.probeSystemAudio(
+            makeTap: {
+                attempt += 1
+                let tap = FakeSystemAudioSource()
+                if attempt == 1 {
+                    tap.startError = SystemAudioTap.TapError.tapCreationFailed(-1)
+                }
+                return tap
+            },
+            sleep: { sleepCalls += 1 }
+        )
+
+        #expect(result == .captured)
+        #expect(attempt == 2)
+        #expect(sleepCalls == 1)
+    }
+
+    @Test func deniedOnBothAttemptsReturnsDenied() async {
+        var attempt = 0
+        var sleepCalls = 0
+
+        let result = await MeetingRecorder.probeSystemAudio(
+            makeTap: {
+                attempt += 1
+                let tap = FakeSystemAudioSource()
+                tap.startError = SystemAudioTap.TapError.tapCreationFailed(-1)
+                return tap
+            },
+            sleep: { sleepCalls += 1 }
+        )
+
+        #expect(result == .denied)
+        #expect(attempt == 2)
+        #expect(sleepCalls == 1)
+    }
+
+    @Test func nonDeniedFailureDoesNotRetry() async {
+        var attempt = 0
+        var sleepCalls = 0
+
+        let result = await MeetingRecorder.probeSystemAudio(
+            makeTap: {
+                attempt += 1
+                let tap = FakeSystemAudioSource()
+                tap.startError = SystemAudioTap.TapError.formatUnsupported
+                return tap
+            },
+            sleep: { sleepCalls += 1 }
+        )
+
+        #expect(result == .failed("formatUnsupported"))
+        #expect(attempt == 1)
+        #expect(sleepCalls == 0)
+    }
+
+    @Test func stopIsCalledEvenOnFailure() async {
+        let tap = FakeSystemAudioSource()
+        tap.startError = SystemAudioTap.TapError.formatUnsupported
+
+        _ = await MeetingRecorder.probeSystemAudio(makeTap: { tap }, sleep: {})
+
+        #expect(tap.stopCalled)
+    }
+}

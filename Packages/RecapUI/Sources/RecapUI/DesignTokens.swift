@@ -121,6 +121,23 @@ public enum RecapCopy {
     /// recording starts without system audio.
     public static let systemAudioUnavailableMessage =
         "System audio isn't being captured — only your microphone is recording."
+
+    /// Fix-it hint under the Microphone permission row when denied.
+    static let microphoneDeniedHint =
+        "Turn on Recap under Microphone, then come back — status updates automatically."
+
+    /// Fix-it hint under the Calendar permission row when denied.
+    static let calendarDeniedHint =
+        "Turn on Recap under Calendars, then come back — status updates automatically."
+
+    /// Fix-it hint under the System Audio row after a denied probe.
+    static let systemAudioDeniedHint =
+        "Turn on Recap under Screen & System Audio Recording, then test again."
+
+    /// Caption under the System Audio row before it's ever been tested —
+    /// sets expectations that testing may trigger a macOS prompt.
+    static let systemAudioNotDeterminedHint =
+        "macOS may ask for permission — click Allow."
 }
 
 /// The Recap logo: rounded dark square containing three waveform bars.

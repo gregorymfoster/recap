@@ -13,6 +13,7 @@ struct SettingsView: View {
     @Environment(QueueStore.self) private var queue: QueueStore?
     @State private var micStatus = AVAudioApplication.shared.recordPermission
     @State private var calendarStatus = EKEventStore.authorizationStatus(for: .event)
+    @State private var calendarRequestStore: EKEventStore?
     @State private var inputDevices: [AudioInputDevice] = AudioInputDevices.inputDevices()
     @State private var deviceListListener: AudioObjectPropertyListenerBlock?
     @State private var sizeSummary: LibrarySizeSummary?
@@ -24,23 +25,62 @@ struct SettingsView: View {
                 PermissionRow(
                     icon: "mic.fill",
                     title: "Microphone",
-                    status: micStatus.permissionStatus
+                    status: micStatus.permissionStatus,
+                    kind: .microphone
                 ) {
-                    PrivacyPane.open(PrivacyPane.microphone)
+                    switch $0 {
+                    case .allow:
+                        Task {
+                            _ = await MeetingRecorder.requestMicPermission()
+                            refreshPermissionStatuses()
+                        }
+                    case .openSystemSettings:
+                        PrivacyPane.open(PrivacyPane.microphone)
+                    case .test, .none:
+                        break
+                    }
                 }
                 PermissionRow(
                     icon: "speaker.wave.2.fill",
                     title: "System Audio",
-                    status: systemAudioStatus
+                    status: systemAudioStatus,
+                    kind: .systemAudio
                 ) {
-                    PrivacyPane.open(PrivacyPane.systemAudio)
+                    if $0 == .openSystemSettings {
+                        PrivacyPane.open(PrivacyPane.systemAudio)
+                    }
+                } trailingContent: {
+                    if systemAudioStatus.showsSystemAudioProbe {
+                        SystemAudioProbeButton(label: systemAudioStatus.systemAudioProbeLabel) { result in
+                            switch result {
+                            case .captured:
+                                settings.lastSystemAudioTapFailed = false
+                            case .denied, .failed:
+                                settings.lastSystemAudioTapFailed = true
+                            }
+                        }
+                    }
                 }
                 PermissionRow(
                     icon: "calendar",
                     title: "Calendar",
-                    status: calendarStatus.permissionStatus
+                    status: calendarStatus.permissionStatus,
+                    kind: .calendar
                 ) {
-                    PrivacyPane.open(PrivacyPane.calendars)
+                    switch $0 {
+                    case .allow:
+                        let store = EKEventStore()
+                        calendarRequestStore = store
+                        Task {
+                            _ = try? await store.requestFullAccessToEvents()
+                            calendarRequestStore = nil
+                            refreshPermissionStatuses()
+                        }
+                    case .openSystemSettings:
+                        PrivacyPane.open(PrivacyPane.calendars)
+                    case .test, .none:
+                        break
+                    }
                 }
                 Text("Recap re-checks these whenever this window comes forward, so a change in System Settings shows up here right away.")
                     .font(Tokens.caption)
@@ -296,13 +336,10 @@ struct SettingsView: View {
     }
 
     /// There's no query API for the system-audio tap's permission — only the
-    /// outcome of the last attempt, persisted by `AppStores.startRecording()`.
+    /// outcome of the last attempt, persisted by `AppStores.startRecording()`
+    /// or the Settings "Test" button.
     private var systemAudioStatus: PermissionStatus {
-        switch settings.lastSystemAudioTapFailed {
-        case .some(true): .unavailable
-        case .some(false): .workedLastTime
-        case nil: .notDetermined
-        }
+        .systemAudio(lastTapFailed: settings.lastSystemAudioTapFailed)
     }
 
     private func refreshPermissionStatuses() {
@@ -311,97 +348,67 @@ struct SettingsView: View {
     }
 }
 
-/// A permission's status as shown in the Permissions section. Distinct from
-/// the raw system enums, since the system-audio tap has no query API and
-/// needs a third "last attempt failed" state the others don't.
-private enum PermissionStatus {
-    case granted
-    case denied
-    case notDetermined
-    /// System-audio only: the tap failed the last time a recording started.
-    case unavailable
-    /// System-audio only: the tap succeeded the last time a recording
-    /// started. Unlike mic/calendar, there's no query API to re-verify this
-    /// live, so it's a distinct, more honest state than "Granted" — the
-    /// permission could have been revoked since.
-    case workedLastTime
-
-    var label: String {
-        switch self {
-        case .granted: "Granted"
-        case .denied: "Denied"
-        case .notDetermined: "Not yet asked"
-        case .unavailable: "Unavailable at last recording"
-        case .workedLastTime: "Worked at last recording"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .granted, .workedLastTime: Tokens.successGreenText
-        case .denied, .unavailable: Tokens.warningAmberText
-        case .notDetermined: Tokens.textTertiary
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .granted, .workedLastTime: "checkmark.circle.fill"
-        case .denied, .unavailable: "exclamationmark.triangle.fill"
-        case .notDetermined: "circle.dashed"
-        }
-    }
-
-    /// Whether the row's "Open System Settings" button is worth showing.
-    var showsSettingsButton: Bool {
-        switch self {
-        case .denied, .unavailable: true
-        case .granted, .notDetermined, .workedLastTime: false
-        }
-    }
-}
-
-private extension AVAudioApplication.recordPermission {
-    var permissionStatus: PermissionStatus {
-        switch self {
-        case .granted: .granted
-        case .denied: .denied
-        default: .notDetermined
-        }
-    }
-}
-
-private extension EKAuthorizationStatus {
-    var permissionStatus: PermissionStatus {
-        switch self {
-        case .fullAccess: .granted
-        case .notDetermined: .notDetermined
-        default: .denied
-        }
-    }
-}
-
-/// One row in the Permissions section: icon, title, live status, and a deep
-/// link to the relevant System Settings pane when action is needed.
-private struct PermissionRow: View {
+/// One row in the Permissions section: icon, title, live status, a primary
+/// action button driven by `PermissionAction`, and a fix-it hint when the
+/// user needs to go to System Settings. `onAction` handles `.allow` and
+/// `.openSystemSettings`; `.test` is rendered by the caller via
+/// `trailingContent` since it needs its own local spinner state
+/// (`SystemAudioProbeButton`), not just a fire-and-forget closure.
+private struct PermissionRow<TrailingContent: View>: View {
     let icon: String
     let title: String
     let status: PermissionStatus
-    let openSettings: () -> Void
+    let kind: PermissionKind
+    let onAction: (PermissionAction) -> Void
+    @ViewBuilder var trailingContent: () -> TrailingContent
+
+    init(
+        icon: String,
+        title: String,
+        status: PermissionStatus,
+        kind: PermissionKind,
+        onAction: @escaping (PermissionAction) -> Void,
+        @ViewBuilder trailingContent: @escaping () -> TrailingContent = { EmptyView() }
+    ) {
+        self.icon = icon
+        self.title = title
+        self.status = status
+        self.kind = kind
+        self.onAction = onAction
+        self.trailingContent = trailingContent
+    }
+
+    private var action: PermissionAction { status.action(for: kind) }
 
     var body: some View {
-        LabeledContent {
-            HStack(spacing: 10) {
-                Label(status.label, systemImage: status.systemImage)
-                    .font(Tokens.caption)
-                    .foregroundStyle(status.color)
-                if status.showsSettingsButton {
-                    Button("Open System Settings") { openSettings() }
-                        .controlSize(.small)
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent {
+                HStack(spacing: 10) {
+                    Label(status.label, systemImage: status.systemImage)
+                        .font(Tokens.caption)
+                        .foregroundStyle(status.color)
+                    switch action {
+                    case .allow:
+                        Button("Allow") { onAction(.allow) }
+                            .controlSize(.small)
+                            .buttonStyle(.borderedProminent)
+                            .tint(Tokens.accentBlue)
+                    case .openSystemSettings:
+                        Button("Open System Settings") { onAction(.openSystemSettings) }
+                            .controlSize(.small)
+                        trailingContent()
+                    case .test, .none:
+                        trailingContent()
+                    }
                 }
+            } label: {
+                Label(title, systemImage: icon)
             }
-        } label: {
-            Label(title, systemImage: icon)
+            if let hint = status.fixItHint(for: kind) {
+                Text(hint)
+                    .font(Tokens.caption)
+                    .foregroundStyle(Tokens.textTertiary)
+            }
         }
     }
 }

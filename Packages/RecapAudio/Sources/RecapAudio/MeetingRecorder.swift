@@ -5,6 +5,36 @@ import os
 
 private let recorderLog = Logger(subsystem: "com.gregfoster.recap", category: "MeetingRecorder")
 
+/// Outcome of `MeetingRecorder.probeSystemAudio()`.
+public enum SystemAudioProbeResult: Sendable, Equatable {
+    /// The tap started successfully — permission works.
+    case captured
+    /// Tap creation failed — almost certainly a TCC denial.
+    case denied
+    /// Some other failure (aggregate device, IO, or format setup).
+    case failed(String)
+
+    /// Maps a thrown error from `SystemAudioTap.start()` to a probe result.
+    /// Pure and exhaustive over `SystemAudioTap.TapError`; anything else
+    /// (shouldn't happen in practice) falls back to `.failed`.
+    init(mappingError error: Error) {
+        guard let tapError = error as? SystemAudioTap.TapError else {
+            self = .failed(String(describing: error))
+            return
+        }
+        switch tapError {
+        case .tapCreationFailed:
+            self = .denied
+        case .aggregateCreationFailed(let status):
+            self = .failed("aggregateCreationFailed(\(status))")
+        case .ioSetupFailed(let status):
+            self = .failed("ioSetupFailed(\(status))")
+        case .formatUnsupported:
+            self = .failed("formatUnsupported")
+        }
+    }
+}
+
 /// Mid-recording conditions the UI should know about.
 public enum RecorderEvent: Equatable, Sendable {
     /// The mic capture graph was rebuilt (device switch, wake from sleep).
@@ -83,6 +113,56 @@ public final class MeetingRecorder {
 
     public static func requestMicPermission() async -> Bool {
         await MicSource.requestPermission()
+    }
+
+    /// Briefly starts a real system-audio tap to verify (or trigger the
+    /// macOS prompt for) the System Audio Recording permission, then tears
+    /// it down. No samples are read or written anywhere.
+    ///
+    /// There is no query/request API for this TCC permission — the tap
+    /// creation call itself is the only way to learn the status or (when
+    /// notDetermined) surface the system prompt. Because that prompt is
+    /// asynchronous, a first denial is retried once after a short delay to
+    /// give the user a chance to click "Allow".
+    public static func probeSystemAudio() async -> SystemAudioProbeResult {
+        await probeSystemAudio(
+            makeTap: { SystemAudioTap() },
+            sleep: { try? await Task.sleep(for: .seconds(2)) }
+        )
+    }
+
+    /// Testable core of `probeSystemAudio()`: tap construction and the
+    /// retry delay are injected so the outcome mapping and one-retry
+    /// behavior can be exercised with a fake tap, without touching real
+    /// Core Audio or waiting on a real timer.
+    static func probeSystemAudio(
+        makeTap: @MainActor () -> SystemAudioCapturing,
+        sleep: () async -> Void
+    ) async -> SystemAudioProbeResult {
+        var result = attemptSystemAudioProbe(makeTap: makeTap)
+        if result == .denied {
+            await sleep()
+            result = attemptSystemAudioProbe(makeTap: makeTap)
+        }
+        recorderLog.info("system audio probe: \(String(describing: result), privacy: .public)")
+        return result
+    }
+
+    /// One attempt: start a fresh tap and immediately stop it, discarding
+    /// any stream. Runs on the main actor because `SystemAudioTap` is.
+    @MainActor
+    private static func attemptSystemAudioProbe(
+        makeTap: @MainActor () -> SystemAudioCapturing
+    ) -> SystemAudioProbeResult {
+        let tap = makeTap()
+        do {
+            _ = try tap.start()
+            tap.stop()
+            return .captured
+        } catch {
+            tap.stop()
+            return SystemAudioProbeResult(mappingError: error)
+        }
     }
 
     /// Switches the input device mid-recording (or before starting). Goes

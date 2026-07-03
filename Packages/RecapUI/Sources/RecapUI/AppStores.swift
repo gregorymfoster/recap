@@ -249,6 +249,7 @@ public final class AppStores {
                     RecapCopy.systemAudioUnavailableMessage, actionTitle: "Open Settings"
                 ) { [weak self] in
                     self?.router.section = .settings
+                    PrivacyPane.open(PrivacyPane.systemAudio)
                 }
             } else if settings.includeSystemAudio {
                 settings.lastSystemAudioTapFailed = false
