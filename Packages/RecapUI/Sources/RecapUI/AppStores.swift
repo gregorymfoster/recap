@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import Foundation
 import OSLog
+import RecapAudio
 import RecapCore
 import RecapTranscription
 
@@ -94,6 +95,36 @@ public final class AppStores {
             exportDebounce = .seconds(5)
             makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
             makeRecordPrompter = { RecordPrompter(onRecord: $0) }
+        } else if ProcessInfo.processInfo.arguments.contains("-soak") {
+            // Soak-test graph: real recording pipeline (mixer, writer, clock,
+            // menu bar) driven by synthetic zero-hardware audio sources, no
+            // transcription engine, no queue. Disk-backed under a throwaway
+            // temp root so `Scripts/soak-test.sh` can sample the real app's
+            // CPU/memory for a runaway main-thread loop without touching mic
+            // or system-audio TCC permissions. See `SyntheticAudioSource`.
+            settings = .ephemeralOnboarded()
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("RecapSoak-\(UUID().uuidString)")
+            let storage = LibraryStorage(rootURL: root)
+            let index = (try? SearchIndex()) ?? (try! SearchIndex())
+            let changeBus = LibraryChangeBus()
+            let library = LibraryStore(storage: storage, index: index, changeBus: changeBus)
+            let models = WhisperModelManager()
+            self.library = library
+            self.models = models
+            self.storage = storage
+            self.changeBus = changeBus
+            session = MeetingSessionStore(makeRecorder: {
+                MeetingRecorder(mic: SyntheticMicSource(), makeSystemTap: { SyntheticSystemAudioSource() })
+            })
+            queue = nil
+            exportDebounce = .seconds(5)
+            makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
+            makeRecordPrompter = { RecordPrompter(onRecord: $0) }
+            let session = self.session
+            Task { @MainActor in
+                guard let record = library.startNewMeeting(title: "Soak recording") else { return }
+                await session.start(record: record, engine: nil, includeSystemAudio: true, includeMic: true)
+            }
         } else {
             let settings = SettingsStore()
             let storage = LibraryStorage(rootURL: settings.saveRootURL)

@@ -30,6 +30,10 @@ Build, then launch with the `-fixtures` arg: `open <path>/Recap.app --args -fixt
 `Recap (Fixtures)` scheme in Xcode. Swaps in sample meetings and ephemeral settings — no disk
 writes, no processing queue. Use for UI work and screenshots.
 
+`-soak` is a similar launch argument, for the soak harness only: it auto-starts a synthetic-audio
+recording (no mic/system-audio hardware, no transcription engine) against throwaway temp storage
+with no processing queue. Driven by `Scripts/soak-test.sh`; not for interactive use.
+
 ## Dev build vs prod
 
 Debug builds produce a fully independent **Recap Dev.app** (`com.gregfoster.recap.dev`) so a prod
@@ -61,6 +65,7 @@ changes. Not run in CI.
 - `swift run --package-path Packages/RecapEnhancement enhance-probe <transcript.json> [notes.md]` — needs Apple Intelligence; exits 2 when unavailable.
 - `swift run --package-path Packages/RecapEnhancement enhance-eval [--runs N] [--json]` — scores `Fixtures/enhance/` cases; run before/after any enhancement prompt change.
 - `swift run --package-path Packages/RecapTranscription transcribe-eval [--json] Fixtures/transcribe` — scores `Fixtures/transcribe/` cases by word error rate; run before/after any model default or decoding-option change. Not run in normal CI — runs nightly + on `workflow_dispatch` (see `transcription-eval` job in `.github/workflows/ci.yml`).
+- `./Scripts/soak-test.sh` — launches the real app in `-soak` mode (synthetic audio, no hardware, no transcription) and samples CPU/memory for ~30s, failing on a runaway main-thread loop (e.g. the MenuBarExtra re-render freeze). Not run per-PR — runs nightly + on `workflow_dispatch` (see `soak-test` job in `.github/workflows/ci.yml`).
 
 See `Fixtures/README.md` for fixture details and expected output.
 
