@@ -1,9 +1,11 @@
+import Foundation
 import RecapTranscription
 import SwiftUI
 
 /// The Models section: download, activate, and delete Whisper variants.
 struct ModelManagerView: View {
     @Environment(WhisperModelManager.self) private var manager
+    @State private var freeDiskBytes: Int64?
 
     var body: some View {
         ScrollView {
@@ -20,44 +22,70 @@ struct ModelManagerView: View {
 
                 LazyVStack(spacing: 10) {
                     ForEach(ModelCatalog.all) { model in
-                        ModelRow(model: model, state: manager.states[model.id] ?? .available)
+                        ModelRow(model: model, state: manager.states[model.id] ?? .available, freeDiskBytes: freeDiskBytes)
                     }
                 }
             }
             .padding(28)
         }
         .background(Tokens.surface)
-        .onAppear { manager.refresh() }
+        .onAppear {
+            manager.refresh()
+            freeDiskBytes = Self.availableDiskBytes(for: WhisperModelManager.defaultModelsRoot)
+        }
+    }
+
+    /// Free space on the volume that holds the models folder, using the
+    /// "important usage" key so it accounts for space macOS could reclaim
+    /// from purgeable caches — the same number System Settings' Storage pane
+    /// effectively bases its own headroom on.
+    private static func availableDiskBytes(for url: URL) -> Int64? {
+        (try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))
+            .flatMap(\.volumeAvailableCapacityForImportantUsage)
     }
 }
 
 private struct ModelRow: View {
     var model: ModelInfo
     var state: ModelState
+    var freeDiskBytes: Int64?
     @Environment(WhisperModelManager.self) private var manager
 
     private var isActive: Bool { manager.activeModelID == model.id }
+    private var diskSpaceFootnote: String? {
+        guard case .available = state else { return nil }
+        return ModelDiskSpace.footnote(freeBytes: freeDiskBytes, modelSizeMB: model.approximateSizeMB, modelDisplayName: model.displayName)
+    }
 
     var body: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    Text(model.displayName)
-                        .font(Tokens.rowTitle)
-                        .foregroundStyle(Tokens.textPrimary)
-                    if model.isRecommended {
-                        chip("Recommended", foreground: Tokens.accentBlue, background: Tokens.accentBlue.opacity(0.1))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text(model.displayName)
+                            .font(Tokens.rowTitle)
+                            .foregroundStyle(Tokens.textPrimary)
+                        if model.isRecommended {
+                            chip("Recommended", foreground: Tokens.accentBlue, background: Tokens.accentBlue.opacity(0.1))
+                        }
+                        if isActive {
+                            chip("Active", foreground: Tokens.successGreenText, background: Tokens.successGreenTint)
+                        } else if state == .installed {
+                            chip("Installed", foreground: Tokens.textSecondary, background: Tokens.chipBackground)
+                        }
                     }
-                    if isActive {
-                        chip("Active", foreground: Tokens.successGreenText, background: Tokens.successGreenTint)
-                    }
+                    Text("\(model.languages) · ~\(model.approximateSizeMB) MB · \(model.qualityHint)")
+                        .font(Tokens.meta)
+                        .foregroundStyle(Tokens.textSecondary)
                 }
-                Text("\(model.languages) · ~\(model.approximateSizeMB) MB · \(model.qualityHint)")
-                    .font(Tokens.meta)
-                    .foregroundStyle(Tokens.textSecondary)
+                Spacer(minLength: 12)
+                actions
             }
-            Spacer(minLength: 12)
-            actions
+            if let diskSpaceFootnote {
+                Text(diskSpaceFootnote)
+                    .font(Tokens.caption)
+                    .foregroundStyle(Tokens.warningAmberText)
+            }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
