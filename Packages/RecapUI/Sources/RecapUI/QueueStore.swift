@@ -211,8 +211,15 @@ public final class QueueStore {
             enhancer: enhancer,
             settings: settingsSnapshot,
             onStatus: { @Sendable id, status in
+                // A trashed meeting is dropped from the library immediately;
+                // an in-flight job for it can still land here afterward (its
+                // task isn't interrupted, see `ProcessingQueue.cancel`).
+                // `updateStatus` already no-ops for an unknown ID, but the
+                // toast path needs its own guard — there's no row left for
+                // this error to annotate.
+                let stillExists = await MainActor.run { library.record(for: id) != nil }
                 await library.updateStatus(id, to: status)
-                if case .error(let message) = status {
+                if case .error(let message) = status, stillExists {
                     await onError?(message)
                 }
                 if status == .ready {
@@ -263,10 +270,20 @@ public final class QueueStore {
     /// "Re-transcribe" context menu action (retryable after a failed or
     /// unsatisfying pass). Resets status to `.queued` first so the row shows
     /// the same quiet "Queued" state as any other pending job, then reuses
-    /// the normal enqueue path.
+    /// the normal enqueue path. Guards on library membership: a stale menu
+    /// action firing after the meeting was just trashed must not resurrect it.
     public func retranscribe(_ record: MeetingRecord, in library: LibraryStore) {
+        guard library.record(for: record.meeting.id) != nil else { return }
         library.updateStatus(record.meeting.id, to: .queued)
         enqueueTranscription(for: record.meeting.id)
+    }
+
+    /// Cancels every PENDING job for a meeting that just left the library
+    /// (moved to Trash). An in-flight job for it is left to finish/fail on
+    /// its own — the `onStatus` callback above guards against acting on a
+    /// stale meeting ID, so that natural finish/fail is harmless.
+    public func cancel(meetingID: UUID) {
+        Task { await queue.cancel(meetingID: meetingID) }
     }
 
     /// Re-runs transcription for every meeting parked in `.needsModel`. Called

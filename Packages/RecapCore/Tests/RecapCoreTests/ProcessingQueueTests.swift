@@ -109,6 +109,44 @@ private func waitUntil(
         #expect(await waitUntil { await executor.executed.count == 2 })
     }
 
+    @Test func cancelMeetingIDRemovesOnlyThatMeetingsPendingJobs() async {
+        let executor = FakeExecutor()
+        await executor.setHoldsJobs(true)
+        let queue = ProcessingQueue(executor: executor)
+        let targetID = UUID()
+        let otherID = UUID()
+        let running = ProcessingJob(kind: .transcribe, meetingID: targetID)
+        let pendingSameMeeting = ProcessingJob(kind: .enhance, meetingID: targetID)
+        let pendingOtherMeeting = ProcessingJob(kind: .transcribe, meetingID: otherID)
+        await queue.enqueue(running)
+        #expect(await waitUntil { await queue.snapshot.running == running })
+        await queue.enqueue(pendingSameMeeting)
+        await queue.enqueue(pendingOtherMeeting)
+        #expect(await queue.snapshot.pending == [pendingSameMeeting, pendingOtherMeeting])
+
+        await queue.cancel(meetingID: targetID)
+
+        // The pending job for the trashed meeting is gone; the other
+        // meeting's pending job survives untouched.
+        #expect(await queue.snapshot.pending == [pendingOtherMeeting])
+        // The already-running job for the trashed meeting isn't interrupted —
+        // cancel only prunes PENDING work.
+        #expect(await queue.snapshot.running == running)
+
+        await executor.setHoldsJobs(false)
+        await executor.releaseHeldJob()
+        #expect(await waitUntil { await executor.executed.count == 2 })
+        #expect(await executor.executed == [running, pendingOtherMeeting])
+    }
+
+    @Test func cancelMeetingIDWithNoPendingJobsIsANoOp() async {
+        let executor = FakeExecutor()
+        let queue = ProcessingQueue(executor: executor)
+        await queue.cancel(meetingID: UUID())
+        #expect(await queue.snapshot.pending.isEmpty)
+        #expect(await queue.snapshot.running == nil)
+    }
+
     @Test func observerSeesProgressAndCompletion() async {
         let executor = FakeExecutor()
         await executor.setHoldsJobs(true)

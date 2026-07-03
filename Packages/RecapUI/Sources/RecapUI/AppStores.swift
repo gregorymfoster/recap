@@ -420,6 +420,18 @@ public final class AppStores {
         }
     }
 
+    /// Moves a meeting to Trash and cancels any still-pending queue work for
+    /// it — the library row's "Move to Trash" context-menu action. Mirrors
+    /// the `stopRecording`/`importAudioFiles` shape: `AppStores` is the one
+    /// place that sees both `library` and `queue`, so it's the seam that
+    /// keeps them in sync rather than teaching `LibraryStore` about the
+    /// queue. `queue` is nil in the fixtures graph, where trashing already
+    /// no-ops (no real folder to trash for a `/dev/null` fixture record).
+    public func moveToTrash(_ record: MeetingRecord) {
+        library.moveToTrash(record)
+        queue?.cancel(meetingID: record.meeting.id)
+    }
+
     /// Navigates to a meeting (used by the menu bar extra's jump items).
     public func showMeeting(_ id: UUID) {
         router.section = .library

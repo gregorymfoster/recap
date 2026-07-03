@@ -267,7 +267,7 @@ struct LibraryView: View {
         }
         Divider()
         Button("Move to Trash", role: .destructive) {
-            library.moveToTrash(record)
+            stores?.moveToTrash(record)
         }
         .disabled(!isOnDisk(record) || isActivelyRecording(record))
     }

@@ -91,6 +91,20 @@ public actor ProcessingQueue {
         pump()
     }
 
+    /// Drops every PENDING job for `meetingID` (e.g. the meeting was just
+    /// moved to Trash). An already-running job for this meeting is left to
+    /// finish/fail on its own — this queue doesn't interrupt in-flight work,
+    /// it just makes sure nothing new is dispatched for a meeting that no
+    /// longer exists.
+    public func cancel(meetingID: UUID) {
+        let before = pending.count
+        pending.removeAll { $0.meetingID == meetingID }
+        let removed = before - pending.count
+        guard removed > 0 else { return }
+        queueLog.info("jobs canceled: meetingID=\(meetingID.uuidString, privacy: .private) count=\(removed, privacy: .public)")
+        notify()
+    }
+
     public func pause() {
         manuallyPaused = true
         notify()
