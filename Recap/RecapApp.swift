@@ -76,6 +76,11 @@ struct RecapApp: App {
 /// adaptor instantiates it before the App struct's stores are reachable, so
 /// the graph arrives via the static hook (set in `RecapApp.init`) and any
 /// URLs delivered before then are buffered.
+///
+/// Also owns the ⌘Q-while-recording guard (design spec 8f): quitting mid-
+/// recording must never silently drop audio, so termination is intercepted,
+/// confirmed with a native alert, and only proceeds after the normal
+/// stop-and-save flow has finished.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var stores: AppStores? {
@@ -93,6 +98,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let urls = pendingURLs
         pendingURLs = []
         stores.importAudioFiles(urls)
+    }
+
+    /// Blocks quitting mid-recording behind a confirmation alert; a manual
+    /// stop-and-save always finishes before termination actually proceeds.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let stores = Self.stores else { return .terminateNow }
+        let title = stores.session.activeRecord?.meeting.title ?? ""
+        let elapsedLabel = stores.session.menuBarElapsedLabel ?? "0:00"
+        switch QuitGuard.decide(isRecording: stores.session.isRecording, title: title, elapsedLabel: elapsedLabel) {
+        case .terminateNow:
+            return .terminateNow
+        case .confirmBeforeTerminating(let title, let elapsed):
+            let alert = NSAlert()
+            alert.messageText = "Still recording '\(title)'"
+            alert.informativeText = "\(elapsed) recorded so far. Quitting stops the recording and saves it to your library."
+            alert.addButton(withTitle: "Stop & Save, then Quit")
+            alert.addButton(withTitle: "Keep Recording")
+            let response = alert.runModal()
+            guard response == .alertFirstButtonReturn else {
+                // "Keep Recording" — cancel the quit outright.
+                return .terminateCancel
+            }
+            // Run the app's NORMAL stop flow (same path a manual Stop click
+            // takes) so the meeting is finalized and queued exactly like any
+            // other stop, then let termination proceed once that's done.
+            stores.stopRecording()
+            Task { @MainActor in
+                // `stopRecording()` is fire-and-forget internally (it awaits
+                // the recorder inside its own Task); give it a beat to reach
+                // `session.activeRecord == nil` before replying, so a slow
+                // write never races app exit.
+                while stores.session.activeRecord != nil {
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+                NSApp.reply(toApplicationShouldTerminate: true)
+            }
+            return .terminateLater
+        }
     }
 }
 

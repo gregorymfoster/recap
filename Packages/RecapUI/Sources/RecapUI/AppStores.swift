@@ -49,6 +49,10 @@ public final class AppStores {
     public let queue: QueueStore?
     public let router = AppRouter()
     public let toasts = ToastCenter()
+    /// Posts "‹meeting› is ready" notifications (design spec 8f). `nil` in
+    /// fixtures/soak graphs — nothing there ever reaches a real `.ready`
+    /// transition through a real queue, so there's nothing to notify about.
+    @ObservationIgnored private var completionNotifier: CompletionNotifier?
     /// In-app "update available" indicator state. Driven by the app target's
     /// Sparkle owner (`UpdaterModel`); read by the sidebar and menu bar.
     public let updateStatus = UpdateStatus()
@@ -142,10 +146,35 @@ public final class AppStores {
             makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
             makeRecordPrompter = { RecordPrompter(onRecord: $0) }
             let toasts = toasts
+            let router = router
+            let notifier = CompletionNotifier(
+                onOpenMeeting: { [weak library] id in
+                    // Mirrors `AppStores.showMeeting(_:)`, inlined: `self`
+                    // isn't fully initialized yet at this point in `init`.
+                    router.section = .library
+                    library?.selectedMeetingID = id
+                    NSApp.activate(ignoringOtherApps: true)
+                },
+                isMeetingCurrentlyVisible: { [weak library] in
+                    NSApp.isActive && router.section == .library && library?.selectedMeetingID == $0
+                }
+            )
+            completionNotifier = notifier
             queue = QueueStore(
                 library: library, storage: storage, models: models, changeBus: changeBus,
                 settings: settings,
-                onError: { message in toasts.show(message) }
+                onError: { message in toasts.show(message) },
+                onMeetingReady: { [weak library] id in
+                    guard let library,
+                          let record = library.meetings.first(where: { $0.meeting.id == id })
+                    else { return }
+                    let enhancedNotes = (try? storage.loadEnhancedNotes(in: record)) ?? nil
+                    let hasEnhancedNotes = !(enhancedNotes ?? "").isEmpty
+                    notifier.meetingStatusChanged(
+                        meetingID: id, title: record.meeting.title, duration: record.meeting.duration,
+                        hasEnhancedNotes: hasEnhancedNotes, to: .ready
+                    )
+                }
             )
             recordHotKey = GlobalHotKey(keyCode: kVK_ANSI_R, modifiers: cmdKey | optionKey) { [weak self] in
                 self?.toggleRecording()
