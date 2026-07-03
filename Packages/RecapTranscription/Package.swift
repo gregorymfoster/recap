@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "RecapTranscription", targets: ["RecapTranscription"]),
         .executable(name: "transcribe-probe", targets: ["TranscribeProbe"]),
         .executable(name: "diarize-probe", targets: ["DiarizeProbe"]),
+        .executable(name: "transcribe-eval", targets: ["TranscribeEval"]),
     ],
     dependencies: [
         .package(path: "../RecapCore"),
@@ -22,6 +23,11 @@ let package = Package(
         // Manual-test harness: diarize a file and print speaker turns.
         // Run: swift run diarize-probe <audio-file>
         .executableTarget(name: "DiarizeProbe", dependencies: ["RecapTranscription"]),
+        // WER-scored quality scorecard over Fixtures/transcribe so model/prompt
+        // changes are measurable. Not run in normal CI (see .github/workflows/ci.yml
+        // "transcription-eval" job — nightly/workflow_dispatch only).
+        // Run: swift run transcribe-eval [--json] [fixtures-dir]
+        .executableTarget(name: "TranscribeEval", dependencies: ["RecapTranscription"]),
         .testTarget(name: "RecapTranscriptionTests", dependencies: ["RecapTranscription"]),
     ]
 )

@@ -36,3 +36,23 @@
   ```sh
   swift run --package-path Packages/RecapEnhancement enhance-probe <transcript.json> [notes.md]
   ```
+
+- `transcribe/` — (reference transcript, expectations) cases for the
+  transcription quality scorecard, scored by word error rate (WER). Run after
+  any model default or decoding-option change:
+
+  ```sh
+  swift run --package-path Packages/RecapTranscription transcribe-eval Fixtures/transcribe
+  ```
+
+  Each case dir has `reference.txt` (ground-truth transcript) and
+  `expectations.json` (`{"maxWER": 0.25, "model": "tiny"}`). Case audio comes
+  from an explicit `expectations.json` `"audio"` path, a case-local
+  `audio.m4a`, or — for `meeting-fixture`, which has neither — the shared
+  `Fixtures/meeting-fixture.m4a` above, so the binary isn't duplicated.
+  `meeting-fixture/reference.txt` was drafted from a `base`-model transcription
+  and lightly hand-corrected; **treat it as a first draft and verify it against
+  the actual `say`-spoken script before trusting eval failures.** Exits
+  nonzero if any case exceeds its `maxWER`. Not run in normal (push/PR) CI —
+  see the `transcription-eval` job in `.github/workflows/ci.yml`, which runs
+  nightly and on `workflow_dispatch`.

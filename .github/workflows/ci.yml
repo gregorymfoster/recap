@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * *"
 
 jobs:
   package-tests:
@@ -54,3 +57,25 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
             | tail -50
+
+  transcription-eval:
+    name: Transcription eval (nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 26
+        run: sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+      - name: Cache SPM build
+        uses: actions/cache@v4
+        with:
+          path: |
+            Packages/RecapTranscription/.build
+          key: spm-RecapTranscription-${{ hashFiles('Packages/RecapTranscription/Package.swift') }}
+      - name: Cache WhisperKit models
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Application Support/Recap/Models
+          key: whisperkit-models-${{ hashFiles('Fixtures/transcribe/**/expectations.json') }}
+      - name: Run transcribe-eval
+        run: swift run --package-path Packages/RecapTranscription transcribe-eval Fixtures/transcribe

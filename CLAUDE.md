@@ -40,10 +40,11 @@ changes. Not run in CI.
 - `swift run --package-path Packages/RecapTranscription diarize-probe Fixtures/two-speaker-fixture.m4a [--json]`
 - `swift run --package-path Packages/RecapEnhancement enhance-probe <transcript.json> [notes.md]` — needs Apple Intelligence; exits 2 when unavailable.
 - `swift run --package-path Packages/RecapEnhancement enhance-eval [--runs N] [--json]` — scores `Fixtures/enhance/` cases; run before/after any enhancement prompt change.
+- `swift run --package-path Packages/RecapTranscription transcribe-eval [--json] Fixtures/transcribe` — scores `Fixtures/transcribe/` cases by word error rate; run before/after any model default or decoding-option change. Not run in normal CI — runs nightly + on `workflow_dispatch` (see `transcription-eval` job in `.github/workflows/ci.yml`).
 
 See `Fixtures/README.md` for fixture details and expected output.
 
-### `--json` output (transcribe-probe, diarize-probe, enhance-eval)
+### `--json` output (transcribe-probe, diarize-probe, enhance-eval, transcribe-eval)
 
 Human-readable output is unchanged by default. With `--json`, each probe additionally prints
 exactly one JSON object as the **last line** of stdout, so agents can parse a result without
@@ -52,10 +53,11 @@ scraping prose:
 - `transcribe-probe`: `{"ok":true,"mode":"file","utterances":12,"duration":31.2,"text":"…first 200 chars…"}`
 - `diarize-probe`: `{"ok":true,"speakers":2,"turns":9}`
 - `enhance-eval`: `{"ok":false,"cases":[{"name":"budget-sync","structure":true,"recall":true,"meta":true,"numbers":false}]}`
+- `transcribe-eval`: `{"ok":true,"cases":[{"name":"meeting-fixture","wer":0.024,"maxWER":0.25,"passed":true}]}`
 
 Exit codes are unchanged by `--json`: `0` success, `1` failure, `64` usage error (`diarize-probe`
 also uses `66` for a missing file, `enhance-eval` uses `66`/`69` for a missing fixtures dir /
-unavailable Apple Intelligence).
+unavailable Apple Intelligence, `transcribe-eval` uses `66` for a missing fixtures dir).
 
 ## Observability: unified logging
 
