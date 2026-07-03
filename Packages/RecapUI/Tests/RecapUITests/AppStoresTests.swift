@@ -102,13 +102,13 @@ private final class FakeRecordPrompter: RecordPrompting {
     /// debounce window, so a single fixed sleep is prone to flaking under
     /// parallel test load — poll instead of guessing one wait long enough.
     private func waitForNonEmptyDirectory(
-        at url: URL, timeout: Duration = .milliseconds(1_000)
+        at url: URL, timeout: Duration = .seconds(3)
     ) async throws -> [String] {
         try await waitForDirectory(at: url, timeout: timeout) { !$0.isEmpty }
     }
 
     private func waitForDirectory(
-        at url: URL, timeout: Duration = .milliseconds(1_000),
+        at url: URL, timeout: Duration = .seconds(3),
         until predicate: ([String]) -> Bool
     ) async throws -> [String] {
         let deadline = ContinuousClock.now + timeout
@@ -119,6 +119,67 @@ private final class FakeRecordPrompter: RecordPrompting {
             try await Task.sleep(for: .milliseconds(20))
         }
         return (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
+    }
+
+    /// Posts `change` on `changeBus`, then keeps re-posting it (spaced
+    /// `retryInterval` apart, which must be longer than the store's
+    /// `exportDebounce` or every retry would cancel the previous post's
+    /// still-pending debounce Task before it can fire) until `vaultDir`
+    /// gets an entry or `timeout` elapses. Guards against the very first
+    /// post landing before the change-bus consumer's `Task` has actually
+    /// been scheduled and subscribed — `LibraryChangeBus.post` silently
+    /// drops changes with no live subscriber, and under CI-runner
+    /// contention a freshly spawned `Task` can take well over a few tens of
+    /// milliseconds to run its first iteration.
+    private func withRetriedPost(
+        _ changeBus: LibraryChangeBus, _ change: LibraryChange, until vaultDir: URL,
+        retryInterval: Duration = .seconds(1), timeout: Duration = .seconds(10)
+    ) async throws -> [String] {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            changeBus.post(change)
+            let entries = try await waitForDirectory(at: vaultDir, timeout: retryInterval) { !$0.isEmpty }
+            if !entries.isEmpty {
+                return entries
+            }
+        }
+        return (try? FileManager.default.contentsOfDirectory(atPath: vaultDir.path)) ?? []
+    }
+
+    /// Blocks until `stores`'s change-bus consumer `Task` (spawned in
+    /// `init`) has demonstrably subscribed, by posting a throwaway change
+    /// for an unrelated meeting and waiting for its mirror-backup export to
+    /// land in a scratch directory — then cleans up. Deliberately uses the
+    /// *mirror* toggle rather than Obsidian so it never shares mutable
+    /// settings state with a caller that's mid-way through asserting
+    /// Obsidian export timing: `runEnabledExporters` reads `settings` live
+    /// at fire time, so flipping a shared `obsidianVaultPath` back and forth
+    /// while a canary debounce Task might still be in flight is itself a
+    /// race. Tests that assert timing around a real post (e.g. "no export
+    /// before the debounce window elapses") need the consumer warmed up
+    /// first without the warm-up racing the assertion; a fixed sleep isn't
+    /// reliable under CI-runner contention where the consumer's Task may not
+    /// run its first loop iteration for a while.
+    private func waitForConsumerSubscribed(
+        stores: AppStores, changeBus: LibraryChangeBus, storage: LibraryStorage, settings: SettingsStore
+    ) async throws {
+        let canaryDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Canary-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: canaryDir) }
+        precondition(!settings.mirrorBackupEnabled, "warm-up uses the mirror toggle; caller must not also use it")
+        settings.mirrorBackupEnabled = true
+        settings.mirrorFolderPath = canaryDir.path
+        let canary = try makeReadyMeeting(in: storage, title: "Canary")
+        _ = try await withRetriedPost(changeBus, .meetingChanged(canary.meeting.id), until: canaryDir)
+        settings.mirrorBackupEnabled = false
+        settings.mirrorFolderPath = ""
+        // Give any debounce Task that was mid-flight when the last
+        // successful poll observed the export a moment to actually finish
+        // and get removed from exportDebounceTasks, so it can't race a
+        // later post for a different meeting ID (each meeting has its own
+        // debounce entry, so this is a belt-and-suspenders margin, not a
+        // strict requirement).
+        try await Task.sleep(for: .milliseconds(50))
     }
 
     // MARK: 1. Change-bus debounced export
@@ -136,12 +197,17 @@ private final class FakeRecordPrompter: RecordPrompting {
         _ = stores // keep the consumer task alive via the strong reference below
 
         // The change-bus consumer subscribes from a freshly spawned Task in
-        // `init`; give it a beat to register before posting, since
-        // `LibraryChangeBus.post` doesn't buffer for late subscribers.
-        try await Task.sleep(for: .milliseconds(20))
-        changeBus.post(.meetingChanged(record.meeting.id))
-
-        let exported = try await waitForNonEmptyDirectory(at: vaultDir)
+        // `init`, and `LibraryChangeBus.post` doesn't buffer for late
+        // subscribers — a post before the consumer's `for await` loop has
+        // actually started running is silently dropped. A fixed sleep
+        // before the first post isn't reliable on a loaded CI runner (the
+        // Task may not get scheduled for a while), so re-post on an interval
+        // shorter than the export debounce until the export lands or we
+        // time out; once the consumer is subscribed, one of these posts is
+        // guaranteed to be seen.
+        let exported = try await withRetriedPost(
+            changeBus, .meetingChanged(record.meeting.id), until: vaultDir
+        )
         #expect(!exported.isEmpty)
     }
 
@@ -150,26 +216,37 @@ private final class FakeRecordPrompter: RecordPrompting {
             .appendingPathComponent("ObsidianVault-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: vaultDir) }
 
-        let (stores, storage, settings, changeBus) = makeStores(exportDebounce: .milliseconds(150))
-        settings.syncsToObsidian = true
-        settings.obsidianVaultPath = vaultDir.path
-
+        // A generous debounce (vs. the 50ms used elsewhere) gives wide
+        // margins around the mid-sequence checks below, so CPU contention
+        // under parallel test execution can't shrink the gap between "second
+        // post lands" and "debounce would have elapsed" into noise.
+        let debounce = Duration.milliseconds(500)
+        let (stores, storage, settings, changeBus) = makeStores(exportDebounce: debounce)
         let record = try makeReadyMeeting(in: storage)
         _ = stores // keep the consumer task alive via the strong reference
 
-        // See changeBusPostDebouncesThenExportsToObsidian: give the consumer
-        // Task a beat to subscribe before the first post.
-        try await Task.sleep(for: .milliseconds(20))
+        // Warm up the consumer against a throwaway mirror destination first
+        // — before turning on Obsidian sync at vaultDir below — so the
+        // timed sequence isn't itself racing the consumer's Task getting
+        // scheduled, and so the warm-up's own export can't land in vaultDir
+        // (see waitForConsumerSubscribed).
+        try await waitForConsumerSubscribed(stores: stores, changeBus: changeBus, storage: storage, settings: settings)
+
+        settings.syncsToObsidian = true
+        settings.obsidianVaultPath = vaultDir.path
+
         changeBus.post(.meetingChanged(record.meeting.id))
-        // Posted again inside the debounce window: this should cancel and
-        // restart the sleep, so nothing has exported yet at +80ms.
-        try await Task.sleep(for: .milliseconds(80))
+        // Posted again well inside the debounce window: this should cancel
+        // and restart the sleep, so nothing has exported yet shortly after.
+        try await Task.sleep(for: debounce / 4)
         changeBus.post(.meetingChanged(record.meeting.id))
 
-        try await Task.sleep(for: .milliseconds(90))
+        // Checked at roughly half the (restarted) window — comfortably
+        // before it can have elapsed even under heavy scheduling jitter.
+        try await Task.sleep(for: debounce / 2)
         #expect(!FileManager.default.fileExists(atPath: vaultDir.path))
 
-        let exported = try await waitForNonEmptyDirectory(at: vaultDir)
+        let exported = try await waitForNonEmptyDirectory(at: vaultDir, timeout: .seconds(5))
         #expect(exported.count == 1)
     }
 
