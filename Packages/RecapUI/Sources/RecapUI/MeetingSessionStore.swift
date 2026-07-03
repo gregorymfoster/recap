@@ -57,7 +57,7 @@ public final class MeetingSessionStore {
     private var inputSwitchNoteTask: Task<Void, Never>?
 
     private static let idleLevels = [Float](repeating: 0, count: 16)
-    private let recorder = MeetingRecorder()
+    private let recorder: MeetingRecorder
     private var levelTask: Task<Void, Never>?
     private var transcriptTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
@@ -67,7 +67,12 @@ public final class MeetingSessionStore {
     /// meeting still gets transcribed.
     public var onAutoStop: (@MainActor () -> Void)?
 
-    public init() {}
+    /// - Parameter makeRecorder: Factory for the recorder; defaults to a
+    ///   real `MeetingRecorder`. Tests inject one built with fake capture
+    ///   sources so record/pause/fallback flows can run without hardware.
+    public init(makeRecorder: @MainActor () -> MeetingRecorder = { MeetingRecorder() }) {
+        recorder = makeRecorder()
+    }
 
     /// Paused still counts as recording — every guard, calendar suppression,
     /// and `isLiveMeeting` check keys off the active record, not the clock.

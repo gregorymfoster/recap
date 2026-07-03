@@ -39,8 +39,9 @@ public final class MeetingRecorder {
     /// easily need a few hundred MB of spool plus models and transcripts.
     private static let minimumFreeBytes: Int64 = 1_000_000_000
 
-    private let mic = MicSource()
-    private var systemTap: SystemAudioTap?
+    private let mic: MicCapturing
+    private let makeSystemTap: @MainActor () -> SystemAudioCapturing
+    private var systemTap: SystemAudioCapturing?
     private var engine: MixerEngine?
     private var pumpTasks: [Task<Void, Never>] = []
 
@@ -63,7 +64,19 @@ public final class MeetingRecorder {
     /// or when it couldn't be determined).
     public var activeInputDeviceName: String? { mic.activeDeviceName }
 
-    public init() {}
+    /// - Parameters:
+    ///   - mic: Mic capture source; defaults to the real `MicSource`. Tests
+    ///     inject a fake exposing a canned sample stream.
+    ///   - makeSystemTap: Factory for the system-audio source, invoked fresh
+    ///     each `start()` (mirroring the real tap's per-recording lifecycle);
+    ///     defaults to constructing a real `SystemAudioTap`.
+    public init(
+        mic: MicCapturing? = nil,
+        makeSystemTap: (@MainActor () -> SystemAudioCapturing)? = nil
+    ) {
+        self.mic = mic ?? MicSource()
+        self.makeSystemTap = makeSystemTap ?? { SystemAudioTap() }
+    }
 
     public static func requestMicPermission() async -> Bool {
         await MicSource.requestPermission()
@@ -92,7 +105,7 @@ public final class MeetingRecorder {
         // filling the mix buffer's other side.
         var systemStream: AsyncStream<[Float]>?
         if includeSystemAudio {
-            let tap = SystemAudioTap()
+            let tap = makeSystemTap()
             do {
                 systemStream = try tap.start()
                 systemTap = tap
