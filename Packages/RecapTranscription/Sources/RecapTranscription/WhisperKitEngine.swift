@@ -14,11 +14,20 @@ public struct WhisperKitEngine: TranscriptionEngine {
     /// Forces decoding to a specific language (ISO 639-1 code, e.g. "es").
     /// `nil` lets WhisperKit auto-detect, its default behavior.
     public let language: String?
+    /// App-owned directory handed to `WhisperKitConfig.downloadBase`. Nothing
+    /// is ever downloaded through this engine (`download: false` below), but
+    /// `HubApi` still resolves a base path from this value at init time —
+    /// leaving it `nil` makes it default to `~/Documents/huggingface`, and
+    /// merely referencing that Documents path trips a spurious TCC file-
+    /// access prompt on first run. Passing an Application Support path here
+    /// keeps WhisperKit away from Documents entirely.
+    public let downloadBase: URL
 
-    public init(modelFolder: URL, modelName: String, language: String? = nil) {
+    public init(modelFolder: URL, modelName: String, language: String? = nil, downloadBase: URL) {
         self.modelFolder = modelFolder
         self.modelName = modelName
         self.language = language
+        self.downloadBase = downloadBase
     }
 
     /// Base decoding options shared by the file pass and the streaming pass,
@@ -38,6 +47,7 @@ public struct WhisperKitEngine: TranscriptionEngine {
         file: URL, progress: @escaping @Sendable (Double) -> Void
     ) async throws -> Transcript {
         let config = WhisperKitConfig(
+            downloadBase: downloadBase,
             modelFolder: modelFolder.path,
             verbose: false,
             load: true,
@@ -106,6 +116,7 @@ public struct WhisperKitEngine: TranscriptionEngine {
 
         continuation.yield(.status(.loadingModel))
         let config = WhisperKitConfig(
+            downloadBase: downloadBase,
             modelFolder: modelFolder.path, verbose: false, load: true, download: false
         )
         let pipe: WhisperKit

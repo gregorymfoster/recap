@@ -152,7 +152,8 @@ public final class WhisperModelManager {
         guard let model = activeModel, let folder = installedFolder(for: model) else { return nil }
         return WhisperKitEngine(
             modelFolder: folder, modelName: model.repoFolderName,
-            language: model.isEnglishOnly ? nil : language
+            language: model.isEnglishOnly ? nil : language,
+            downloadBase: modelsRoot
         )
     }
 
@@ -168,7 +169,8 @@ public final class WhisperModelManager {
         guard let model = streamingModel, let folder = installedFolder(for: model) else { return nil }
         return WhisperKitEngine(
             modelFolder: folder, modelName: model.repoFolderName,
-            language: model.isEnglishOnly ? nil : language
+            language: model.isEnglishOnly ? nil : language,
+            downloadBase: modelsRoot
         )
     }
 

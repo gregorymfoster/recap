@@ -20,12 +20,26 @@ import WhisperKit
     }
 
     @Test func engineDefaultsToAutoDetectWhenLanguageOmitted() {
-        let engine = WhisperKitEngine(modelFolder: URL(filePath: "/dev/null"), modelName: "tiny")
+        let engine = WhisperKitEngine(
+            modelFolder: URL(filePath: "/dev/null"), modelName: "tiny",
+            downloadBase: URL(filePath: "/dev/null")
+        )
         #expect(engine.language == nil)
     }
 
     @Test func engineRetainsPassedLanguage() {
-        let engine = WhisperKitEngine(modelFolder: URL(filePath: "/dev/null"), modelName: "tiny", language: "fr")
+        let engine = WhisperKitEngine(
+            modelFolder: URL(filePath: "/dev/null"), modelName: "tiny", language: "fr",
+            downloadBase: URL(filePath: "/dev/null")
+        )
         #expect(engine.language == "fr")
+    }
+
+    @Test func engineStoresAndForwardsDownloadBase() {
+        let base = URL(filePath: "/tmp/recap-models")
+        let engine = WhisperKitEngine(
+            modelFolder: URL(filePath: "/dev/null"), modelName: "tiny", downloadBase: base
+        )
+        #expect(engine.downloadBase == base)
     }
 }
