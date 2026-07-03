@@ -47,6 +47,9 @@ public final class AppStores {
     public let models: WhisperModelManager
     public let session: MeetingSessionStore
     public let queue: QueueStore?
+    /// Today's remaining calendar events for the Library's Upcoming section
+    /// (design mock 9a). Fixture-seeded in the fixtures graph.
+    public let upcoming: UpcomingStore
     public let router = AppRouter()
     public let toasts = ToastCenter()
     /// Posts "‹meeting› is ready" notifications (design spec 8f). `nil` in
@@ -96,6 +99,7 @@ public final class AppStores {
             queue = nil
             storage = nil
             changeBus = LibraryChangeBus()
+            upcoming = .fixture()
             exportDebounce = .seconds(5)
             makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
             makeRecordPrompter = { RecordPrompter(onRecord: $0) }
@@ -121,6 +125,7 @@ public final class AppStores {
                 MeetingRecorder(mic: SyntheticMicSource(), makeSystemTap: { SyntheticSystemAudioSource() })
             })
             queue = nil
+            upcoming = .live()
             exportDebounce = .seconds(5)
             makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
             makeRecordPrompter = { RecordPrompter(onRecord: $0) }
@@ -142,6 +147,7 @@ public final class AppStores {
             self.storage = storage
             self.changeBus = changeBus
             session = MeetingSessionStore()
+            upcoming = .live()
             exportDebounce = .seconds(5)
             makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
             makeRecordPrompter = { RecordPrompter(onRecord: $0) }
@@ -211,6 +217,7 @@ public final class AppStores {
         queue = nil
         storage = nil
         changeBus = LibraryChangeBus()
+        upcoming = .fixture()
         exportDebounce = .seconds(5)
         makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
         makeRecordPrompter = { RecordPrompter(onRecord: $0) }
@@ -231,6 +238,7 @@ public final class AppStores {
         session: MeetingSessionStore,
         queue: QueueStore?,
         changeBus: LibraryChangeBus,
+        upcoming: UpcomingStore = .fixture(),
         registersHotKey: Bool = false,
         exportDebounce: Duration = .seconds(5),
         makeCalendarWatcher: @escaping (@escaping @MainActor (CalendarEventSnapshot) -> Void) -> MeetingEventWatching = { CalendarWatcher(onMeetingStarting: $0) },
@@ -243,6 +251,7 @@ public final class AppStores {
         self.session = session
         self.queue = queue
         self.changeBus = changeBus
+        self.upcoming = upcoming
         self.exportDebounce = exportDebounce
         self.makeCalendarWatcher = makeCalendarWatcher
         self.makeRecordPrompter = makeRecordPrompter

@@ -47,6 +47,14 @@ public final class SettingsStore {
         didSet { defaults.set(floatingCapsuleStyle.rawValue, forKey: "floatingCapsuleStyle") }
     }
 
+    /// Canonical `CallApp.id`s the user has muted for call detection
+    /// ("Don't ask for Teams", or a toggle off in Settings → Calendar).
+    /// Stored as the *disabled* set so apps added to the catalog later
+    /// default to on.
+    public var disabledCallAppIDs: Set<String> {
+        didSet { defaults.set(Array(disabledCallAppIDs).sorted(), forKey: "disabledCallAppIDs") }
+    }
+
     /// Mirror finished meetings into an Obsidian vault folder as Markdown.
     public var syncsToObsidian: Bool {
         didSet { defaults.set(syncsToObsidian, forKey: "obsidianSync") }
@@ -125,6 +133,7 @@ public final class SettingsStore {
             .flatMap(CalendarAutoRecordMode.init(rawValue:)) ?? .off
         floatingCapsuleStyle = defaults.string(forKey: "floatingCapsuleStyle")
             .flatMap(FloatingCapsuleStyle.init(rawValue:)) ?? .full
+        disabledCallAppIDs = Set(defaults.stringArray(forKey: "disabledCallAppIDs") ?? [])
         syncsToObsidian = defaults.bool(forKey: "obsidianSync")
         obsidianVaultPath = defaults.string(forKey: "obsidianVaultPath") ?? ""
         mirrorBackupEnabled = defaults.bool(forKey: "mirrorBackup")

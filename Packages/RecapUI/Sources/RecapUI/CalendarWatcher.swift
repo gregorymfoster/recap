@@ -32,19 +32,27 @@ public enum UpNextEvent {
     /// "1:00 PM · in 19m" style relative-time line for the up-next row.
     /// `referenceDate` is injected for deterministic tests.
     public static func timeLine(for event: CalendarEventSnapshot, now: Date = .now) -> String {
-        let clockTime = event.start.formatted(.dateTime.hour().minute())
+        "\(clockTime(for: event)) · \(relativeTime(for: event, now: now))"
+    }
+
+    /// The "1:00 PM" half of `timeLine`, for callers that style the two
+    /// halves differently (the Library's Upcoming row tints the countdown).
+    public static func clockTime(for event: CalendarEventSnapshot) -> String {
+        event.start.formatted(.dateTime.hour().minute())
+    }
+
+    /// The "in 19m" half of `timeLine`.
+    public static func relativeTime(for event: CalendarEventSnapshot, now: Date = .now) -> String {
         let minutesUntil = max(0, Int(event.start.timeIntervalSince(now) / 60))
-        let relative: String
         if minutesUntil < 1 {
-            relative = "starting now"
+            return "starting now"
         } else if minutesUntil < 60 {
-            relative = "in \(minutesUntil)m"
+            return "in \(minutesUntil)m"
         } else {
             let hours = minutesUntil / 60
             let minutes = minutesUntil % 60
-            relative = minutes == 0 ? "in \(hours)h" : "in \(hours)h \(minutes)m"
+            return minutes == 0 ? "in \(hours)h" : "in \(hours)h \(minutes)m"
         }
-        return "\(clockTime) · \(relative)"
     }
 }
 
@@ -117,6 +125,17 @@ public final class CalendarWatcher {
         return UpNextEvent.choose(from: snapshots, now: now)
     }
 
+    /// Every event between now and the end of today, unfiltered — the
+    /// Library's Upcoming section applies `UpcomingEvents.todayRemaining`.
+    /// Like `upNext`, this **never** triggers a permission prompt.
+    public func todayEvents(now: Date = .now, calendar: Calendar = .current) -> [CalendarEventSnapshot] {
+        guard Self.isAuthorized else { return [] }
+        let startOfTomorrow = calendar.startOfDay(for: now).addingTimeInterval(24 * 3600)
+        guard now < startOfTomorrow else { return [] }
+        let predicate = store.predicateForEvents(withStart: now, end: startOfTomorrow, calendars: nil)
+        return store.events(matching: predicate).map(Self.snapshot(of:))
+    }
+
     private func poll() {
         let now = Date.now
         let predicate = store.predicateForEvents(
@@ -145,14 +164,16 @@ public final class CalendarWatcher {
         let urlText = [
             event.url?.absoluteString, event.location, event.notes,
         ].compactMap(\.self).joined(separator: " ")
+        let provider = MeetingEventDetection.conferenceProviderName(in: urlText)
         return CalendarEventSnapshot(
             id: event.eventIdentifier ?? UUID().uuidString,
             title: event.title ?? "Meeting",
             start: event.startDate,
             end: event.endDate,
             otherAttendees: others,
-            hasConferenceURL: MeetingEventDetection.containsConferenceURL(urlText),
-            isAllDay: event.isAllDay
+            hasConferenceURL: provider != nil,
+            isAllDay: event.isAllDay,
+            conferenceProvider: provider
         )
     }
 }

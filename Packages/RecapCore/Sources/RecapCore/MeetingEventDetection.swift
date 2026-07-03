@@ -11,6 +11,10 @@ public struct CalendarEventSnapshot: Equatable, Sendable {
     public var otherAttendees: [String]
     public var hasConferenceURL: Bool
     public var isAllDay: Bool
+    /// Display name of the video-call service ("Zoom", "Teams"…) when one
+    /// was recognized in the event's URL/location/notes. Meta-line garnish
+    /// only — never used for detection decisions.
+    public var conferenceProvider: String?
 
     public init(
         id: String,
@@ -19,7 +23,8 @@ public struct CalendarEventSnapshot: Equatable, Sendable {
         end: Date,
         otherAttendees: [String] = [],
         hasConferenceURL: Bool = false,
-        isAllDay: Bool = false
+        isAllDay: Bool = false,
+        conferenceProvider: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -28,6 +33,7 @@ public struct CalendarEventSnapshot: Equatable, Sendable {
         self.otherAttendees = otherAttendees
         self.hasConferenceURL = hasConferenceURL
         self.isAllDay = isAllDay
+        self.conferenceProvider = conferenceProvider
     }
 }
 
@@ -43,17 +49,26 @@ public enum MeetingEventDetection {
         return event.hasConferenceURL || !event.otherAttendees.isEmpty
     }
 
-    /// Hosts of the common video-call services, matched against any URLs in
-    /// an event's URL field, location, or notes.
-    private static let conferenceHosts: [String] = [
-        "zoom.us", "meet.google.com", "teams.microsoft.com", "teams.live.com",
-        "webex.com", "whereby.com", "meet.jit.si", "around.co", "gather.town",
-        "chime.aws", "vc.ringcentral.com", "gotomeeting.com",
+    /// Hosts of the common video-call services (with display names), matched
+    /// against any URLs in an event's URL field, location, or notes.
+    private static let conferenceHosts: [(host: String, name: String)] = [
+        ("zoom.us", "Zoom"), ("meet.google.com", "Meet"),
+        ("teams.microsoft.com", "Teams"), ("teams.live.com", "Teams"),
+        ("webex.com", "Webex"), ("whereby.com", "Whereby"),
+        ("meet.jit.si", "Jitsi"), ("around.co", "Around"),
+        ("gather.town", "Gather"), ("chime.aws", "Chime"),
+        ("vc.ringcentral.com", "RingCentral"), ("gotomeeting.com", "GoToMeeting"),
     ]
 
     public static func containsConferenceURL(_ text: String) -> Bool {
+        conferenceProviderName(in: text) != nil
+    }
+
+    /// Display name of the first video-call service found in `text`
+    /// ("Zoom", "Teams"…), or nil when no real host match exists.
+    public static func conferenceProviderName(in text: String) -> String? {
         let lowered = text.lowercased()
-        return conferenceHosts.contains { host in
+        return conferenceHosts.first { host, _ in
             guard let range = lowered.range(of: host) else { return false }
             // Require a real host match ("recap.zoom.us/j/…"), not a mention
             // inside a word ("nozoom.usual").
@@ -62,6 +77,6 @@ public enum MeetingEventDetection {
             let before = lowered[..<range.lowerBound]
             let boundaryBefore = before.last.map { !$0.isLetter && !$0.isNumber } ?? true
             return boundaryAfter && boundaryBefore
-        }
+        }?.name
     }
 }
