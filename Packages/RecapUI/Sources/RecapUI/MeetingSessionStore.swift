@@ -17,6 +17,10 @@ public final class MeetingSessionStore {
     public private(set) var levels: [Float] = MeetingSessionStore.idleLevels
     public private(set) var permissionDenied = false
 
+    /// True while recording, when mic access is denied and the recording is
+    /// running system-audio only — drives the "mic off" indicator in the pill.
+    public private(set) var micUnavailable = false
+
     /// Live transcript state (split view), reduced from `TranscriptionUpdate`s
     /// by the pure `LiveTranscriptState.applying(_:)`. Provisional — the
     /// post-stop file pass produces the canonical transcript.
@@ -80,18 +84,20 @@ public final class MeetingSessionStore {
         preferredInputUID: String? = nil
     ) async {
         guard activeRecord == nil else { return }
-        guard await MeetingRecorder.requestMicPermission() else {
-            permissionDenied = true
-            return
-        }
+        // Denied mic no longer aborts: the recorder falls back to system
+        // audio only (and the pill shows a "mic off" indicator). It only
+        // fails outright when there's no audio source at all.
+        let micGranted = await MeetingRecorder.requestMicPermission()
         permissionDenied = false
+        micUnavailable = false
         startFailureMessage = nil
         recordingFailureMessage = nil
         do {
             let output = try recorder.start(
                 writingTo: record.audioURL, includeSystemAudio: includeSystemAudio,
-                preferredInputUID: preferredInputUID
+                includeMic: micGranted, preferredInputUID: preferredInputUID
             )
+            micUnavailable = !micGranted
             systemAudioUnavailable = includeSystemAudio && !recorder.systemAudioActive
             activeRecord = record
             clock = recorder.clock ?? RecordingClock(startedAt: .now)
@@ -120,6 +126,11 @@ public final class MeetingSessionStore {
                 // of leaving the pane on a "Listening…" placeholder forever.
                 liveTranscript.liveState = .noModelInstalled
             }
+        } catch MeetingRecorder.RecorderError.noAudioSource {
+            // Mic denied and no system audio to fall back on — nothing to
+            // record. Surface it as the mic-permission problem it is.
+            activeRecord = nil
+            permissionDenied = true
         } catch MeetingRecorder.RecorderError.diskFull {
             activeRecord = nil
             startFailureMessage = "Not enough free disk space"
@@ -206,6 +217,7 @@ public final class MeetingSessionStore {
         clock = nil
         levels = Self.idleLevels
         systemAudioUnavailable = false
+        micUnavailable = false
         liveTranscript = LiveTranscriptState()
         activeInputDeviceName = nil
         inputSwitchNoteTask?.cancel()

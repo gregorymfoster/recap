@@ -137,6 +137,16 @@ public final class AppStores {
             } else if let message = session.startFailureMessage {
                 library.markError(record, message: message)
                 toasts.show(message)
+            } else if session.micUnavailable {
+                // Recording is running system-audio only; the pill shows the
+                // "mic off" badge, and this offers the fix.
+                toasts.show(
+                    "Microphone access off — recording system audio only",
+                    actionTitle: "Open Settings"
+                ) { [weak self] in
+                    self?.router.section = .settings
+                    PrivacyPane.open(PrivacyPane.microphone)
+                }
             } else if session.systemAudioUnavailable {
                 settings.lastSystemAudioTapFailed = true
                 toasts.show(

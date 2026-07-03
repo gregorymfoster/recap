@@ -9,6 +9,13 @@ import Testing
         #expect(buffer.mic.isEmpty)
     }
 
+    @Test func systemOnlyModePassesThroughImmediately() {
+        var buffer = MixBuffer()
+        buffer.micActive = false
+        #expect(buffer.pushSystem([0.1, 0.2]) == [0.1, 0.2])
+        #expect(buffer.system.isEmpty)
+    }
+
     @Test func pairwiseDrainMixesEqualLengths() {
         var buffer = MixBuffer()
         #expect(buffer.pushMic([0.1, 0.1, 0.1]).isEmpty)  // system side empty, below threshold

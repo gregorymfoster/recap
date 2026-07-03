@@ -13,6 +13,9 @@ struct RecordingPill: View {
     /// Name of the mic in use, when it's known — shown as a small hoverable
     /// label so the pill stays compact but the device is still visible.
     var inputDeviceName: String?
+    /// True when mic access is denied and the recording is running on system
+    /// audio alone — shown as an amber "mic off" badge in place of the device.
+    var micUnavailable: Bool = false
     /// Latest confirmed live-transcription text, shown as a one-line rolling
     /// snippet under the waveform so confidence is visible even without the
     /// main window open — the whole point of the light streaming pass.
@@ -43,7 +46,16 @@ struct RecordingPill: View {
                             .font(Tokens.microLabel)
                             .fixedSize()
                     }
-                    if let inputDeviceName {
+                    if micUnavailable {
+                        HStack(spacing: 4) {
+                            Image(systemName: "mic.slash.fill")
+                                .font(.system(size: 9))
+                            Text("Mic access off")
+                                .font(Tokens.microLabel)
+                                .fixedSize()
+                        }
+                        .foregroundStyle(Tokens.warningAmber)
+                    } else if let inputDeviceName {
                         Text(inputDeviceName)
                             .font(Tokens.caption)
                             .lineLimit(1)
@@ -60,7 +72,9 @@ struct RecordingPill: View {
                         .fill(.white.opacity(0.15))
                         .frame(width: 1, height: 18)
                 }
-                .help(inputDeviceName.map { "Recording from \($0)" } ?? "")
+                .help(micUnavailable
+                    ? "Microphone access is off — recording system audio only"
+                    : inputDeviceName.map { "Recording from \($0)" } ?? "")
                 Button(action: onPauseToggle) {
                     // stays: dark glyph pinned to black on a solid white control-button
                     // in both modes (Tokens.textPrimary would invert to near-white here)
@@ -198,6 +212,16 @@ struct PulsingDot: View {
             isPaused: false,
             levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
             inputDeviceName: "AirPods Pro",
+            onPauseToggle: {},
+            onStop: {}
+        )
+        RecordingPill(
+            clock: RecordingClock(startedAt: .now.addingTimeInterval(-1453)),
+            isPaused: false,
+            levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
+            inputDeviceName: nil,
+            micUnavailable: true,
+            lastHeardText: nil,
             onPauseToggle: {},
             onStop: {}
         )

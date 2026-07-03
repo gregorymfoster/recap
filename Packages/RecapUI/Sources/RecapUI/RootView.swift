@@ -49,6 +49,7 @@ public struct RootView: View {
                 RecordingPill(
                     clock: clock, isPaused: session.isPaused, levels: session.levels,
                     inputDeviceName: session.activeInputDeviceName,
+                    micUnavailable: session.micUnavailable,
                     lastHeardText: session.lastHeardText,
                     onPauseToggle: { stores.togglePause() },
                     onStop: { stores.stopRecording() }

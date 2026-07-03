@@ -30,6 +30,9 @@ public final class MeetingRecorder {
 
     public enum RecorderError: Error {
         case diskFull
+        /// Neither the mic nor system audio is available (mic denied and
+        /// system-audio capture off or unavailable) — nothing to record.
+        case noAudioSource
     }
 
     /// Refuse to start with less than this much free space — a meeting can
@@ -52,6 +55,10 @@ public final class MeetingRecorder {
     /// hardware trouble) and the recording is mic-only.
     public private(set) var systemAudioActive = false
 
+    /// False when the mic wasn't captured (access denied) and the recording
+    /// is system-audio-only. Mirror image of `systemAudioActive`.
+    public private(set) var micActive = false
+
     /// The mic device actually in use, for display (nil while not recording,
     /// or when it couldn't be determined).
     public var activeInputDeviceName: String? { mic.activeDeviceName }
@@ -70,7 +77,8 @@ public final class MeetingRecorder {
     }
 
     public func start(
-        writingTo url: URL, includeSystemAudio: Bool = true, preferredInputUID: String? = nil
+        writingTo url: URL, includeSystemAudio: Bool = true, includeMic: Bool = true,
+        preferredInputUID: String? = nil
     ) throws -> Output {
         let folder = url.deletingLastPathComponent()
         if let free = try? folder.resourceValues(
@@ -95,13 +103,23 @@ public final class MeetingRecorder {
             }
         }
 
+        // Nothing to capture — mic is off (denied) and system audio isn't
+        // available either. Bail before opening files so the caller can
+        // surface the permission problem instead of recording silence.
+        guard includeMic || systemAudioActive else {
+            systemTap?.stop()
+            systemTap = nil
+            systemAudioActive = false
+            throw RecorderError.noAudioSource
+        }
+
         let (chunks, chunkContinuation) = AsyncStream.makeStream(of: AudioChunk.self)
         let (levels, levelContinuation) = AsyncStream.makeStream(of: Float.self)
         let (events, eventContinuation) = AsyncStream.makeStream(of: RecorderEvent.self)
         let engine: MixerEngine
         do {
             engine = try MixerEngine(
-                url: url, systemActive: systemAudioActive,
+                url: url, systemActive: systemAudioActive, micActive: includeMic,
                 chunks: chunkContinuation, levels: levelContinuation, events: eventContinuation
             )
         } catch {
@@ -120,25 +138,34 @@ public final class MeetingRecorder {
             })
         }
 
-        do {
-            mic.onRebuild = { reason in
-                eventContinuation.yield(.inputRebuilt(reason: reason))
-            }
-            let micStream = try mic.start()
-            pumpTasks.append(Task.detached(priority: .userInitiated) {
-                for await samples in micStream {
-                    await engine.pushMic(samples)
+        // Mic access denied → skip capture entirely and record system audio
+        // alone. The mixer already passes system samples straight through
+        // (micActive == false), so no mic counterpart is ever awaited.
+        if includeMic {
+            do {
+                mic.onRebuild = { reason in
+                    eventContinuation.yield(.inputRebuilt(reason: reason))
                 }
-            })
-        } catch {
-            systemTap?.stop()
-            systemTap = nil
-            systemAudioActive = false
-            for task in pumpTasks {
-                task.cancel()
+                let micStream = try mic.start()
+                micActive = true
+                pumpTasks.append(Task.detached(priority: .userInitiated) {
+                    for await samples in micStream {
+                        await engine.pushMic(samples)
+                    }
+                })
+            } catch {
+                systemTap?.stop()
+                systemTap = nil
+                systemAudioActive = false
+                micActive = false
+                for task in pumpTasks {
+                    task.cancel()
+                }
+                pumpTasks = []
+                throw error
             }
-            pumpTasks = []
-            throw error
+        } else {
+            micActive = false
         }
 
         clock = RecordingClock(startedAt: .now)
@@ -170,6 +197,7 @@ public final class MeetingRecorder {
         systemTap?.stop()
         systemTap = nil
         systemAudioActive = false
+        micActive = false
         for task in pumpTasks {
             task.cancel()
         }
@@ -211,11 +239,13 @@ private actor MixerEngine {
     init(
         url: URL,
         systemActive: Bool,
+        micActive: Bool,
         chunks: AsyncStream<AudioChunk>.Continuation,
         levels: AsyncStream<Float>.Continuation,
         events: AsyncStream<RecorderEvent>.Continuation
     ) throws {
         buffer.systemActive = systemActive
+        buffer.micActive = micActive
         guard
             let format = AVAudioFormat(
                 commonFormat: .pcmFormatFloat32, sampleRate: AudioPipeline.mixerSampleRate,

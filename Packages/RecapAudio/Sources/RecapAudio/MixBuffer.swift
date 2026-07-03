@@ -19,6 +19,10 @@ struct MixBuffer {
     /// When false (mic-only recording), mic samples pass straight through
     /// instead of waiting for a system-audio counterpart.
     var systemActive = true
+    /// When false (system-audio-only recording, e.g. mic access denied),
+    /// system samples pass straight through instead of waiting for a mic
+    /// counterpart — mirror image of `systemActive`.
+    var micActive = true
 
     private(set) var mic: [Float] = []
     private(set) var system: [Float] = []
@@ -30,6 +34,7 @@ struct MixBuffer {
     }
 
     mutating func pushSystem(_ samples: [Float]) -> [Float] {
+        guard micActive else { return samples }
         system.append(contentsOf: samples)
         return drain()
     }
