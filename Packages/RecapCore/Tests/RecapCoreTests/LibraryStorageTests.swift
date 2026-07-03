@@ -57,6 +57,32 @@ import Testing
         #expect(try storage.loadAll().count == 2)
     }
 
+    @Test func createImportedMeetingRoundTripsAsQueued() throws {
+        let storage = try makeStorage()
+        let date = Date(timeIntervalSince1970: 1_780_400_000)
+        let record = try storage.createImportedMeeting(title: "Podcast episode", date: date)
+
+        #expect(record.meeting.status == .queued)
+        #expect(record.meeting.title == "Podcast episode")
+        #expect(record.meeting.date == date)
+        #expect(record.meeting.duration == 0)
+        #expect(FileManager.default.fileExists(atPath: record.metadataURL.path))
+
+        let loaded = try storage.loadAll()
+        #expect(loaded.map(\.meeting) == [record.meeting])
+    }
+
+    @Test func importedMeetingTitleCollisionOnSameDayGetsDistinctFolder() throws {
+        let storage = try makeStorage()
+        let date = Date(timeIntervalSince1970: 1_780_400_000)
+        // A recorded meeting and an import with the same title on the same day.
+        let recorded = try storage.create(Meeting(title: "Interview", date: date))
+        let imported = try storage.createImportedMeeting(title: "Interview", date: date)
+
+        #expect(recorded.folderURL != imported.folderURL)
+        #expect(try storage.loadAll().count == 2)
+    }
+
     @Test func folderNameSanitizesPathHostileCharacters() {
         let meeting = Meeting(title: "Q3: budget / review", date: Date(timeIntervalSince1970: 1_780_400_000))
         let name = LibraryStorage.folderName(for: meeting)

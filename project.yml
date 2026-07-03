@@ -46,6 +46,14 @@ targets:
         NSAudioCaptureUsageDescription: Recap records system audio so other meeting participants are captured. Audio never leaves your Mac.
         NSCalendarsFullAccessUsageDescription: Recap reads your calendar to notice when a meeting is starting, so it can offer to record. Event details never leave your Mac.
         NSHumanReadableCopyright: © 2026 Greg Foster. MIT License.
+        # Finder "Open With" for audio files → application(_:open:) → import.
+        # Viewer/Alternate: Recap can open audio but never claims default-app.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Audio
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.audio
         # The design system is light-only (hardcoded token colors); render Aqua in dark mode too.
         NSRequiresAquaSystemAppearance: true
         SUFeedURL: https://gregorymfoster.github.io/recap/appcast.xml

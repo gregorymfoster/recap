@@ -1,18 +1,31 @@
+import AppKit
 import RecapUI
 import Sparkle
 import SwiftUI
+import UniformTypeIdentifiers
 
 @main
 struct RecapApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     /// The app-lifetime store graph — the App struct persists for the whole
     /// process, so this is constructed exactly once.
-    @State private var stores = AppStores()
+    @State private var stores: AppStores
 
     private let updaterController = SPUStandardUpdaterController(
         startingUpdater: true,
         updaterDelegate: nil,
         userDriverDelegate: nil
     )
+
+    init() {
+        let stores = AppStores()
+        _stores = State(initialValue: stores)
+        // The delegate adaptor is created before any @State is readable from
+        // it, so hand the graph over through a static hook; the delegate
+        // buffers any file-open events that arrive first.
+        AppDelegate.stores = stores
+    }
 
     var body: some Scene {
         WindowGroup(id: "main") {
@@ -26,6 +39,19 @@ struct RecapApp: App {
             CommandGroup(replacing: .appSettings) {
                 SettingsCommand(stores: stores)
             }
+            CommandGroup(after: .newItem) {
+                Button("Import Audio…") {
+                    let panel = NSOpenPanel()
+                    panel.allowedContentTypes = [.audio]
+                    panel.allowsMultipleSelection = true
+                    panel.canChooseDirectories = false
+                    panel.message = "Choose audio files to import into your library"
+                    if panel.runModal() == .OK {
+                        stores.importAudioFiles(panel.urls)
+                    }
+                }
+                .keyboardShortcut("o", modifiers: .command)
+            }
         }
 
         MenuBarExtra {
@@ -33,6 +59,31 @@ struct RecapApp: App {
         } label: {
             MenuBarLabel(stores: stores)
         }
+    }
+}
+
+/// Receives Finder "Open With" file-open events — SwiftUI's `onOpenURL`
+/// never sees file opens on macOS, so this needs a real app delegate. The
+/// adaptor instantiates it before the App struct's stores are reachable, so
+/// the graph arrives via the static hook (set in `RecapApp.init`) and any
+/// URLs delivered before then are buffered.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    static weak var stores: AppStores? {
+        didSet { flushPending() }
+    }
+    private static var pendingURLs: [URL] = []
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        Self.pendingURLs.append(contentsOf: urls)
+        Self.flushPending()
+    }
+
+    private static func flushPending() {
+        guard let stores, !pendingURLs.isEmpty else { return }
+        let urls = pendingURLs
+        pendingURLs = []
+        stores.importAudioFiles(urls)
     }
 }
 

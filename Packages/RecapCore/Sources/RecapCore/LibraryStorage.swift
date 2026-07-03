@@ -48,6 +48,17 @@ public struct LibraryStorage: Sendable {
         return record
     }
 
+    /// Creates the folder for a meeting imported from an external audio file:
+    /// status starts at `.queued` (there's nothing to record — the audio is
+    /// materialized by the importer, then transcription runs). Reuses the
+    /// same folder-uniquing as recorded meetings, so a same-day title
+    /// collision gets a distinct " 2"-suffixed folder.
+    public func createImportedMeeting(
+        title: String, date: Date, duration: TimeInterval = 0
+    ) throws -> MeetingRecord {
+        try create(Meeting(title: title, date: date, duration: duration, status: .queued))
+    }
+
     public func saveMetadata(_ record: MeetingRecord) throws {
         try Self.encoder.encode(record.meeting).write(to: record.metadataURL, options: .atomic)
     }

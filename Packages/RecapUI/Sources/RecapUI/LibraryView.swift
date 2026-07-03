@@ -1,6 +1,7 @@
 import RecapCore
 import RecapTranscription
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The Library home screen (design mock 1c): header with Record button,
 /// meeting cards with processing status, summary preview for the latest
@@ -12,6 +13,8 @@ struct LibraryView: View {
     @Environment(WhisperModelManager.self) private var models
     @Environment(SettingsStore.self) private var settings
     @Environment(AppRouter.self) private var router
+
+    @State private var dropTargeted = false
 
     var body: some View {
         ScrollView {
@@ -34,6 +37,41 @@ struct LibraryView: View {
             }
         }
         .background(.white)
+        .dropDestination(for: URL.self) { urls, _ in
+            handleDrop(urls)
+        } isTargeted: { dropTargeted = $0 }
+        .overlay { if dropTargeted { dropHighlight } }
+    }
+
+    /// Files dragged from Finder: audio-conforming ones import; anything
+    /// else gets a toast instead of silently vanishing.
+    private func handleDrop(_ urls: [URL]) -> Bool {
+        let audio = urls.filter {
+            UTType(filenameExtension: $0.pathExtension)?.conforms(to: .audio) == true
+        }
+        for url in urls where !audio.contains(url) {
+            stores?.toasts.show("Couldn't import \(url.lastPathComponent) — not an audio file")
+        }
+        guard !audio.isEmpty else { return false }
+        stores?.importAudioFiles(audio)
+        return true
+    }
+
+    private var dropHighlight: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: Tokens.radiusCard)
+                .fill(Tokens.accentBlue.opacity(0.06))
+                .stroke(Tokens.accentBlue, lineWidth: 2)
+            Label("Drop audio to import", systemImage: "square.and.arrow.down")
+                .font(Tokens.rowTitle)
+                .foregroundStyle(Tokens.accentBlue)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.white, in: Capsule())
+                .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+        }
+        .padding(10)
+        .allowsHitTesting(false)
     }
 
     /// Grouped-with-headers for date sorts, a flat list for `.longest` (a

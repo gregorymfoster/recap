@@ -143,6 +143,17 @@ public final class LibraryStore {
         replace(updated)
     }
 
+    /// Adds an already-materialized imported meeting (folder, audio, and
+    /// metadata all on disk — see `AudioImporter`) without a full `reload()`:
+    /// sorted insert into the newest-first array, index update, change-bus
+    /// post.
+    public func insertImported(_ record: MeetingRecord) {
+        let i = meetings.firstIndex { $0.meeting.date < record.meeting.date } ?? meetings.endIndex
+        meetings.insert(record, at: i)
+        if let storage, let index { try? index.update(record, from: storage) }
+        changeBus?.post(.meetingChanged(record.meeting.id))
+    }
+
     /// Aborts a recording that never captured audio (permission denied, engine failure).
     public func markError(_ record: MeetingRecord, message: String) {
         var updated = record

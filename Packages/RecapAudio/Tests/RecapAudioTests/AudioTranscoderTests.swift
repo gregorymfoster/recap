@@ -38,6 +38,48 @@ import Testing
         try file.write(from: buffer)
     }
 
+    /// Writes a 1-second 440 Hz tone as a 16-bit PCM WAV — the import path's
+    /// most common non-m4a source format.
+    private func writeWAV(at url: URL, seconds: Double = 1.0) throws {
+        let sampleRate = 44_100.0
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: sampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsNonInterleaved: false,
+        ]
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false
+        )!
+        let file = try AVAudioFile(
+            forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false
+        )
+        let frames = AVAudioFrameCount(sampleRate * seconds)
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+        buffer.frameLength = frames
+        for i in 0..<Int(frames) {
+            buffer.floatChannelData![0][i] = sinf(Float(i) * 2 * .pi * 440 / Float(sampleRate)) * 0.5
+        }
+        try file.write(from: buffer)
+    }
+
+    /// The external-import path: a WAV source transcodes to a readable m4a
+    /// with the duration preserved.
+    @Test func transcodeWAVToM4APreservesDuration() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let wav = dir.appendingPathComponent("imported.wav")
+        let m4a = dir.appendingPathComponent("audio.m4a")
+        try writeWAV(at: wav)
+
+        try AudioTranscoder.transcodeToAAC(from: wav, to: m4a)
+
+        let duration = try #require(AudioTranscoder.duration(of: m4a))
+        #expect(abs(duration - 1.0) < 0.05)
+    }
+
     @Test func transcodeProducesReadableAAC() throws {
         let dir = try tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
