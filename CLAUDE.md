@@ -56,6 +56,10 @@ writes, no processing queue. Use for UI work and screenshots.
 recording (no mic/system-audio hardware, no transcription engine) against throwaway temp storage
 with no processing queue. Driven by `Scripts/soak-test.sh`; not for interactive use.
 
+`-show-menubar-content` (combine with `-fixtures`) opens an auxiliary, non-resizable window hosting
+the menu bar extra's popover content (`MenuBarContent`) so it can be screenshotted — the real
+status-item popover lives in menu-bar overflow that headless tooling can't reach.
+
 ## Dev build vs prod
 
 Debug builds produce a fully independent **Recap Dev.app** (`com.gregfoster.recap.dev`) so a prod

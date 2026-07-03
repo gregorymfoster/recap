@@ -41,6 +41,7 @@ struct RecapApp: App {
     var body: some Scene {
         WindowGroup(id: "main") {
             RootView(stores: stores)
+                .modifier(MenuBarContentDebugOpener())
         }
         .defaultSize(width: 1060, height: 660)
         .commands {
@@ -87,6 +88,50 @@ struct RecapApp: App {
         // Rich popover content (design handoff 8a) — `.menu` style can't
         // render the header block, progress rows, or quick actions.
         .menuBarExtraStyle(.window)
+
+        // Debug hook (like `-fixtures`/`-soak`): the menu bar extra's popover
+        // normally lives in the status-item overflow, which screen capture
+        // and UI-automation tooling can't reach headlessly. This auxiliary,
+        // non-resizable window hosts the same `MenuBarContent` view so its
+        // idle/recording states can be screenshotted like any other window.
+        // `SceneBuilder` doesn't support an `if` here (control flow inside a
+        // scene builder isn't just unsupported, it currently ICEs the
+        // compiler — confirmed by isolated repro), so the scene is always
+        // declared but launch-suppressed; `MenuBarContentDebugOpener` below
+        // opens it explicitly only when `-show-menubar-content` is passed
+        // (documented in CLAUDE.md's "Run the app with fixture data" section).
+        Window("Menu Bar Content", id: "menubar-content-debug") {
+            MenuBarContentDebugView(stores: stores)
+        }
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)
+    }
+}
+
+/// Content view for the `-show-menubar-content` debug window.
+private struct MenuBarContentDebugView: View {
+    let stores: AppStores
+
+    var body: some View {
+        MenuBarContent(stores: stores)
+            .background(Tokens.surface)
+    }
+}
+
+/// Opens the (launch-suppressed) menu-bar-content debug window at launch when
+/// `-show-menubar-content` is passed. Lives on `RootView`'s window rather
+/// than the debug window's own body, since `openWindow` needs a scene that's
+/// actually created to call from — the suppressed window's own content view
+/// never runs its body until something opens it.
+struct MenuBarContentDebugOpener: ViewModifier {
+    @Environment(\.openWindow) private var openWindow
+
+    func body(content: Content) -> some View {
+        content.task {
+            if ProcessInfo.processInfo.arguments.contains("-show-menubar-content") {
+                openWindow(id: "menubar-content-debug")
+            }
+        }
     }
 }
 

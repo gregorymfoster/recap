@@ -73,6 +73,12 @@ public final class LibraryStore {
     /// -fixtures runs and screenshot dumps can show the transcript pane —
     /// avatars, rename affordance, playback follow. Empty in disk-backed mode.
     private var fixtureTranscripts: [UUID: Transcript] = [:]
+    /// Canned raw notes for fixture records, mirroring `fixtureTranscripts`.
+    /// Empty in disk-backed mode.
+    private var fixtureNotes: [UUID: String] = [:]
+    /// Canned enhanced notes for fixture records, mirroring
+    /// `fixtureTranscripts`. Empty in disk-backed mode.
+    private var fixtureEnhancedNotes: [UUID: String] = [:]
 
     private static let sortKey = "librarySort"
 
@@ -90,7 +96,9 @@ public final class LibraryStore {
     /// Fixture store for previews and early UI work.
     public init(
         fixtures: [MeetingRecord], queueSummary: QueueSummary? = nil,
-        transcripts: [UUID: Transcript] = [:]
+        transcripts: [UUID: Transcript] = [:],
+        notes: [UUID: String] = [:],
+        enhancedNotes: [UUID: String] = [:]
     ) {
         self.storage = nil
         self.index = nil
@@ -101,6 +109,8 @@ public final class LibraryStore {
         self.meetings = fixtures
         self.queueSummary = queueSummary
         self.fixtureTranscripts = transcripts
+        self.fixtureNotes = notes
+        self.fixtureEnhancedNotes = enhancedNotes
     }
 
     /// `meetings` filtered then sorted — the source of truth (`meetings`,
@@ -260,7 +270,7 @@ public final class LibraryStore {
     // MARK: Notes & transcript
 
     public func loadNotes(for record: MeetingRecord) -> String {
-        guard let storage else { return "" }
+        guard let storage else { return fixtureNotes[record.meeting.id] ?? "" }
         return (try? storage.loadNotes(in: record)) ?? ""
     }
 
@@ -270,7 +280,7 @@ public final class LibraryStore {
     }
 
     public func loadEnhancedNotes(for record: MeetingRecord) -> String? {
-        guard let storage else { return nil }
+        guard let storage else { return fixtureEnhancedNotes[record.meeting.id] }
         return (try? storage.loadEnhancedNotes(in: record)) ?? nil
     }
 
@@ -350,7 +360,18 @@ extension LibraryStore {
                 folderURL: URL(filePath: "/dev/null")
             )
         }
-        let standup = record("Weekly standup", hoursAgo: 6, duration: 900, attendees: ["Maya", "Sam"], status: .ready)
+        var standup = record("Weekly standup", hoursAgo: 6, duration: 900, attendees: ["Maya", "Sam"], status: .ready)
+        // Real playable audio (design handoff v2 §8d): every other fixture
+        // record points at `/dev/null`, which `MeetingDetailView.hasPlayableAudio`
+        // correctly treats as "no audio" — that's right for the rest of the
+        // library, but it means the player bar never docks anywhere in
+        // `-fixtures` mode. Point just this one ready meeting's folder at a
+        // throwaway temp folder holding a short silent `.m4a` so screenshot
+        // QA can see the docked player, scrubber, and click-to-seek against
+        // this meeting's transcript (utterances span 0–38s below).
+        if let audioFolder = FixtureAudio.makeSilentMeetingFolder(duration: 40) {
+            standup.folderURL = audioFolder
+        }
         // Canned transcript for the first ready meeting, so fixture runs can
         // exercise the transcript pane (avatars, speaker rename, seek UI).
         let standupTranscript = Transcript(
@@ -363,6 +384,23 @@ extension LibraryStore {
             ],
             engine: "fixture", model: "fixture", language: "en"
         )
+        // Canned raw + enhanced notes for the same meeting, so fixture runs
+        // can exercise the ✨ Enhanced / My notes segmented control, the
+        // enhanced-caption + Undo affordance, and EnhancedNotesView's
+        // supported Markdown subset (design handoff v2 §8c).
+        let standupNotes = """
+        - Roundtable: Q3 draft, onboarding revision, perf regressions
+        - Feedback due Friday
+        """
+        let standupEnhancedNotes = """
+        ## Updates
+        - Maya shipped the Q3 roadmap draft — feedback due **Friday**.
+        - The onboarding revision still needs a second usability pass; Priya has two sessions booked this week.
+        - Performance regressions on older laptops — Sam follows up with numbers next week.
+
+        ## Action items
+        - [ ] Sam shares performance regression numbers next week
+        """
         return LibraryStore(
             fixtures: [
                 record("Design sync — Q3 roadmap", hoursAgo: 0.5, duration: 1_453, attendees: ["Maya", "Sam", "Priya"], status: .transcribing(progress: 0.42)),
@@ -373,7 +411,9 @@ extension LibraryStore {
                 record("Pricing brainstorm", hoursAgo: 30, duration: 2_400, attendees: ["Maya", "Alex", "Priya"], status: .ready),
             ],
             queueSummary: QueueSummary(jobCount: 2, progress: 0.42),
-            transcripts: [standup.meeting.id: standupTranscript]
+            transcripts: [standup.meeting.id: standupTranscript],
+            notes: [standup.meeting.id: standupNotes],
+            enhancedNotes: [standup.meeting.id: standupEnhancedNotes]
         )
     }
 }

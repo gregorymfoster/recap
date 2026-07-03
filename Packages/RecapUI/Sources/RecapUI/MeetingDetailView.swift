@@ -158,6 +158,7 @@ struct MeetingDetailView: View {
                     .foregroundStyle(enhancedNotes != nil ? Tokens.textSecondary : Tokens.textBody)
                     .lineSpacing(7)
                     .scrollContentBackground(.hidden)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 34)
                     .padding(.top, 16)
             }
