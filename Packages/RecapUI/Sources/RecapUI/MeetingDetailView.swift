@@ -1,4 +1,5 @@
 import CoreAudio
+import Foundation
 import RecapAudio
 import RecapCore
 import RecapTranscription
@@ -55,12 +56,11 @@ struct MeetingDetailView: View {
             savedTranscript = library.loadTranscript(for: record)
             enhancedNotes = library.loadEnhancedNotes(for: record)
             showingOriginal = false
-            // Live meetings default to expanded so the user sees text
-            // appearing without hunting for the toggle; saved meetings keep
-            // whatever the user last chose.
-            if isLiveMeeting {
-                showTranscript = true
-            }
+            // Default to the split view whenever there's a transcript to show —
+            // live meetings (text appears as it's spoken) and finished ones
+            // (transcript lands next to the summary without hunting for the
+            // toggle). The toolbar toggle still hides it.
+            showTranscript = isLiveMeeting || savedTranscript?.utterances.isEmpty == false
         }
         .task(id: record.meeting.status) {
             // Refresh once the pipeline lands results (status flips to ready).
@@ -70,6 +70,9 @@ struct MeetingDetailView: View {
                 }
                 if enhancedNotes == nil {
                     enhancedNotes = library.loadEnhancedNotes(for: record)
+                }
+                if savedTranscript?.utterances.isEmpty == false {
+                    showTranscript = true
                 }
             }
         }
@@ -109,6 +112,24 @@ struct MeetingDetailView: View {
             }
         }
         .background(Tokens.surface)
+    }
+
+    /// True when the editor pane is currently showing the enhanced summary
+    /// rather than the user's raw notes.
+    private var isShowingEnhanced: Bool {
+        enhancedNotes != nil && !showingOriginal
+    }
+
+    /// Copies whatever the editor pane is showing right now: the enhanced
+    /// summary markdown, or the raw notes.
+    @ViewBuilder
+    private var copyNotesButton: some View {
+        let displayed = isShowingEnhanced ? (enhancedNotes ?? "") : notes
+        if !displayed.isEmpty {
+            CopyButton(help: isShowingEnhanced ? "Copy summary" : "Copy notes") {
+                isShowingEnhanced ? (enhancedNotes ?? "") : notes
+            }
+        }
     }
 
     /// "✨ Enhanced / My original notes" switcher, shown once enhancement exists.
@@ -152,6 +173,7 @@ struct MeetingDetailView: View {
                     .kerning(-0.4)
                     .foregroundStyle(Tokens.textPrimary)
                 notesModeToggle
+                copyNotesButton
             }
             if !record.meeting.attendees.isEmpty {
                 HStack(spacing: 6) {
@@ -213,7 +235,11 @@ struct MeetingDetailView: View {
             Text("·")
             Text("CPU: low-priority")
             Spacer()
-            Text("Saving to \(library.saveLocationLabel)")
+            if case .ready = record.meeting.status {
+                persistenceChips
+            } else {
+                Text("Saving to \(library.saveLocationLabel)")
+            }
         }
         .font(.system(size: 10.5))
         .foregroundStyle(Tokens.textSecondary)
@@ -221,6 +247,46 @@ struct MeetingDetailView: View {
         .padding(.vertical, 6)
         .background(Tokens.subtleBackground.opacity(0.9))
         .overlay(alignment: .top) { Divider() }
+    }
+
+    /// Once a meeting is `.ready`, the trailing "Saving to …" text upgrades to
+    /// truthful chips: always a "Saved" chip (the folder exists on disk), plus
+    /// "Backed up" only after the folder mirror actually succeeded. With
+    /// backup disabled, a quiet "Local only" note — informative, not alarming.
+    private var persistenceChips: some View {
+        HStack(spacing: 8) {
+            persistenceChip("Saved")
+                .help("Saved in \(record.folderURL.path)")
+            if let backupDate = record.meeting.lastBackupDate {
+                persistenceChip("Backed up")
+                    .help("Backed up to \(backupLocationLabel) · \(backupDate.formatted(.relative(presentation: .named)))")
+            } else if !settings.mirrorBackupEnabled || settings.mirrorFolderPath.isEmpty {
+                Text("Local only")
+                    .foregroundStyle(Tokens.textTertiary)
+            }
+        }
+    }
+
+    /// Green-check chip, styled after `MeetingStatusView`'s chips.
+    private func persistenceChip(_ label: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 9))
+            Text(label)
+                .font(Tokens.caption.weight(.semibold))
+        }
+        .foregroundStyle(Tokens.successGreenText)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Tokens.successGreenTint, in: RoundedRectangle(cornerRadius: Tokens.radiusChip))
+    }
+
+    /// "~/…"-abbreviated mirror-backup destination, like `saveLocationLabel`.
+    private var backupLocationLabel: String {
+        let path = settings.mirrorFolderPath
+        guard !path.isEmpty else { return "backup folder" }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 }
 

@@ -176,6 +176,14 @@ public final class LibraryStore {
         }
     }
 
+    /// Records a successful folder-mirror backup, persisting through the
+    /// same metadata save path as every other meeting mutation.
+    public func markBackedUp(_ id: UUID, at date: Date = .now) {
+        guard var record = record(for: id) else { return }
+        record.meeting.lastBackupDate = date
+        replace(record)
+    }
+
     /// Used by crash salvage: the recovered file is the only duration source.
     public func updateDuration(_ id: UUID, to duration: TimeInterval) {
         guard var record = record(for: id) else { return }

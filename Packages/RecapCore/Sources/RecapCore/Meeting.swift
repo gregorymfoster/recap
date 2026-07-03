@@ -27,6 +27,10 @@ public struct Meeting: Codable, Equatable, Identifiable, Sendable {
     /// decode unchanged. CloudKit sync (Milestone C) uses this for
     /// last-writer-wins conflict resolution.
     public var updatedAt: Date?
+    /// When the folder-mirror backup last succeeded for this meeting; nil if
+    /// it never has. Optional so pre-existing `meeting.json` files decode
+    /// unchanged.
+    public var lastBackupDate: Date?
 
     public init(
         id: UUID = UUID(),
@@ -35,7 +39,8 @@ public struct Meeting: Codable, Equatable, Identifiable, Sendable {
         duration: TimeInterval = 0,
         attendees: [String] = [],
         status: MeetingStatus = .recording,
-        updatedAt: Date? = nil
+        updatedAt: Date? = nil,
+        lastBackupDate: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -44,5 +49,6 @@ public struct Meeting: Codable, Equatable, Identifiable, Sendable {
         self.attendees = attendees
         self.status = status
         self.updatedAt = updatedAt
+        self.lastBackupDate = lastBackupDate
     }
 }

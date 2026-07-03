@@ -57,6 +57,15 @@ private actor ChainCollector {
     }
 }
 
+/// Collects meetings reported as successfully mirror-backed-up.
+private actor BackupCollector {
+    private(set) var meetingIDs: [UUID] = []
+
+    func record(_ id: UUID) {
+        meetingIDs.append(id)
+    }
+}
+
 @Suite struct MeetingProcessorTests {
     private func makeStorage() -> LibraryStorage {
         let root = FileManager.default.temporaryDirectory
@@ -85,6 +94,7 @@ private actor ChainCollector {
         settings: @escaping @Sendable () async -> ProcessorSettings = { ProcessorSettings.disabled },
         statusCollector: StatusCollector,
         chainCollector: ChainCollector,
+        backupCollector: BackupCollector? = nil,
         changeBus: LibraryChangeBus = LibraryChangeBus()
     ) -> MeetingProcessor {
         MeetingProcessor(
@@ -95,6 +105,7 @@ private actor ChainCollector {
             settings: settings,
             onStatus: { @Sendable id, status in await statusCollector.record(id, status) },
             onDurationRecovered: { @Sendable _, _ in },
+            onBackedUp: { @Sendable id in await backupCollector?.record(id) },
             chain: { @Sendable job in await chainCollector.record(job) },
             changeBus: changeBus
         )
@@ -316,6 +327,7 @@ private actor ChainCollector {
 
         let statusCollector = StatusCollector()
         let chainCollector = ChainCollector()
+        let backupCollector = BackupCollector()
         let processor = makeProcessor(
             storage: storage,
             enhancer: FakeEnhancer(isAvailable: false),
@@ -331,7 +343,8 @@ private actor ChainCollector {
                 )
             },
             statusCollector: statusCollector,
-            chainCollector: chainCollector
+            chainCollector: chainCollector,
+            backupCollector: backupCollector
         )
 
         try await processor.execute(
@@ -344,6 +357,10 @@ private actor ChainCollector {
         #expect(!exportedMarkdown.isEmpty)
         let mirrored = try FileManager.default.contentsOfDirectory(atPath: mirrorDir.path)
         #expect(!mirrored.isEmpty)
+        // A successful mirror reports back so the meeting's lastBackupDate
+        // gets persisted (and the UI can show "Backed up").
+        let backedUp = await backupCollector.meetingIDs
+        #expect(backedUp == [record.meeting.id])
     }
 
     @Test func doesNotExportWhenTogglesAreOff() async throws {
@@ -362,6 +379,7 @@ private actor ChainCollector {
 
         let statusCollector = StatusCollector()
         let chainCollector = ChainCollector()
+        let backupCollector = BackupCollector()
         let processor = makeProcessor(
             storage: storage,
             enhancer: FakeEnhancer(isAvailable: false),
@@ -377,7 +395,8 @@ private actor ChainCollector {
                 )
             },
             statusCollector: statusCollector,
-            chainCollector: chainCollector
+            chainCollector: chainCollector,
+            backupCollector: backupCollector
         )
 
         try await processor.execute(
@@ -386,6 +405,8 @@ private actor ChainCollector {
 
         #expect(!FileManager.default.fileExists(atPath: vaultDir.path))
         #expect(!FileManager.default.fileExists(atPath: mirrorDir.path))
+        let backedUp = await backupCollector.meetingIDs
+        #expect(backedUp.isEmpty)
     }
 
     // MARK: 10. Diarizer disabled is best-effort — transcription still completes

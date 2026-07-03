@@ -22,6 +22,9 @@ struct MeetingProcessor: JobExecutor {
     let onStatus: @Sendable (UUID, MeetingStatus) async -> Void
     /// Crash salvage recovered the audio; the file length is the duration.
     let onDurationRecovered: @Sendable (UUID, TimeInterval) async -> Void
+    /// The folder-mirror backup succeeded for this meeting — persist the
+    /// timestamp so the UI can truthfully show "Backed up".
+    let onBackedUp: @Sendable (UUID) async -> Void
     /// Enqueues a follow-up job (transcribe → enhance chaining).
     let chain: @Sendable (ProcessingJob) async -> Void
     /// Announces a meeting is about to be exported, so other subscribers
@@ -139,6 +142,7 @@ struct MeetingProcessor: JobExecutor {
             let mirror = FolderMirrorExporter(destinationRootURL: URL(fileURLWithPath: s.mirrorFolderPath))
             do {
                 try mirror.mirror(record)
+                await onBackedUp(record.meeting.id)
             } catch {
                 processorLog.error("Folder-mirror backup failed: \(error, privacy: .public)")
             }
@@ -207,6 +211,9 @@ public final class QueueStore {
             },
             onDurationRecovered: { @Sendable id, duration in
                 await library.updateDuration(id, to: duration)
+            },
+            onBackedUp: { @Sendable id in
+                await library.markBackedUp(id)
             },
             chain: { @Sendable job in
                 await queueBox.queue?.enqueue(job)

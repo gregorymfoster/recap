@@ -249,6 +249,12 @@ public final class AppStores {
                     includeMic: includeMic,
                     preferredInputUID: settings.preferredInputUID
                 )
+                if session.isRecording {
+                    // Jump straight to the live meeting so the live transcript
+                    // pane (on by default for live meetings) is visible from
+                    // the first second of recording.
+                    showMeeting(record.meeting.id)
+                }
                 if session.permissionDenied {
                     library.markError(record, message: "Microphone access denied")
                     toasts.show(

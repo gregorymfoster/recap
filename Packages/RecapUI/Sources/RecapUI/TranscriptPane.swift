@@ -24,6 +24,13 @@ struct TranscriptPane: View {
                     OnDeviceBadge(label: "on-device")
                 }
                 Spacer()
+                if !utterances.isEmpty {
+                    // Confirmed utterances only — the in-progress partial is
+                    // deliberately excluded from copies.
+                    CopyButton(help: "Copy transcript") {
+                        TranscriptFormatter.plainText(utterances: utterances)
+                    }
+                }
             }
             .padding(.horizontal, 22)
             .padding(.top, 18)
@@ -206,27 +213,22 @@ struct TranscriptPane: View {
             .padding(.leading, 48)  // aligns with the text column
     }
 
+    // Naming/timestamp conventions live in TranscriptFormatter (RecapCore) so
+    // the on-screen transcript and clipboard copies never drift apart.
+
     private func displayName(for speakerID: String) -> String {
-        if let number = speakerNumber(speakerID) { return "Speaker \(number)" }
-        return speakerID
+        TranscriptFormatter.speakerDisplayName(speakerID)
     }
 
     private func color(for speakerID: String) -> Color {
-        guard let number = speakerNumber(speakerID), number >= 1 else { return Tokens.textSecondary }
+        guard let number = TranscriptFormatter.speakerNumber(speakerID), number >= 1 else {
+            return Tokens.textSecondary
+        }
         return Tokens.speakerPalette[(number - 1) % Tokens.speakerPalette.count]
     }
 
-    private func speakerNumber(_ speakerID: String) -> Int? {
-        guard speakerID.hasPrefix("S") else { return nil }
-        return Int(speakerID.dropFirst())
-    }
-
     private func timestamp(_ seconds: TimeInterval) -> String {
-        let total = Int(seconds)
-        if total >= 3600 {
-            return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
-        }
-        return String(format: "%d:%02d", total / 60, total % 60)
+        TranscriptFormatter.timestamp(seconds)
     }
 }
 

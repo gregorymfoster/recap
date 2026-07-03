@@ -18,10 +18,16 @@ struct RecapApp: App {
     /// update itself into the prod app, so Sparkle isn't even constructed.
     private let updater: UpdaterModel?
 
+    /// Owns the Granola-style floating recording capsule shown while
+    /// recording and Recap is backgrounded. Same `AppStores`/session wiring
+    /// as prod — no dev-build special-casing needed.
+    private let floatingIndicator: FloatingIndicatorController
+
     init() {
         let stores = AppStores()
         _stores = State(initialValue: stores)
         updater = AppIdentity.isDevBuild ? nil : UpdaterModel(status: stores.updateStatus)
+        floatingIndicator = FloatingIndicatorController(stores: stores)
         // The delegate adaptor is created before any @State is readable from
         // it, so hand the graph over through a static hook; the delegate
         // buffers any file-open events that arrive first.

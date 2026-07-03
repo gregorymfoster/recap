@@ -16,6 +16,26 @@ import Testing
         #expect(decoded == meeting)
     }
 
+    @Test func decodesLegacyJSONWithoutLastBackupDate() throws {
+        // A meeting.json written before `lastBackupDate` (and `updatedAt`)
+        // existed must still decode — old libraries never migrate.
+        let legacyJSON = """
+        {
+          "id": "6F1E2D3C-4B5A-6978-8899-AABBCCDDEEFF",
+          "title": "Weekly standup",
+          "date": 700000000,
+          "duration": 900,
+          "attendees": ["Maya"],
+          "status": {"ready": {}}
+        }
+        """
+        let meeting = try JSONDecoder().decode(Meeting.self, from: Data(legacyJSON.utf8))
+        #expect(meeting.lastBackupDate == nil)
+        #expect(meeting.updatedAt == nil)
+        #expect(meeting.status == .ready)
+        #expect(meeting.title == "Weekly standup")
+    }
+
     @Test func transcriptFullTextJoinsUtterances() {
         let transcript = Transcript(
             utterances: [
