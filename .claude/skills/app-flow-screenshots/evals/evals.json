@@ -1,0 +1,18 @@
+{
+  "skill_name": "app-flow-screenshots",
+  "notes": "GUI-exclusive skill: evals must run one at a time on an unlocked Mac with Accessibility + Screen Recording granted to the host. No baseline runs (two concurrent GUI drivers would fight over one desktop). Validation is a single real run + manual inspection of the PNGs.",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "take screenshots of all the core flows of the app and put them in a folder in my downloads so i can drop them into claude design as a state-of-the-app dump",
+      "expected_output": "~/Downloads/Recap-flows-<date>/ containing 01-library.png through 10-floating-capsule.png (08 optional) plus README.md manifest with version, commit, and per-file descriptions. Every PNG shows the state named in references/flows.md; no blank or wrong-state frames.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "grab a fresh state-of-the-app dump — the UI changed since the last one",
+      "expected_output": "A NEW folder (suffix -2 etc. if same day) — the previous dump is not overwritten. Same content contract as eval 1.",
+      "files": []
+    }
+  ]
+}
