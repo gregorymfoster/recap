@@ -249,6 +249,16 @@ public final class QueueStore {
         Task { await queue.enqueue(ProcessingJob(kind: .transcribe, meetingID: meetingID)) }
     }
 
+    /// Re-transcribes a meeting from its saved audio — the library row's
+    /// "Re-transcribe" context menu action (retryable after a failed or
+    /// unsatisfying pass). Resets status to `.queued` first so the row shows
+    /// the same quiet "Queued" state as any other pending job, then reuses
+    /// the normal enqueue path.
+    public func retranscribe(_ record: MeetingRecord, in library: LibraryStore) {
+        library.updateStatus(record.meeting.id, to: .queued)
+        enqueueTranscription(for: record.meeting.id)
+    }
+
     /// Re-runs transcription for every meeting parked in `.needsModel`. Called
     /// when a speech model becomes active (freshly installed, or restored at
     /// launch) so parked recordings finish without the user re-recording.

@@ -77,6 +77,24 @@ public struct LibraryStorage: Sendable {
         }
     }
 
+    /// Renames a meeting's display title. Only `meeting.json` changes — the
+    /// on-disk folder name is fixed at creation time, so existing exports
+    /// (Obsidian, folder-mirror) that reference the folder path stay valid.
+    public func rename(_ record: MeetingRecord, to title: String) throws -> MeetingRecord {
+        var updated = record
+        updated.meeting.title = title
+        try saveMetadata(updated)
+        return updated
+    }
+
+    /// Moves a meeting's folder to the Trash (recoverable — Finder's Trash,
+    /// not a permanent delete), via `FileManager.trashItem`.
+    public func trash(_ record: MeetingRecord) throws {
+        try logOnFailure("trash") {
+            try FileManager.default.trashItem(at: record.folderURL, resultingItemURL: nil)
+        }
+    }
+
     /// Loads every meeting folder under the root. Folders without a readable
     /// `meeting.json` are skipped (never deleted); the skip count is logged
     /// so a bad folder doesn't silently vanish from view.

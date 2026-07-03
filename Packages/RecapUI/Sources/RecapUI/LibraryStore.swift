@@ -207,6 +207,40 @@ public final class LibraryStore {
         meetings.first { $0.meeting.id == id }
     }
 
+    /// Renames a meeting's display title. Fixture mode (no `storage`) updates
+    /// the in-memory record only, so the context menu still works in previews.
+    public func rename(_ record: MeetingRecord, to title: String) {
+        guard let storage else {
+            var updated = record
+            updated.meeting.title = title
+            replaceInMemoryOnly(updated)
+            return
+        }
+        guard let renamed = try? storage.rename(record, to: title) else { return }
+        replace(renamed)
+    }
+
+    /// Moves a meeting's folder to the Trash (recoverable) and drops it from
+    /// the in-memory list + search index. No-ops in fixture mode — there's no
+    /// real folder to trash for a `/dev/null` fixture record.
+    public func moveToTrash(_ record: MeetingRecord) {
+        guard let storage else { return }
+        guard (try? storage.trash(record)) != nil else { return }
+        meetings.removeAll { $0.meeting.id == record.meeting.id }
+        if selectedMeetingID == record.meeting.id { selectedMeetingID = nil }
+        if let index { try? index.reindex(from: storage) }
+        changeBus?.post(.meetingChanged(record.meeting.id))
+    }
+
+    /// Fixture-only path for `rename` — mirrors `replace` minus disk I/O.
+    private func replaceInMemoryOnly(_ record: MeetingRecord) {
+        var record = record
+        record.meeting.updatedAt = .now
+        if let i = meetings.firstIndex(where: { $0.meeting.id == record.meeting.id }) {
+            meetings[i] = record
+        }
+    }
+
     // MARK: Notes & transcript
 
     public func loadNotes(for record: MeetingRecord) -> String {

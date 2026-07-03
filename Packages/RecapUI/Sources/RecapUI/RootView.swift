@@ -113,7 +113,7 @@ public struct RootView: View {
                         }
                     }
             } else {
-                LibraryView()
+                LibraryView(showSearch: $showSearch)
             }
         case .models:
             ModelManagerView()

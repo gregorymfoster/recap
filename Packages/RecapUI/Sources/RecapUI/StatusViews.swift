@@ -1,14 +1,20 @@
 import RecapCore
 import SwiftUI
 
-/// Trailing status indicator on a Library row: blue progress while transcribing,
-/// gray chip while queued, green chip when ready. `needsModel` is an actionable
-/// amber button that jumps to the Models tab; `error` surfaces its message.
+/// Trailing status indicator on a Library row — the "quiet status system"
+/// (design global decision #4): `.ready` is the silent default (nothing
+/// shown at all, no green chip); color marks exceptions only. `needsModel`
+/// stays an actionable amber chip (there's a real action: install a model),
+/// and `.error` is red text plus a blue "Retry" link that re-enqueues
+/// transcription — the one other actionable exception.
 struct MeetingStatusView: View {
     var status: MeetingStatus
     /// Invoked when the user taps the "needs model" chip. When nil, the chip is
     /// shown as a non-interactive label (e.g. in previews).
     var onInstallModel: (() -> Void)?
+    /// Invoked when the user taps "Retry" on a failed transcription. When
+    /// nil, the retry link is omitted (e.g. in previews/fixtures).
+    var onRetry: (() -> Void)?
 
     var body: some View {
         switch status {
@@ -16,27 +22,51 @@ struct MeetingStatusView: View {
             // stays: white text on the solid red "Recording" chip in both modes
             chip("Recording", foreground: .white, background: Tokens.recordRed)
         case .queued:
-            chip("Queued", foreground: Tokens.textSecondary, background: Tokens.chipBackground)
+            Text("Queued")
+                .font(Tokens.caption)
+                .foregroundStyle(Tokens.textSecondary)
         case .transcribing(let progress):
-            HStack(spacing: 10) {
-                Text("Transcribing")
+            HStack(spacing: 8) {
+                Text("Transcribing · \(Int((progress * 100).rounded()))%")
                     .font(Tokens.caption.weight(.semibold))
                     .foregroundStyle(Tokens.accentBlue)
+                    .monospacedDigit()
                 ProgressView(value: progress)
                     .tint(Tokens.accentBlue)
-                    .frame(width: 180)
+                    .frame(width: 110)
             }
         case .enhancing:
-            chip("Enhancing", foreground: Tokens.accentBlue, background: Tokens.accentBlue.opacity(0.1))
+            Text("Enhancing")
+                .font(Tokens.caption.weight(.semibold))
+                .foregroundStyle(Tokens.accentBlue)
         case .ready:
-            chip("Ready", foreground: Tokens.successGreenText, background: Tokens.successGreenTint)
+            // Silent default: a finished meeting shows no status at all.
+            EmptyView()
         case .needsModel:
             needsModelChip
-        case .error(let message):
-            // Show the actual reason ("Microphone access denied", …) rather
-            // than a bare "Error", with the full text on hover.
-            chip(message, foreground: Tokens.recordRedDark, background: Tokens.recordRed.opacity(0.1))
-                .help(message)
+        case .error:
+            errorStatus
+        }
+    }
+
+    /// Red "Transcription failed" text + blue "Retry" link that re-enqueues
+    /// transcription. The underlying message (e.g. "Microphone access
+    /// denied") stays available on hover for detail, but the row itself
+    /// always reads the same quiet, generic failure text per the design.
+    @ViewBuilder private var errorStatus: some View {
+        if case .error(let message) = status {
+            HStack(spacing: 8) {
+                Text("Transcription failed")
+                    .font(Tokens.caption.weight(.semibold))
+                    .foregroundStyle(Tokens.recordRedDark)
+                if let onRetry {
+                    Button("Retry", action: onRetry)
+                        .buttonStyle(.plain)
+                        .font(Tokens.caption.weight(.semibold))
+                        .foregroundStyle(Tokens.accentBlue)
+                }
+            }
+            .help(message)
         }
     }
 
@@ -92,7 +122,10 @@ struct OnDeviceBadge: View {
 }
 
 extension Meeting {
-    /// "Jun 30 · 24 min · 3 speakers" — the row meta line.
+    /// "Jun 30 · 24 min · 3 speakers" — the row meta line. Meetings parked at
+    /// `.needsModel` have audio safely on disk but nothing to show for
+    /// duration/speakers yet (no transcript = no diarization) — "audio
+    /// saved" reassures that the recording wasn't lost.
     var metaLine: String {
         var parts = [date.formatted(.dateTime.month(.abbreviated).day())]
         if duration > 0 {
@@ -100,6 +133,9 @@ extension Meeting {
         }
         if !attendees.isEmpty {
             parts.append("\(attendees.count + 1) speakers")
+        }
+        if status == .needsModel {
+            parts.append("audio saved")
         }
         return parts.joined(separator: " · ")
     }

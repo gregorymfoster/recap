@@ -26,6 +26,13 @@ public enum SidebarItem: String, CaseIterable, Identifiable {
 }
 
 struct Sidebar: View {
+    /// Sidebar items that are actually navigable from the list (excludes
+    /// `.settings`, which per the v2 design lives in its own window — the
+    /// `SidebarItem` case itself stays, since `AppRouter`/menu-bar/toast "Open
+    /// Settings" actions outside this file still route through
+    /// `router.section = .settings`).
+    private static let visibleItems: [SidebarItem] = [.library, .models]
+
     @Binding var selection: SidebarItem?
     @Environment(LibraryStore.self) private var library
     @Environment(WhisperModelManager.self) private var models
@@ -34,13 +41,35 @@ struct Sidebar: View {
     var body: some View {
         VStack(spacing: 0) {
             List(selection: $selection) {
-                ForEach(SidebarItem.allCases) { item in
-                    Label(item.label, systemImage: item.systemImage)
-                        .badge(item == .library ? library.meetings.count : 0)
-                        .tag(item)
+                ForEach(Self.visibleItems) { item in
+                    HStack(spacing: 8) {
+                        Image(systemName: item.systemImage)
+                            .font(.system(size: 12))
+                            .foregroundStyle(selection == item ? Tokens.accentBlue : Tokens.textSecondary)
+                            .frame(width: 16)
+                        Text(item.label)
+                            .font(.system(size: 13, weight: selection == item ? .semibold : .regular))
+                        Spacer()
+                        if item == .library, !library.meetings.isEmpty {
+                            Text("\(library.meetings.count)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Tokens.textTertiary)
+                                .monospacedDigit()
+                        }
+                    }
+                    .tag(item)
                 }
             }
             .listStyle(.sidebar)
+            // Design global #2: sidebar selection should read as a neutral
+            // translucent fill, not accent blue. `.tint()` was tried here
+            // first, but on macOS `List`'s tint bridges to the *window's*
+            // control tint rather than staying scoped to this view subtree —
+            // it silently recolored unrelated blue progress bars elsewhere
+            // in the window. Left as native accent-blue selection instead;
+            // a fully neutral selection would need a custom
+            // NSTableView-level row-color override, which is a bigger change
+            // than this pass's budget.
 
             if let queue = library.queueSummary {
                 QueueWidget(summary: queue)
@@ -56,18 +85,6 @@ struct Sidebar: View {
 
             activeModelFooter
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            HStack(spacing: 8) {
-                RecapLogo()
-                Text("Recap")
-                    .font(.system(size: 14, weight: .bold))
-                    .kerning(-0.2)
-                    .foregroundStyle(Tokens.textPrimary)
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 6)
-        }
     }
 
     private var activeModelFooter: some View {
@@ -81,6 +98,8 @@ struct Sidebar: View {
                 Text(models.activeModel.map { "\($0.displayName) · \($0.languages)" } ?? "No model installed")
                     .font(Tokens.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer()
                 Image(systemName: "gearshape")
                     .font(.system(size: 11))
@@ -125,26 +144,33 @@ struct UpdateChip: View {
     }
 }
 
-/// Sidebar footer card: aggregate progress of the background processing queue.
+/// Sidebar footer card: aggregate progress of the background processing
+/// queue (design mock 6a). No pause affordance — `ProcessingQueue` has no
+/// pause API today (only an automatic battery-triggered pause reflected in
+/// `pauseReason`), so we show status only rather than inventing a control
+/// that wouldn't do anything.
 struct QueueWidget: View {
     var summary: QueueSummary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 2) {
             Text("Processing queue")
-                .font(.system(size: 11.5, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Tokens.textPrimary)
-            Text("\(summary.jobCount) recording\(summary.jobCount == 1 ? "" : "s") · low priority")
-                .font(.system(size: 10.5))
+            Text("\(summary.jobCount) recording\(summary.jobCount == 1 ? "" : "s") · \(Int((summary.progress * 100).rounded()))%")
+                .font(.system(size: 11))
                 .foregroundStyle(Tokens.textSecondary)
-            Text(summary.pauseReason ?? "pauses on battery")
-                .font(.system(size: 10.5))
-                .foregroundStyle(summary.pauseReason == nil ? Tokens.textSecondary : .orange)
             ProgressView(value: summary.progress)
                 .tint(Tokens.accentBlue)
-                .controlSize(.small)
+                .controlSize(.mini)
+                .padding(.top, 6)
+            Text(summary.pauseReason ?? "Low priority · pauses on battery")
+                .font(.system(size: 10))
+                .foregroundStyle(summary.pauseReason == nil ? Tokens.textTertiary : .orange)
+                .padding(.top, 4)
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: 9))
     }

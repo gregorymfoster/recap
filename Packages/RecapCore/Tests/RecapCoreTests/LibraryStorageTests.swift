@@ -111,4 +111,31 @@ import Testing
         let loaded = try storage.loadAll()
         #expect(loaded.map(\.meeting.id) == [newer.meeting.id, older.meeting.id])
     }
+
+    @Test func renameUpdatesTitleButKeepsFolderURL() throws {
+        let storage = try makeStorage()
+        let record = try storage.create(Meeting(title: "Old title", date: .now))
+
+        let renamed = try storage.rename(record, to: "New title")
+
+        #expect(renamed.meeting.title == "New title")
+        #expect(renamed.folderURL == record.folderURL)
+
+        let loaded = try storage.loadAll()
+        #expect(loaded.map(\.meeting.title) == ["New title"])
+        #expect(loaded.first?.folderURL.resolvingSymlinksInPath() == record.folderURL.resolvingSymlinksInPath())
+    }
+
+    @Test func trashMovesFolderAndRemovesItFromLoadAll() throws {
+        let storage = try makeStorage()
+        let keep = try storage.create(Meeting(title: "Keep me", date: .now))
+        let doomed = try storage.create(Meeting(title: "Trash me", date: .now))
+        #expect(try storage.loadAll().count == 2)
+
+        try storage.trash(doomed)
+
+        #expect(!FileManager.default.fileExists(atPath: doomed.folderURL.path))
+        let loaded = try storage.loadAll()
+        #expect(loaded.map(\.meeting.id) == [keep.meeting.id])
+    }
 }

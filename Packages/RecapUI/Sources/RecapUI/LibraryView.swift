@@ -1,39 +1,46 @@
+import AppKit
 import RecapCore
 import RecapTranscription
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Library home screen (design mock 1c): header with Record button,
-/// meeting cards with processing status, summary preview for the latest
-/// enhanced meeting.
+/// The Library home screen (design mock 6a): unified window toolbar with
+/// title/search/filter/Record, date-grouped rows in inset containers, quiet
+/// status system, and a row context menu (open/copy/reveal/rename/
+/// re-transcribe/trash).
 struct LibraryView: View {
     @Environment(AppStores.self) private var stores: AppStores?
     @Environment(LibraryStore.self) private var library
     @Environment(MeetingSessionStore.self) private var session
     @Environment(WhisperModelManager.self) private var models
     @Environment(SettingsStore.self) private var settings
+    @Environment(QueueStore.self) private var queue: QueueStore?
     @Environment(AppRouter.self) private var router
 
+    /// Owned by `RootView`; the toolbar's search field opens the same ⌘K
+    /// overlay the global shortcut does.
+    @Binding var showSearch: Bool
+
     @State private var dropTargeted = false
+    @State private var renameTarget: MeetingRecord?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                header
-                    .padding(.bottom, 20)
-                    .padding(.horizontal, 28)
-                    .padding(.top, 28)
                 if library.meetings.isEmpty {
                     emptyState
-                        .padding(.horizontal, 28)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 16)
                 } else if library.displayMeetings.isEmpty {
                     filteredEmptyState
-                        .padding(.horizontal, 28)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 16)
                 } else {
                     content
-                        .padding(.horizontal, 28)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 16)
                 }
-                Color.clear.frame(height: 28)
+                Color.clear.frame(height: 24)
             }
         }
         .background(Tokens.surface)
@@ -41,7 +48,118 @@ struct LibraryView: View {
             handleDrop(urls)
         } isTargeted: { dropTargeted = $0 }
         .overlay { if dropTargeted { dropHighlight } }
+        .navigationTitle("Library")
+        .toolbar { toolbarContent }
+        .renameSheet(target: $renameTarget) { record, newTitle in
+            library.rename(record, to: newTitle)
+        }
     }
+
+    // MARK: Toolbar (design global #3 — unified toolbar, not an in-content header)
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            searchField
+        }
+        if !library.meetings.isEmpty {
+            ToolbarItem(placement: .primaryAction) {
+                sortFilterMenu
+            }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            recordButton
+        }
+    }
+
+    /// Styled like a compact search field, but it's a button — clicking (or
+    /// ⌘K) opens the existing full-screen search overlay rather than typing
+    /// inline. Deliberately no `Spacer()`/fixed-frame combination: SwiftUI
+    /// toolbar items size themselves from intrinsic content, and a
+    /// `Spacer()` inside a `.frame(width:)` here reliably produced a
+    /// zero-width `NSToolbarItem` that AppKit silently dropped from the
+    /// toolbar — fixed spacing avoids that failure mode.
+    private var searchField: some View {
+        Button {
+            showSearch = true
+        } label: {
+            HStack(spacing: 34) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Tokens.textTertiary)
+                    Text("Search")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Tokens.textTertiary)
+                }
+                Text("⌘K")
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(Tokens.textTertiary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: 4))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
+        .help("Search titles, notes, and transcripts")
+    }
+
+    private var recordButton: some View {
+        Button {
+            stores?.startRecording()
+        } label: {
+            HStack(spacing: 7) {
+                // stays: white dot/text on the red Record button in both modes
+                Circle().fill(.white).frame(width: 7, height: 7)
+                Text("Record")
+                    .font(.system(size: 12.5, weight: .semibold))
+            }
+            // stays: white text on the red Record button in both modes
+            .foregroundStyle(.white)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 4)
+            .background(Tokens.recordRed, in: RoundedRectangle(cornerRadius: Tokens.radiusButton - 1))
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut("n", modifiers: .command)
+    }
+
+    private var sortFilterMenu: some View {
+        @Bindable var library = library
+        return Menu {
+            Picker("Sort", selection: $library.sort) {
+                ForEach(LibrarySort.allCases, id: \.self) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            Divider()
+            Toggle("Ready only", isOn: $library.filter.readyOnly)
+            Toggle("Longer than 15 minutes", isOn: Binding(
+                get: { library.filter.minDuration != nil },
+                set: { library.filter.minDuration = $0 ? 900 : nil }
+            ))
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Tokens.textSecondary)
+                if library.filter.isActive {
+                    Circle()
+                        .fill(Tokens.accentBlue)
+                        .frame(width: 6, height: 6)
+                        .offset(x: 7, y: -6)
+                }
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Sort and filter the library")
+    }
+
+    // MARK: Drag & drop import
 
     /// Files dragged from Finder: audio-conforming ones import; anything
     /// else gets a toast instead of silently vanishing.
@@ -75,45 +193,116 @@ struct LibraryView: View {
         .allowsHitTesting(false)
     }
 
-    /// Grouped-with-headers for date sorts, a flat list for `.longest` (a
-    /// duration ranking reads oddly split into date buckets).
+    // MARK: List content
+
+    /// Grouped-with-headers for date sorts, a flat list (single container)
+    /// for `.longest` (a duration ranking reads oddly split into date
+    /// buckets).
     @ViewBuilder private var content: some View {
         if library.sort == .longest {
-            LazyVStack(spacing: 10) {
-                ForEach(library.displayMeetings) { record in
-                    row(for: record)
-                }
-            }
+            groupCard(for: library.displayMeetings)
         } else {
             let sections = MeetingGrouping.sections(library.displayMeetings, now: .now, calendar: .current)
-            LazyVStack(alignment: .leading, spacing: 10, pinnedViews: [.sectionHeaders]) {
+            LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
                 ForEach(sections, id: \.id) { section in
-                    Section {
-                        ForEach(section.records) { record in
-                            row(for: record)
-                        }
-                    } header: {
+                    VStack(alignment: .leading, spacing: 7) {
                         sectionHeader(section.title)
+                        groupCard(for: section.records)
                     }
                 }
             }
         }
     }
 
+    /// One rounded, hairline-bordered container per date group (design mock
+    /// 6a): subtle fill, radius 10, row separators inset past the icon tile.
+    private func groupCard(for records: [MeetingRecord]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(records.enumerated()), id: \.element.id) { index, record in
+                if index > 0 {
+                    Divider()
+                        .overlay(Tokens.hairline)
+                        .padding(.leading, 53)
+                }
+                row(for: record)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Tokens.subtleBackground.opacity(0.6))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Tokens.cardStroke, lineWidth: 1)
+        )
+    }
+
     private func row(for record: MeetingRecord) -> some View {
-        MeetingRow(record: record) { router.section = .models }
+        MeetingRow(record: record, onInstallModel: { router.section = .models })
+            .contentShape(Rectangle())
             .onTapGesture { library.selectedMeetingID = record.meeting.id }
+            .contextMenu {
+                rowContextMenu(for: record)
+            }
+    }
+
+    @ViewBuilder
+    private func rowContextMenu(for record: MeetingRecord) -> some View {
+        Button("Open") {
+            library.selectedMeetingID = record.meeting.id
+        }
+        Button("Copy notes as Markdown") {
+            copyNotes(for: record)
+        }
+        Button("Reveal in Finder") {
+            revealInFinder(record)
+        }
+        .disabled(!isOnDisk(record))
+        Divider()
+        Button("Rename…") {
+            renameTarget = record
+        }
+        Button("Re-transcribe") {
+            queue?.retranscribe(record, in: library)
+        }
+        Divider()
+        Button("Move to Trash", role: .destructive) {
+            library.moveToTrash(record)
+        }
+        .disabled(!isOnDisk(record) || isActivelyRecording(record))
+    }
+
+    /// Fixture records live at `/dev/null` — Reveal/Trash have nothing real
+    /// to act on, so those items are disabled rather than silently failing.
+    private func isOnDisk(_ record: MeetingRecord) -> Bool {
+        record.folderURL.path != "/dev/null"
+    }
+
+    private func isActivelyRecording(_ record: MeetingRecord) -> Bool {
+        session.activeRecord?.meeting.id == record.meeting.id
+    }
+
+    /// Mirrors the detail view's copy behavior: enhanced notes when present,
+    /// otherwise the raw notes.
+    private func copyNotes(for record: MeetingRecord) {
+        let enhanced = library.loadEnhancedNotes(for: record)
+        let notes = enhanced ?? library.loadNotes(for: record)
+        guard !notes.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(notes, forType: .string)
+    }
+
+    private func revealInFinder(_ record: MeetingRecord) {
+        NSWorkspace.shared.activateFileViewerSelecting([record.folderURL])
     }
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(Tokens.microLabel)
+            .font(.system(size: 10.5, weight: .semibold))
+            .kerning(0.5)
             .foregroundStyle(Tokens.textTertiary)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            // Opaque background so pinned headers don't show rows scrolling
-            // underneath them.
-            .background(Tokens.surface)
+            .padding(.horizontal, 4)
     }
 
     private var emptyState: some View {
@@ -141,129 +330,118 @@ struct LibraryView: View {
         }
         .padding(.top, 120)
     }
-
-    private var header: some View {
-        HStack {
-            Text("Library")
-                .font(Tokens.sectionTitle)
-                .foregroundStyle(Tokens.textPrimary)
-                .kerning(-0.3)
-            Spacer()
-            if !library.meetings.isEmpty {
-                sortFilterMenu
-            }
-            Button {
-                stores?.startRecording()
-            } label: {
-                HStack(spacing: 7) {
-                    // stays: white dot/text on the red Record button in both modes
-                    Circle().fill(.white).frame(width: 8, height: 8)
-                    Text("Record")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                // stays: white text on the red Record button in both modes
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
-                .background(Tokens.recordRed, in: RoundedRectangle(cornerRadius: Tokens.radiusButton))
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut("n", modifiers: .command)
-        }
-    }
-
-    private var sortFilterMenu: some View {
-        @Bindable var library = library
-        return Menu {
-            Picker("Sort", selection: $library.sort) {
-                ForEach(LibrarySort.allCases, id: \.self) { option in
-                    Text(option.label).tag(option)
-                }
-            }
-            Divider()
-            Toggle("Ready only", isOn: $library.filter.readyOnly)
-            Toggle("Longer than 15 minutes", isOn: Binding(
-                get: { library.filter.minDuration != nil },
-                set: { library.filter.minDuration = $0 ? 900 : nil }
-            ))
-        } label: {
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Tokens.textSecondary)
-                    .padding(6)
-                if library.filter.isActive {
-                    Circle()
-                        .fill(Tokens.accentBlue)
-                        .frame(width: 6, height: 6)
-                        .offset(x: -2, y: 2)
-                }
-            }
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help("Sort and filter the library")
-    }
 }
 
+/// A single Library row (design mock 6a): 28×28 neutral icon tile, title,
+/// meta line, trailing quiet status. Ready rows show only a chevron on
+/// hover; other statuses show their own indicator instead.
 private struct MeetingRow: View {
     var record: MeetingRecord
     var onInstallModel: () -> Void
+    @Environment(QueueStore.self) private var queue: QueueStore?
+    @Environment(LibraryStore.self) private var library
     @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 11) {
             iconTile
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(record.meeting.title)
-                    .font(Tokens.rowTitle)
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Tokens.textPrimary)
                     .lineLimit(1)
+                    .truncationMode(.tail)
                 Text(record.meeting.metaLine)
-                    .font(Tokens.meta)
+                    .font(.system(size: 11))
                     .foregroundStyle(Tokens.textSecondary)
             }
             Spacer(minLength: 12)
-            MeetingStatusView(status: record.meeting.status, onInstallModel: onInstallModel)
+            trailing
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: Tokens.radiusCard)
-                .fill(hovering ? Tokens.subtleBackground : Tokens.surface)
-                .stroke(Tokens.cardStroke, lineWidth: 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: Tokens.radiusCard))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(hovering ? Tokens.chipBackground.opacity(0.6) : Color.clear)
         .onHover { hovering = $0 }
     }
 
-    private var iconTile: some View {
-        RoundedRectangle(cornerRadius: 9)
-            .fill(tint.opacity(0.12))
-            .frame(width: 36, height: 36)
-            .overlay {
-                Image(systemName: record.meeting.attendees.count > 1 ? "person.2.fill" : "waveform")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(tint)
+    /// Ready rows are silent (design global #4) except for a hover chevron —
+    /// no chip, no color. Every other status keeps its own indicator so
+    /// hovering doesn't hide information the user needs (progress, retry).
+    @ViewBuilder private var trailing: some View {
+        if record.meeting.status == .ready {
+            if hovering {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Tokens.textTertiary)
             }
+        } else {
+            MeetingStatusView(
+                status: record.meeting.status,
+                onInstallModel: onInstallModel,
+                onRetry: { queue?.retranscribe(record, in: library) }
+            )
+        }
     }
 
-    private var tint: Color {
-        // stays: flat accent palette (icon-tile fill), same as accentBlue/successGreen — not appearance-dependent
-        let palette: [Color] = [Tokens.accentBlue, Color(red: 0x8E / 255, green: 0x7C / 255, blue: 0xC3 / 255), Tokens.successGreen, .orange]
-        return palette[abs(record.meeting.id.hashValue) % palette.count]
+    private var iconTile: some View {
+        RoundedRectangle(cornerRadius: 7)
+            .fill(Tokens.chipBackground)
+            .frame(width: 28, height: 28)
+            .overlay {
+                Image(systemName: "waveform")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Tokens.textSecondary)
+            }
+    }
+}
+
+/// "Rename Speaker"-style alert-driven rename for a meeting title. A plain
+/// `.alert` with a text field is the smallest correct native surface for a
+/// single-field rename — no bespoke popover to hand-roll.
+private struct RenameSheetModifier: ViewModifier {
+    @Binding var target: MeetingRecord?
+    var onRename: (MeetingRecord, String) -> Void
+    @State private var title = ""
+
+    func body(content: Content) -> some View {
+        content.alert(
+            "Rename Meeting",
+            isPresented: Binding(get: { target != nil }, set: { if !$0 { target = nil } }),
+            presenting: target
+        ) { record in
+            TextField("Title", text: $title)
+            Button("Cancel", role: .cancel) { target = nil }
+            Button("Rename") {
+                let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { onRename(record, trimmed) }
+                target = nil
+            }
+        } message: { record in
+            Text("Choose a new title for \"\(record.meeting.title)\".")
+        }
+        .onChange(of: target) { _, newValue in
+            title = newValue?.meeting.title ?? ""
+        }
+    }
+}
+
+extension View {
+    fileprivate func renameSheet(
+        target: Binding<MeetingRecord?>, onRename: @escaping (MeetingRecord, String) -> Void
+    ) -> some View {
+        modifier(RenameSheetModifier(target: target, onRename: onRename))
     }
 }
 
 #Preview {
-    LibraryView()
+    LibraryView(showSearch: .constant(false))
         .environment(LibraryStore.fixture())
         .environment(AppRouter())
         .frame(width: 820, height: 620)
 }
 
 #Preview("Dark") {
-    LibraryView()
+    LibraryView(showSearch: .constant(false))
         .environment(LibraryStore.fixture())
         .environment(AppRouter())
         .frame(width: 820, height: 620)
