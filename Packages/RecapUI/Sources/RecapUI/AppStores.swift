@@ -76,6 +76,7 @@ public final class AppStores {
             let toasts = toasts
             queue = QueueStore(
                 library: library, storage: storage, models: models, changeBus: changeBus,
+                settings: settings,
                 onError: { message in toasts.show(message) }
             )
             recordHotKey = GlobalHotKey(keyCode: kVK_ANSI_R, modifiers: cmdKey | optionKey) { [weak self] in

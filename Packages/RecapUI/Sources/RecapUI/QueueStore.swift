@@ -16,6 +16,9 @@ struct MeetingProcessor: JobExecutor {
     /// nil when speaker labeling is disabled in settings.
     let diarizerProvider: @Sendable () async -> SpeakerDiarizer?
     let enhancer: NoteEnhancer
+    /// Fresh settings snapshot per use — settings can change while a job is
+    /// queued, and reading a @MainActor SettingsStore requires hopping actors.
+    let settings: @Sendable () async -> ProcessorSettings
     let onStatus: @Sendable (UUID, MeetingStatus) async -> Void
     /// Crash salvage recovered the audio; the file length is the duration.
     let onDurationRecovered: @Sendable (UUID, TimeInterval) async -> Void
@@ -81,7 +84,7 @@ struct MeetingProcessor: JobExecutor {
                 } else {
                     // Apple Intelligence off → meeting completes transcript-only.
                     await onStatus(job.meetingID, .ready)
-                    exportToConfiguredDestinations(record)
+                    await exportToConfiguredDestinations(record)
                 }
             } catch {
                 processorLog.error("Transcription failed: \(error, privacy: .public)")
@@ -95,7 +98,7 @@ struct MeetingProcessor: JobExecutor {
                 !transcript.utterances.isEmpty
             else {
                 await onStatus(job.meetingID, .ready)
-                exportToConfiguredDestinations(record)
+                await exportToConfiguredDestinations(record)
                 return
             }
             await onStatus(job.meetingID, .enhancing)
@@ -108,24 +111,23 @@ struct MeetingProcessor: JobExecutor {
                 // its transcript; enhancement can be retried from the editor.
             }
             await onStatus(job.meetingID, .ready)
-            exportToConfiguredDestinations(record)
+            await exportToConfiguredDestinations(record)
         }
     }
 
     /// Mirrors a finished meeting to the configured sync destinations
     /// (Obsidian vault, folder-mirror backup, webhook). Best-effort: a failed
     /// export never affects the meeting itself.
-    private func exportToConfiguredDestinations(_ record: MeetingRecord) {
+    private func exportToConfiguredDestinations(_ record: MeetingRecord) async {
         changeBus.post(.meetingChanged(record.meeting.id))
 
-        let defaults = UserDefaults.standard
+        let s = await settings()
         let notes = try? storage.loadNotes(in: record)
         let enhanced = (try? storage.loadEnhancedNotes(in: record)) ?? nil
         let transcript = try? storage.loadTranscript(in: record)
 
-        let path = defaults.string(forKey: "obsidianVaultPath") ?? ""
-        if defaults.bool(forKey: "obsidianSync"), !path.isEmpty {
-            let exporter = ObsidianExporter(vaultFolderURL: URL(fileURLWithPath: path))
+        if s.syncsToObsidian, !s.obsidianVaultPath.isEmpty {
+            let exporter = ObsidianExporter(vaultFolderURL: URL(fileURLWithPath: s.obsidianVaultPath))
             do {
                 try exporter.export(record, notes: notes, enhanced: enhanced, transcript: transcript)
             } catch {
@@ -133,9 +135,8 @@ struct MeetingProcessor: JobExecutor {
             }
         }
 
-        let mirrorPath = defaults.string(forKey: "mirrorFolderPath") ?? ""
-        if defaults.bool(forKey: "mirrorBackup"), !mirrorPath.isEmpty {
-            let mirror = FolderMirrorExporter(destinationRootURL: URL(fileURLWithPath: mirrorPath))
+        if s.mirrorBackupEnabled, !s.mirrorFolderPath.isEmpty {
+            let mirror = FolderMirrorExporter(destinationRootURL: URL(fileURLWithPath: s.mirrorFolderPath))
             do {
                 try mirror.mirror(record)
             } catch {
@@ -143,8 +144,8 @@ struct MeetingProcessor: JobExecutor {
             }
         }
 
-        if let webhook = defaults.string(forKey: "webhookURL"),
-           let url = URL(string: webhook), url.scheme?.hasPrefix("http") == true {
+        if !s.webhookURL.isEmpty,
+           let url = URL(string: s.webhookURL), url.scheme?.hasPrefix("http") == true {
             let exporter = WebhookExporter(endpoint: url)
             let meeting = record.meeting
             Task {
@@ -172,25 +173,32 @@ public final class QueueStore {
     /// - Parameter onError: Fired once per meeting when the processing
     ///   pipeline transitions it to `.error`, so the UI can surface a toast
     ///   in addition to the row chip `updateStatus` already produces.
+    /// - Parameter enhancer: Injectable so tests can hand in a fake through
+    ///   this public surface; production always uses `FoundationModelEnhancer()`.
     public init(
         library: LibraryStore, storage: LibraryStorage, models: WhisperModelManager,
-        changeBus: LibraryChangeBus,
+        changeBus: LibraryChangeBus, settings: SettingsStore,
+        enhancer: NoteEnhancer = FoundationModelEnhancer(),
         onError: (@MainActor (String) -> Void)? = nil
     ) {
         // Two-phase init: the processor's chain closure needs the queue.
         let queueBox = QueueBox()
         let diarizer = SpeakerDiarizer()
+        let settingsSnapshot: @Sendable () async -> ProcessorSettings = {
+            await MainActor.run { settings.processorSettings }
+        }
         let processor = MeetingProcessor(
             storage: storage,
             engineProvider: { @Sendable in
-                let language = UserDefaults.standard.string(forKey: "transcriptionLanguage")
+                let language = await settingsSnapshot().transcriptionLanguage
                 return await models.activeEngine(language: language)
             },
             diarizerProvider: { @Sendable in
-                let enabled = UserDefaults.standard.object(forKey: "labelSpeakers") as? Bool ?? true
+                let enabled = await settingsSnapshot().labelsSpeakers
                 return enabled ? diarizer : nil
             },
-            enhancer: FoundationModelEnhancer(),
+            enhancer: enhancer,
+            settings: settingsSnapshot,
             onStatus: { @Sendable id, status in
                 await library.updateStatus(id, to: status)
                 if case .error(let message) = status {
@@ -205,8 +213,7 @@ public final class QueueStore {
             },
             changeBus: changeBus
         )
-        let pausesOnBattery = UserDefaults.standard.object(forKey: "pauseOnBattery") as? Bool ?? true
-        let queue = ProcessingQueue(executor: processor, pausesOnBattery: pausesOnBattery)
+        let queue = ProcessingQueue(executor: processor, pausesOnBattery: settings.pausesOnBattery)
         self.queue = queue
         Task { await queueBox.set(queue) }
 
@@ -245,8 +252,10 @@ public final class QueueStore {
         }
     }
 
+    /// Persistence is the caller's responsibility (`SettingsStore.pausesOnBattery`'s
+    /// `didSet` already writes UserDefaults) — this only pushes the live value
+    /// into the running queue actor.
     public func setPausesOnBattery(_ value: Bool) {
-        UserDefaults.standard.set(value, forKey: "pauseOnBattery")
         Task { await queue.setPausesOnBattery(value) }
     }
 
