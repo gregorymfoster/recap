@@ -1,135 +1,77 @@
 import RecapCore
 import SwiftUI
 
-/// The floating dark capsule shown while recording (design mock 1a):
-/// pulsing red dot, elapsed timer, live waveform, "local" caption,
-/// pause/resume, Stop. While paused the dot goes static amber, a PAUSED
-/// micro-label appears, and the timer freezes to a static string (a ticking
+/// The docked recording pill shown in-window while recording (design mock
+/// 6c): pulsing red dot, elapsed timer, live waveform, hairline divider,
+/// round pause button, white Stop pill. Deliberately uncrowded — the privacy
+/// badge lives in the meeting header now, the input-device name isn't shown
+/// here, and there's no live-transcript snippet (the transcript pane already
+/// shows that). While paused the dot goes static amber, a PAUSED micro-label
+/// appears, and the timer freezes to a static string (a ticking
 /// `Text(style: .timer)` cannot be frozen — rendering switches instead).
 struct RecordingPill: View {
     var clock: RecordingClock
     var isPaused: Bool
     var levels: [Float]
-    /// Name of the mic in use, when it's known — shown as a small hoverable
-    /// label so the pill stays compact but the device is still visible.
-    var inputDeviceName: String?
-    /// True when mic access is denied and the recording is running on system
-    /// audio alone — shown as an amber "mic off" badge in place of the device.
-    var micUnavailable: Bool = false
-    /// Latest confirmed live-transcription text, shown as a one-line rolling
-    /// snippet under the waveform so confidence is visible even without the
-    /// main window open — the whole point of the light streaming pass.
-    var lastHeardText: String?
     var onPauseToggle: () -> Void
     var onStop: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 14) {
-                PulsingDot(
-                    color: isPaused ? Tokens.warningAmber : Tokens.recordRed,
-                    pulsing: !isPaused
-                )
-                timer
-                if isPaused {
-                    Text("PAUSED")
-                        .font(Tokens.microLabel)
-                        .foregroundStyle(Tokens.warningAmber)
-                        .fixedSize()
-                }
-                waveform
-                HStack(spacing: 8) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 8))
-                        Text("local")
-                            .font(Tokens.microLabel)
-                            .fixedSize()
-                    }
-                    if micUnavailable {
-                        HStack(spacing: 4) {
-                            Image(systemName: "mic.slash.fill")
-                                .font(.system(size: 9))
-                            Text("Mic access off")
-                                .font(Tokens.microLabel)
-                                .fixedSize()
-                        }
-                        .foregroundStyle(Tokens.warningAmber)
-                    } else if let inputDeviceName {
-                        Text(inputDeviceName)
-                            .font(Tokens.caption)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .frame(maxWidth: 110, alignment: .leading)
-                    }
-                }
-                // stays: white-on-darkSurface pill internals in both modes
-                .foregroundStyle(.white.opacity(0.55))
-                .padding(.leading, 12)
-                .overlay(alignment: .leading) {
-                    // stays: white-on-darkSurface pill internals in both modes
-                    Rectangle()
-                        .fill(.white.opacity(0.15))
-                        .frame(width: 1, height: 18)
-                }
-                .help(micUnavailable
-                    ? "Microphone access is off — recording system audio only"
-                    : inputDeviceName.map { "Recording from \($0)" } ?? "")
-                Button(action: onPauseToggle) {
-                    // stays: dark glyph pinned to black on a solid white control-button
-                    // in both modes (Tokens.textPrimary would invert to near-white here)
-                    Image(systemName: isPaused ? "play.fill" : "pause.fill")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.black)
-                        .frame(width: 27, height: 27)
-                        .background(.white, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut("p", modifiers: [.command, .option])
-                .help(isPaused ? "Resume recording (⌥⌘P)" : "Pause recording (⌥⌘P)")
-                Button(action: onStop) {
-                    // stays: dark text pinned to black on a solid white control-button
-                    // in both modes (Tokens.textPrimary would invert to near-white here)
-                    Text("Stop")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
-                        .background(.white, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut(".", modifiers: .command)
+        HStack(spacing: 14) {
+            PulsingDot(
+                color: isPaused ? Tokens.warningAmber : Tokens.recordRed,
+                pulsing: !isPaused
+            )
+            timer
+            if isPaused {
+                Text("PAUSED")
+                    .font(Tokens.microLabel)
+                    .foregroundStyle(Tokens.warningAmber)
+                    .fixedSize()
             }
-            if let lastHeardText, !lastHeardText.isEmpty {
-                // stays: white-on-darkSurface pill internals in both modes
-                Text(lastHeardText)
-                    .font(Tokens.caption)
-                    .foregroundStyle(.white.opacity(0.5))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: 360, alignment: .leading)
-                    .transition(.opacity)
+            waveform
+            // stays: white-on-darkSurface hairline divider in both modes
+            Rectangle()
+                .fill(.white.opacity(0.15))
+                .frame(width: 1, height: 18)
+            Button(action: onPauseToggle) {
+                // stays: dark glyph pinned to black on a solid white control-button
+                // in both modes (Tokens.textPrimary would invert to near-white here)
+                Image(systemName: isPaused ? "play.fill" : "pause.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.black)
+                    .frame(width: 27, height: 27)
+                    .background(.white, in: Circle())
             }
+            .buttonStyle(.plain)
+            .keyboardShortcut("p", modifiers: [.command, .option])
+            .help(isPaused ? "Resume recording (⌥⌘P)" : "Pause recording (⌥⌘P)")
+            Button(action: onStop) {
+                // stays: dark text pinned to black on a solid white control-button
+                // in both modes (Tokens.textPrimary would invert to near-white here)
+                Text("Stop")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(.white, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(".", modifiers: .command)
         }
         .padding(.leading, 18)
         .padding(.trailing, 10)
         .padding(.vertical, 10)
-        // A plain Capsule reads as a pill for the single-line case; once the
-        // "last heard" line pushes the pill taller, a Capsule's semicircular
-        // ends would look increasingly stretched, so use a fixed radius that
-        // stays pill-like at both heights.
-        .background(Tokens.darkSurface, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .background(Tokens.darkSurface, in: Capsule())
         .overlay {
             // Separates the dark pill from an equally-dark window behind it.
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(Tokens.darkSurfaceStroke, lineWidth: 1)
+            Capsule().stroke(Tokens.darkSurfaceStroke, lineWidth: 1)
         }
         // stays: shadow stays black in both modes
         .shadow(color: .black.opacity(0.25), radius: 14, y: 8)
         // The bottom overlay proposes a narrow width; without this the HStack
-        // compresses — "local" wraps and the Stop label truncates to "…".
+        // compresses.
         .fixedSize()
-        .animation(.easeOut(duration: 0.15), value: lastHeardText)
     }
 
     /// Running: a TimelineView ticking from the clock's synthetic start date
@@ -172,6 +114,23 @@ struct RecordingPill: View {
     }
 }
 
+/// Downsamples the session's rolling RMS-level window to a small fixed count
+/// of bars for compact waveform displays (the pill's 5 bars, the capsule's
+/// 4) — pure so it's testable without `MeetingSessionStore`. Picks evenly
+/// spaced samples from the source window rather than averaging, so a single
+/// loud syllable still visibly pokes a bar instead of getting smoothed away.
+enum WaveformDownsample {
+    static func bars(from levels: [Float], count: Int) -> [Float] {
+        guard count > 0 else { return [] }
+        guard !levels.isEmpty else { return [Float](repeating: 0, count: count) }
+        guard levels.count != count else { return levels }
+        return (0..<count).map { i in
+            let sourceIndex = levels.count == 1 ? 0 : (i * (levels.count - 1)) / max(1, count - 1)
+            return levels[sourceIndex]
+        }
+    }
+}
+
 struct PulsingDot: View {
     var color: Color = Tokens.recordRed
     /// False renders a steady dot (paused state) — a repeating animation
@@ -201,27 +160,7 @@ struct PulsingDot: View {
         RecordingPill(
             clock: RecordingClock(startedAt: .now.addingTimeInterval(-1453)),
             isPaused: false,
-            levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
-            inputDeviceName: "AirPods Pro",
-            lastHeardText: "…so I think we should ship the onboarding revamp next sprint.",
-            onPauseToggle: {},
-            onStop: {}
-        )
-        RecordingPill(
-            clock: RecordingClock(startedAt: .now.addingTimeInterval(-1453)),
-            isPaused: false,
-            levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
-            inputDeviceName: "AirPods Pro",
-            onPauseToggle: {},
-            onStop: {}
-        )
-        RecordingPill(
-            clock: RecordingClock(startedAt: .now.addingTimeInterval(-1453)),
-            isPaused: false,
-            levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
-            inputDeviceName: nil,
-            micUnavailable: true,
-            lastHeardText: nil,
+            levels: (0..<5).map { _ in Float.random(in: 0.1...0.9) },
             onPauseToggle: {},
             onStop: {}
         )
@@ -232,8 +171,7 @@ struct PulsingDot: View {
                 return clock
             }(),
             isPaused: true,
-            levels: [Float](repeating: 0, count: 16),
-            inputDeviceName: "AirPods Pro",
+            levels: [Float](repeating: 0, count: 5),
             onPauseToggle: {},
             onStop: {}
         )
@@ -247,17 +185,7 @@ struct PulsingDot: View {
         RecordingPill(
             clock: RecordingClock(startedAt: .now.addingTimeInterval(-1453)),
             isPaused: false,
-            levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
-            inputDeviceName: "AirPods Pro",
-            lastHeardText: "…so I think we should ship the onboarding revamp next sprint.",
-            onPauseToggle: {},
-            onStop: {}
-        )
-        RecordingPill(
-            clock: RecordingClock(startedAt: .now.addingTimeInterval(-1453)),
-            isPaused: false,
-            levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
-            inputDeviceName: "AirPods Pro",
+            levels: (0..<5).map { _ in Float.random(in: 0.1...0.9) },
             onPauseToggle: {},
             onStop: {}
         )
@@ -268,8 +196,7 @@ struct PulsingDot: View {
                 return clock
             }(),
             isPaused: true,
-            levels: [Float](repeating: 0, count: 16),
-            inputDeviceName: "AirPods Pro",
+            levels: [Float](repeating: 0, count: 5),
             onPauseToggle: {},
             onStop: {}
         )

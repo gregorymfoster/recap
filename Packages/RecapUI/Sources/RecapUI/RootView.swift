@@ -47,10 +47,8 @@ public struct RootView: View {
         .overlay(alignment: .bottom) {
             if let clock = session.clock {
                 RecordingPill(
-                    clock: clock, isPaused: session.isPaused, levels: session.levels,
-                    inputDeviceName: session.activeInputDeviceName,
-                    micUnavailable: session.micUnavailable,
-                    lastHeardText: session.lastHeardText,
+                    clock: clock, isPaused: session.isPaused,
+                    levels: WaveformDownsample.bars(from: session.levels, count: 5),
                     onPauseToggle: { stores.togglePause() },
                     onStop: { stores.stopRecording() }
                 )

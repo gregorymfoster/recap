@@ -164,6 +164,11 @@ public final class AppStores {
                 }
                 self?.stopRecording()
             }
+            session.onInputRebuilt = { [weak self] reason, deviceName in
+                self?.toasts.show(MicLossToast.message(reason: reason, deviceName: deviceName), style: .warning, actionTitle: "Change…") {
+                    SettingsOpener.open()
+                }
+            }
             startChangeBusConsumer()
         }
     }
@@ -230,6 +235,11 @@ public final class AppStores {
                     toasts.show(message)
                 }
                 self?.stopRecording()
+            }
+            session.onInputRebuilt = { reason, deviceName in
+                toasts.show(MicLossToast.message(reason: reason, deviceName: deviceName), style: .warning, actionTitle: "Change…") {
+                    SettingsOpener.open()
+                }
             }
         }
         if storage != nil {
