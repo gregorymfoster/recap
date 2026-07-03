@@ -68,14 +68,11 @@ struct MeetingDetailView: View {
         .navigationTitle(record.meeting.title)
         .environment(playback)
         .toolbar {
-            ToolbarItem {
+            ToolbarItem(placement: .primaryAction) {
                 copyNotesButton
             }
-            ToolbarItem {
-                Toggle(isOn: $showTranscript) {
-                    Label("Transcript", systemImage: "text.quote")
-                }
-                .help("Show transcript")
+            ToolbarItem(placement: .primaryAction) {
+                transcriptToggle
             }
         }
         .task(id: record.meeting.id) {
@@ -179,10 +176,34 @@ struct MeetingDetailView: View {
     private var copyNotesButton: some View {
         let displayed = isShowingEnhanced ? (enhancedNotes ?? "") : notes
         if !displayed.isEmpty {
-            CopyButton(help: isShowingEnhanced ? "Copy summary" : "Copy notes") {
+            CopyButton(help: isShowingEnhanced ? "Copy summary" : "Copy notes", toolbarStyle: true) {
                 isShowingEnhanced ? (enhancedNotes ?? "") : notes
             }
         }
+    }
+
+    /// Circular toolbar bubble matching the Library toolbar family; filled
+    /// with the accent color while the transcript inspector is visible.
+    private var transcriptToggle: some View {
+        Button {
+            showTranscript.toggle()
+        } label: {
+            Image(systemName: "text.quote")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(showTranscript ? Color.white : Tokens.textSecondary)
+                .frame(width: 28, height: 28)
+                .background(
+                    showTranscript ? AnyShapeStyle(Tokens.accentBlue) : AnyShapeStyle(Tokens.chipBackground),
+                    in: Circle()
+                )
+                .overlay {
+                    if !showTranscript {
+                        Circle().stroke(Tokens.hairline, lineWidth: 1)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .help(showTranscript ? "Hide transcript" : "Show transcript")
     }
 
     /// Blue-tinted banner shown while this meeting's notes are being
@@ -249,6 +270,15 @@ struct MeetingDetailView: View {
         }
     }
 
+    private var titleText: some View {
+        Text(record.meeting.title)
+            .font(.system(size: 22, weight: .bold))
+            .kerning(-0.3)
+            .foregroundStyle(Tokens.textPrimary)
+            .lineLimit(2)
+            .truncationMode(.tail)
+    }
+
     /// Switches the active notes view and persists the choice per meeting
     /// (nil default means "prefer Enhanced whenever available" — selecting
     /// Enhanced explicitly stores nil rather than `.enhanced` so a later
@@ -275,15 +305,19 @@ struct MeetingDetailView: View {
                         .foregroundStyle(Tokens.warningAmberText)
                 }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(record.meeting.title)
-                    .font(.system(size: 22, weight: .bold))
-                    .kerning(-0.3)
-                    .foregroundStyle(Tokens.textPrimary)
-                    .lineLimit(2)
-                    .truncationMode(.tail)
-                Spacer(minLength: 12)
-                notesModeToggle
+            // Title and mode toggle share a row only when the title actually
+            // fits beside it; in a narrow editor pane the toggle drops below
+            // instead of squeezing the title into letter-per-line wrapping.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    titleText
+                    Spacer(minLength: 12)
+                    notesModeToggle
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    titleText
+                    notesModeToggle
+                }
             }
             if let subtitle = record.meeting.subtitle, !subtitle.isEmpty {
                 Text(subtitle)
