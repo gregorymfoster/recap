@@ -310,8 +310,8 @@ struct MeetingDetailView: View {
     }
 
     /// Input-device selector, shown only in the live meeting's header. The
-    /// transient input-switch note is now routed to a toast by another
-    /// package; `session.inputSwitchNote` itself stays for that consumer.
+    /// transient input-switch note is routed to a toast via `onInputRebuilt`
+    /// instead of being rendered here.
     private var liveInputRow: some View {
         @Bindable var settings = settings
         return HStack(spacing: 10) {

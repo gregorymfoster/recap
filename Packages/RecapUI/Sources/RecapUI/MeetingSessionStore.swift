@@ -51,16 +51,6 @@ public final class MeetingSessionStore {
     /// The mic device actually in use, for display in the live header/pill.
     public private(set) var activeInputDeviceName: String?
 
-    /// A brief note about a mid-recording input switch ("Input switched to
-    /// AirPods Pro"), cleared automatically after a few seconds.
-    ///
-    /// Superseded by `onInputRebuilt` routing an amber `ToastCenter` toast
-    /// (design mock 6c's mic-loss toast) — kept around, still updated, only
-    /// because `MeetingDetailView`'s live-header rendering of this property
-    /// is owned by another package/agent to remove. Don't add new readers.
-    public private(set) var inputSwitchNote: String?
-    private var inputSwitchNoteTask: Task<Void, Never>?
-
     /// Fires whenever the recorder rebuilds its input mid-recording (device
     /// unplugged, switched, etc.) — `AppStores` wires this to an amber
     /// "Mic disconnected — switched to <device>" toast. `reason` is the raw
@@ -245,29 +235,15 @@ public final class MeetingSessionStore {
         switch event {
         case .inputRebuilt(let reason):
             // The mic graph survived a device switch — levels resuming is
-            // the main signal, but a brief note confirms which device won.
+            // the main signal; `onInputRebuilt` routes an amber toast
+            // confirming which device won.
             activeInputDeviceName = recorder.activeInputDeviceName
-            showInputSwitchNote(reason)
             onInputRebuilt?(reason, activeInputDeviceName)
         case .writeFailed:
             // Audio can't reach disk — stop now so what was captured
             // survives, and tell the user why the recording ended.
             recordingFailureMessage = "Recording stopped — couldn't write audio (disk full?)"
             onAutoStop?()
-        }
-    }
-
-    /// Shows `reason` as a transient note and clears it a few seconds later.
-    private func showInputSwitchNote(_ reason: String) {
-        let note = reason.prefix(1).uppercased() + reason.dropFirst()
-        inputSwitchNote = note
-        inputSwitchNoteTask?.cancel()
-        inputSwitchNoteTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(5))
-            guard !Task.isCancelled else { return }
-            if self?.inputSwitchNote == note {
-                self?.inputSwitchNote = nil
-            }
         }
     }
 
@@ -317,9 +293,6 @@ public final class MeetingSessionStore {
         micUnavailable = false
         liveTranscript = LiveTranscriptState()
         activeInputDeviceName = nil
-        inputSwitchNoteTask?.cancel()
-        inputSwitchNoteTask = nil
-        inputSwitchNote = nil
         return (record, duration)
     }
 
