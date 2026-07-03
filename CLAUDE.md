@@ -23,6 +23,28 @@ Packages are pure SPM. The app shell is XcodeGen-generated — `Recap.xcodeproj`
 - All packages: `./Scripts/test.sh` (~30s total; extra args pass through, e.g. `./Scripts/test.sh --filter LibraryStorage`).
 - One package: `swift test --package-path Packages/RecapCore`.
 - App build: `xcodegen && xcodebuild build -project Recap.xcodeproj -scheme Recap -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO`.
+- SPM quirk: after ADDING a new source file to a shared package, sibling packages'
+  incremental builds can fail with "cannot find type '<NewType>' in scope" (the owning
+  package stays green — that's the signature). Fix the build, not the code:
+  `swift package --package-path Packages/<failing-pkg> clean` and re-run.
+- Package tests never compile `Recap/` (app shell). Any change there is unverified
+  until the xcodegen + xcodebuild app build runs — don't report app-shell work done
+  without it.
+
+## Parallel feature work (multi-agent)
+
+- Scaffold shared API surfaces (new SettingsStore keys, store/view skeletons, helper
+  entry points) in a commit on main BEFORE fanning out parallel worktree agents —
+  worktrees can't see each other's edits, so any cross-package contract must exist at
+  branch time. Pin exact signatures in every brief that consumes them.
+- One agent = one disjoint file set. Merge branches sequentially, then run the full
+  suite AND the app build centrally — per-package green doesn't cover integration.
+- UI work isn't done until it's been seen: launch `-fixtures` and screenshot the
+  changed surface (app-flow-screenshots skill), in both light and dark mode. Diff
+  review catches logic bugs; only screenshots catch wrong-side panels, banned copy
+  ("Zero kB"), and dropped toolbar items.
+- New UI surfaces must ship with fixture state that renders them — a surface the
+  fixture app can't show is a surface QA can't verify.
 
 ## Run the app with fixture data
 
