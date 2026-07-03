@@ -8,12 +8,11 @@ struct PlayerBar: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Button(action: { playback.togglePlayPause() }) {
-                Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-            }
-            .buttonStyle(.plain)
+            playPauseButton
             Text(Self.timestamp(playback.position))
-                .font(Tokens.caption.monospacedDigit())
+                .font(.system(size: 10.5).monospacedDigit())
+                .foregroundStyle(Tokens.textSecondary)
+                .frame(width: 34, alignment: .trailing)
             Slider(
                 value: Binding(
                     get: { playback.position },
@@ -21,16 +20,45 @@ struct PlayerBar: View {
                 ),
                 in: 0...max(playback.duration, 1)
             )
+            .tint(Tokens.accentBlue)
             Text(Self.timestamp(playback.duration))
-                .font(Tokens.caption.monospacedDigit())
-            Button(action: { playback.cycleRate() }) {
-                Text(Self.rateLabel(playback.rate))
-                    .font(Tokens.caption.monospacedDigit())
-            }
-            .buttonStyle(.plain)
+                .font(.system(size: 10.5).monospacedDigit())
+                .foregroundStyle(Tokens.textSecondary)
+                .frame(width: 34, alignment: .leading)
+            rateChip
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 16)
+        .frame(height: 32)
+        .background(Tokens.subtleBackground.opacity(0.9))
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    /// Round white 28pt play/pause button (mock 8d).
+    private var playPauseButton: some View {
+        Button(action: { playback.togglePlayPause() }) {
+            Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.85))
+                .frame(width: 28, height: 28)
+                .background(Color.white, in: Circle())
+                .overlay(Circle().stroke(Tokens.cardStroke, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .help(playback.isPlaying ? "Pause" : "Play")
+    }
+
+    /// Speed chip cycling 1× / 1.5× / 2×.
+    private var rateChip: some View {
+        Button(action: { playback.cycleRate() }) {
+            Text(Self.rateLabel(playback.rate))
+                .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
+                .foregroundStyle(Tokens.textSecondary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Tokens.chipBackground, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Playback speed")
     }
 
     static func timestamp(_ seconds: TimeInterval) -> String {
@@ -42,4 +70,10 @@ struct PlayerBar: View {
     static func rateLabel(_ rate: Double) -> String {
         rate == rate.rounded() ? "\(Int(rate))×" : "\(rate)×"
     }
+}
+
+#Preview("Player bar") {
+    let playback = PlaybackStore()
+    return PlayerBar(playback: playback)
+        .frame(width: 500)
 }
