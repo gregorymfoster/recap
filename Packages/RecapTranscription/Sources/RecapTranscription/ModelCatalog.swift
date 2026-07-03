@@ -29,6 +29,12 @@ public struct ModelInfo: Identifiable, Equatable, Sendable {
 
     /// Folder name inside the whisperkit-coreml repo snapshot.
     public var repoFolderName: String { "openai_whisper-\(id)" }
+
+    /// Whisper's convention for English-only builds is a ".en" id suffix
+    /// (e.g. "small.en") — none of `ModelCatalog.all` currently use one
+    /// (every catalog entry is multilingual), but this guards against
+    /// silently mis-forcing a language on such a model if one is ever added.
+    public var isEnglishOnly: Bool { id.hasSuffix(".en") }
 }
 
 /// Static catalog of WhisperKit CoreML builds hosted at huggingface.co/argmaxinc/whisperkit-coreml.

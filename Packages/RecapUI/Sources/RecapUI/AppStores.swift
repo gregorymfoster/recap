@@ -122,7 +122,7 @@ public final class AppStores {
         Task {
             await session.start(
                 record: record,
-                engine: models.streamingEngine(),
+                engine: models.streamingEngine(language: settings.transcriptionLanguage),
                 includeSystemAudio: settings.includeSystemAudio,
                 preferredInputUID: settings.preferredInputUID
             )

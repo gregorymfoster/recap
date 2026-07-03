@@ -4,16 +4,28 @@ import RecapCore
 import RecapTranscription
 
 // Manual verification harness for model download + transcription (M5/M7).
-// Usage: transcribe-probe <audio-file> [variant] [--stream]
+// Usage: transcribe-probe <audio-file> [variant] [--stream] [--language <code>]
 // Downloads the variant (default: tiny) if needed, then transcribes the file —
 // in one shot, or with --stream by replaying it through the live streaming
-// path in 1-second chunks.
+// path in 1-second chunks. --language forces decoding to an ISO 639-1 code
+// (e.g. "es") instead of WhisperKit's default auto-detection (J3).
 
 var argumentList = Array(CommandLine.arguments.dropFirst())
 let streaming = argumentList.contains("--stream")
 argumentList.removeAll { $0 == "--stream" }
+var language: String?
+if let flagIndex = argumentList.firstIndex(of: "--language") {
+    let valueIndex = argumentList.index(after: flagIndex)
+    guard valueIndex < argumentList.count else {
+        print("usage: transcribe-probe <audio-file> [variant] [--stream] [--language <code>]")
+        exit(64)
+    }
+    language = argumentList[valueIndex]
+    argumentList.remove(at: valueIndex)
+    argumentList.remove(at: flagIndex)
+}
 guard let audioPath = argumentList.first else {
-    print("usage: transcribe-probe <audio-file> [variant] [--stream]")
+    print("usage: transcribe-probe <audio-file> [variant] [--stream] [--language <code>]")
     exit(64)
 }
 let variant = argumentList.dropFirst().first ?? "tiny"
@@ -116,9 +128,12 @@ func run() async {
     }
     manager.setActive(model.id)
 
-    guard let engine = manager.activeEngine() else {
+    guard let engine = manager.activeEngine(language: language) else {
         print("FAIL: no engine for installed model")
         exit(1)
+    }
+    if let language {
+        print("forcing language: \(language)")
     }
 
     if streaming {

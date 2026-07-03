@@ -89,6 +89,18 @@ public final class SettingsStore {
         }
     }
 
+    /// Forces transcription to a specific language (ISO 639-1 code). `nil`
+    /// means auto-detect — WhisperKit's default behavior.
+    public var transcriptionLanguage: String? {
+        didSet {
+            if let transcriptionLanguage {
+                defaults.set(transcriptionLanguage, forKey: "transcriptionLanguage")
+            } else {
+                defaults.removeObject(forKey: "transcriptionLanguage")
+            }
+        }
+    }
+
     private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
@@ -107,6 +119,7 @@ public final class SettingsStore {
         saveRootPath = defaults.string(forKey: "saveRootPath") ?? LibraryStorage.defaultRootURL.path
         lastSystemAudioTapFailed = defaults.object(forKey: "lastSystemAudioTapFailed") as? Bool
         preferredInputUID = defaults.string(forKey: "preferredInputUID")
+        transcriptionLanguage = defaults.string(forKey: "transcriptionLanguage")
     }
 
     public var saveRootURL: URL {

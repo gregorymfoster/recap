@@ -18,20 +18,63 @@ struct LibraryView: View {
             VStack(alignment: .leading, spacing: 0) {
                 header
                     .padding(.bottom, 20)
+                    .padding(.horizontal, 28)
+                    .padding(.top, 28)
                 if library.meetings.isEmpty {
                     emptyState
+                        .padding(.horizontal, 28)
+                } else if library.displayMeetings.isEmpty {
+                    filteredEmptyState
+                        .padding(.horizontal, 28)
                 } else {
-                    LazyVStack(spacing: 10) {
-                        ForEach(library.meetings) { record in
-                            MeetingRow(record: record) { router.section = .models }
-                                .onTapGesture { library.selectedMeetingID = record.meeting.id }
+                    content
+                        .padding(.horizontal, 28)
+                }
+                Color.clear.frame(height: 28)
+            }
+        }
+        .background(.white)
+    }
+
+    /// Grouped-with-headers for date sorts, a flat list for `.longest` (a
+    /// duration ranking reads oddly split into date buckets).
+    @ViewBuilder private var content: some View {
+        if library.sort == .longest {
+            LazyVStack(spacing: 10) {
+                ForEach(library.displayMeetings) { record in
+                    row(for: record)
+                }
+            }
+        } else {
+            let sections = MeetingGrouping.sections(library.displayMeetings, now: .now, calendar: .current)
+            LazyVStack(alignment: .leading, spacing: 10, pinnedViews: [.sectionHeaders]) {
+                ForEach(sections, id: \.id) { section in
+                    Section {
+                        ForEach(section.records) { record in
+                            row(for: record)
                         }
+                    } header: {
+                        sectionHeader(section.title)
                     }
                 }
             }
-            .padding(28)
         }
-        .background(.white)
+    }
+
+    private func row(for record: MeetingRecord) -> some View {
+        MeetingRow(record: record) { router.section = .models }
+            .onTapGesture { library.selectedMeetingID = record.meeting.id }
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(Tokens.microLabel)
+            .foregroundStyle(Tokens.textTertiary)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // Opaque background so pinned headers don't show rows scrolling
+            // underneath them.
+            .background(.white)
     }
 
     private var emptyState: some View {
@@ -47,6 +90,19 @@ struct LibraryView: View {
         .padding(.top, 120)
     }
 
+    private var filteredEmptyState: some View {
+        ContentUnavailableView {
+            Label("No matching meetings", systemImage: "line.3.horizontal.decrease.circle")
+                .font(Tokens.rowTitle)
+                .foregroundStyle(Tokens.textPrimary)
+        } description: {
+            Text("Try loosening the filter — fewer conditions or a shorter minimum length.")
+                .font(Tokens.meta)
+                .foregroundStyle(Tokens.textSecondary)
+        }
+        .padding(.top, 120)
+    }
+
     private var header: some View {
         HStack {
             Text("Library")
@@ -54,6 +110,9 @@ struct LibraryView: View {
                 .foregroundStyle(Tokens.textPrimary)
                 .kerning(-0.3)
             Spacer()
+            if !library.meetings.isEmpty {
+                sortFilterMenu
+            }
             Button {
                 stores?.startRecording()
             } label: {
@@ -70,6 +129,39 @@ struct LibraryView: View {
             .buttonStyle(.plain)
             .keyboardShortcut("n", modifiers: .command)
         }
+    }
+
+    private var sortFilterMenu: some View {
+        @Bindable var library = library
+        return Menu {
+            Picker("Sort", selection: $library.sort) {
+                ForEach(LibrarySort.allCases, id: \.self) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            Divider()
+            Toggle("Ready only", isOn: $library.filter.readyOnly)
+            Toggle("Longer than 15 minutes", isOn: Binding(
+                get: { library.filter.minDuration != nil },
+                set: { library.filter.minDuration = $0 ? 900 : nil }
+            ))
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Tokens.textSecondary)
+                    .padding(6)
+                if library.filter.isActive {
+                    Circle()
+                        .fill(Tokens.accentBlue)
+                        .frame(width: 6, height: 6)
+                        .offset(x: -2, y: 2)
+                }
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Sort and filter the library")
     }
 }
 

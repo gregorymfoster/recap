@@ -11,10 +11,27 @@ import WhisperKit
 public struct WhisperKitEngine: TranscriptionEngine {
     public let modelFolder: URL
     public let modelName: String
+    /// Forces decoding to a specific language (ISO 639-1 code, e.g. "es").
+    /// `nil` lets WhisperKit auto-detect, its default behavior.
+    public let language: String?
 
-    public init(modelFolder: URL, modelName: String) {
+    public init(modelFolder: URL, modelName: String, language: String? = nil) {
         self.modelFolder = modelFolder
         self.modelName = modelName
+        self.language = language
+    }
+
+    /// Base decoding options shared by the file pass and the streaming pass,
+    /// with the language override applied. Pure and easily unit-tested.
+    static func decodingOptions(language: String?) -> DecodingOptions {
+        var options = DecodingOptions()
+        options.task = .transcribe
+        options.skipSpecialTokens = true
+        if let language {
+            options.language = language
+            options.detectLanguage = false
+        }
+        return options
     }
 
     public func transcribe(
@@ -41,9 +58,7 @@ public struct WhisperKitEngine: TranscriptionEngine {
             progress(1)
         }
 
-        var options = DecodingOptions()
-        options.task = .transcribe
-        options.skipSpecialTokens = true
+        let options = Self.decodingOptions(language: language)
         let results = try await pipe.transcribe(audioPath: file.path, decodeOptions: options)
 
         let utterances = results
@@ -118,9 +133,7 @@ public struct WhisperKitEngine: TranscriptionEngine {
                 }
                 return
             }
-            var options = DecodingOptions()
-            options.task = .transcribe
-            options.skipSpecialTokens = true
+            let options = Self.decodingOptions(language: language)
             guard let results = try? await pipe.transcribe(audioArray: buffer, decodeOptions: options)
             else { return }
             let segments = results.flatMap(\.segments).map {

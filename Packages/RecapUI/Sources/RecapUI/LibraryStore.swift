@@ -15,6 +15,43 @@ public struct QueueSummary: Equatable, Sendable {
     }
 }
 
+/// Library list ordering. Persisted to UserDefaults — the user's chosen sort
+/// should survive a relaunch, unlike the filter (session-only).
+public enum LibrarySort: String, CaseIterable, Sendable {
+    case newest
+    case oldest
+    case longest
+
+    var label: String {
+        switch self {
+        case .newest: "Newest first"
+        case .oldest: "Oldest first"
+        case .longest: "Longest first"
+        }
+    }
+}
+
+/// Metadata-only narrowing of the library list — no disk I/O, so it's cheap
+/// to recompute on every keystroke/toggle. Session-only (not persisted): a
+/// fresh launch always shows everything until the user filters again.
+public struct LibraryFilter: Equatable, Sendable {
+    public var minDuration: TimeInterval?
+    public var readyOnly: Bool
+
+    public init(minDuration: TimeInterval? = nil, readyOnly: Bool = false) {
+        self.minDuration = minDuration
+        self.readyOnly = readyOnly
+    }
+
+    public var isActive: Bool { minDuration != nil || readyOnly }
+
+    func matches(_ record: MeetingRecord) -> Bool {
+        if let minDuration, record.meeting.duration < minDuration { return false }
+        if readyOnly, record.meeting.status != .ready { return false }
+        return true
+    }
+}
+
 @MainActor
 @Observable
 public final class LibraryStore {
@@ -22,17 +59,27 @@ public final class LibraryStore {
     public var selectedMeetingID: UUID?
     public var queueSummary: QueueSummary?
 
+    public var sort: LibrarySort {
+        didSet { defaults?.set(sort.rawValue, forKey: Self.sortKey) }
+    }
+    public var filter = LibraryFilter()
+
     private let storage: LibraryStorage?
     private let index: SearchIndex?
     private let autosaver: NotesAutosaver?
     private let changeBus: LibraryChangeBus?
+    private let defaults: UserDefaults?
+
+    private static let sortKey = "librarySort"
 
     /// Disk-backed store: loads the library and rebuilds the search index.
-    public init(storage: LibraryStorage, index: SearchIndex, changeBus: LibraryChangeBus) {
+    public init(storage: LibraryStorage, index: SearchIndex, changeBus: LibraryChangeBus, defaults: UserDefaults = .standard) {
         self.storage = storage
         self.index = index
         self.autosaver = NotesAutosaver(storage: storage)
         self.changeBus = changeBus
+        self.defaults = defaults
+        self.sort = defaults.string(forKey: Self.sortKey).flatMap(LibrarySort.init(rawValue:)) ?? .newest
         reload()
     }
 
@@ -42,8 +89,25 @@ public final class LibraryStore {
         self.index = nil
         self.autosaver = nil
         self.changeBus = nil
+        self.defaults = nil
+        self.sort = .newest
         self.meetings = fixtures
         self.queueSummary = queueSummary
+    }
+
+    /// `meetings` filtered then sorted — the source of truth (`meetings`,
+    /// newest-first from disk) never changes. Recomputed on demand; cheap
+    /// since it's metadata-only.
+    public var displayMeetings: [MeetingRecord] {
+        let filtered = filter.isActive ? meetings.filter(filter.matches) : meetings
+        switch sort {
+        case .newest:
+            return filtered.sorted { $0.meeting.date > $1.meeting.date }
+        case .oldest:
+            return filtered.sorted { $0.meeting.date < $1.meeting.date }
+        case .longest:
+            return filtered.sorted { $0.meeting.duration > $1.meeting.duration }
+        }
     }
 
     public func reload() {

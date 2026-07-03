@@ -182,7 +182,10 @@ public final class QueueStore {
         let diarizer = SpeakerDiarizer()
         let processor = MeetingProcessor(
             storage: storage,
-            engineProvider: { @Sendable in await models.activeEngine() },
+            engineProvider: { @Sendable in
+                let language = UserDefaults.standard.string(forKey: "transcriptionLanguage")
+                return await models.activeEngine(language: language)
+            },
             diarizerProvider: { @Sendable in
                 let enabled = UserDefaults.standard.object(forKey: "labelSpeakers") as? Bool ?? true
                 return enabled ? diarizer : nil

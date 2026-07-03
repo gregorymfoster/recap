@@ -142,9 +142,18 @@ public final class WhisperModelManager {
     }
 
     /// The engine for the active model, if one is installed.
-    public func activeEngine() -> WhisperKitEngine? {
+    ///
+    /// - Parameter language: Forces decoding to this language (ISO 639-1
+    ///   code); `nil` auto-detects. Ignored (forced to `nil`) for
+    ///   English-only models — forcing a language on a model that only
+    ///   understands English would just be a no-op at best, and WhisperKit
+    ///   has no other language to switch to.
+    public func activeEngine(language: String? = nil) -> WhisperKitEngine? {
         guard let model = activeModel, let folder = installedFolder(for: model) else { return nil }
-        return WhisperKitEngine(modelFolder: folder, modelName: model.repoFolderName)
+        return WhisperKitEngine(
+            modelFolder: folder, modelName: model.repoFolderName,
+            language: model.isEnglishOnly ? nil : language
+        )
     }
 
     /// The engine for the dedicated streaming model, if one is installed.
@@ -153,9 +162,14 @@ public final class WhisperModelManager {
     /// the file-pass model is large. If the streaming and active models
     /// happen to be the same variant, the two engines simply point at the
     /// same folder; each still loads its own WhisperKit instance.
-    public func streamingEngine() -> WhisperKitEngine? {
+    ///
+    /// - Parameter language: See `activeEngine(language:)`.
+    public func streamingEngine(language: String? = nil) -> WhisperKitEngine? {
         guard let model = streamingModel, let folder = installedFolder(for: model) else { return nil }
-        return WhisperKitEngine(modelFolder: folder, modelName: model.repoFolderName)
+        return WhisperKitEngine(
+            modelFolder: folder, modelName: model.repoFolderName,
+            language: model.isEnglishOnly ? nil : language
+        )
     }
 
     /// True once the streaming model is installed and ready to use.

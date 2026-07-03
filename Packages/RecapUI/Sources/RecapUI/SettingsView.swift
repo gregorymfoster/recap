@@ -3,6 +3,7 @@ import AVFoundation
 import CoreAudio
 import EventKit
 import RecapAudio
+import RecapCore
 import SwiftUI
 
 /// The Settings section: permissions, save location, recording sources, processing.
@@ -14,6 +15,7 @@ struct SettingsView: View {
     @State private var calendarStatus = EKEventStore.authorizationStatus(for: .event)
     @State private var inputDevices: [AudioInputDevice] = AudioInputDevices.inputDevices()
     @State private var deviceListListener: AudioObjectPropertyListenerBlock?
+    @State private var sizeSummary: LibrarySizeSummary?
 
     var body: some View {
         @Bindable var settings = settings
@@ -49,18 +51,10 @@ struct SettingsView: View {
             }
 
             Section("Storage") {
-                LabeledContent("Meetings folder") {
-                    HStack(spacing: 10) {
-                        Text(tildePath(settings.saveRootPath))
-                            .font(Tokens.meta)
-                            .foregroundStyle(Tokens.textSecondary)
-                        Button("Change…") { pickFolder() }
-                            .controlSize(.small)
-                    }
-                }
-                Text("Notes and audio are plain files — Markdown, JSON, and m4a — readable by any app. A new folder takes effect the next time Recap opens.")
-                    .font(Tokens.caption)
-                    .foregroundStyle(Tokens.textTertiary)
+                storageSectionContent
+            }
+            .task(priority: .utility) {
+                await refreshSizeSummary()
             }
 
             Section("Recording") {
@@ -186,9 +180,55 @@ struct SettingsView: View {
                 Text("Tells apart who spoke, on-device. The first labeled transcript downloads a small model (~50 MB); if it isn't available yet, transcripts are simply unlabeled.")
                     .font(Tokens.caption)
                     .foregroundStyle(Tokens.textTertiary)
+                Picker("Transcription language", selection: $settings.transcriptionLanguage) {
+                    Text("Auto-detect").tag(String?.none)
+                    ForEach(TranscriptionLanguages.common) { language in
+                        Text(language.displayName).tag(String?.some(language.code))
+                    }
+                }
+                Text("Auto-detect works well for most meetings. Forcing a language helps short or heavily accented recordings.")
+                    .font(Tokens.caption)
+                    .foregroundStyle(Tokens.textTertiary)
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Split out of the "Storage" `Section` body — folded into the giant
+    /// `Form` inline, this combination of `LabeledContent`/`DisclosureGroup`/
+    /// `ForEach` blew past the type checker's time budget ("failed to
+    /// produce diagnostic for expression").
+    @ViewBuilder private var storageSectionContent: some View {
+        LabeledContent("Meetings folder") {
+            HStack(spacing: 10) {
+                Text(tildePath(settings.saveRootPath))
+                    .font(Tokens.meta)
+                    .foregroundStyle(Tokens.textSecondary)
+                Button("Change…") { pickFolder() }
+                    .controlSize(.small)
+            }
+        }
+        Text("Notes and audio are plain files — Markdown, JSON, and m4a — readable by any app. A new folder takes effect the next time Recap opens.")
+            .font(Tokens.caption)
+            .foregroundStyle(Tokens.textTertiary)
+
+        LabeledContent("Library size") {
+            if let sizeSummary {
+                Text(sizeSummary.totalBytes, format: .byteCount(style: .file))
+                    .font(Tokens.meta)
+                    .foregroundStyle(Tokens.textSecondary)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+            }
+        }
+        if let sizeSummary, !sizeSummary.largest.isEmpty {
+            DisclosureGroup("Largest meetings") {
+                ForEach(sizeSummary.largest) { entry in
+                    LargestMeetingRow(entry: entry) { openMeeting(entry.id) }
+                }
+            }
+        }
     }
 
     private func pickVaultFolder() {
@@ -232,6 +272,27 @@ struct SettingsView: View {
     private func tildePath(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+    }
+
+    /// Computes the on-disk footprint of the library off the main actor, so
+    /// opening Settings never blocks on a folder walk. `LibraryStorage` and
+    /// `MeetingRecord` are both `Sendable`, so the detached task can capture
+    /// them directly.
+    private func refreshSizeSummary() async {
+        guard let records = stores?.library.meetings else { return }
+        let storage = LibraryStorage(rootURL: settings.saveRootURL)
+        let summary = await Task.detached(priority: .utility) {
+            try? storage.sizeSummary(for: records)
+        }.value
+        sizeSummary = summary
+    }
+
+    /// Jumps to a meeting from the "Largest meetings" list — same navigation
+    /// as the menu bar extra's recent-meetings items and the search overlay.
+    private func openMeeting(_ id: UUID) {
+        guard let stores else { return }
+        stores.router.section = .library
+        stores.library.selectedMeetingID = id
     }
 
     /// There's no query API for the system-audio tap's permission — only the
@@ -342,5 +403,30 @@ private struct PermissionRow: View {
         } label: {
             Label(title, systemImage: icon)
         }
+    }
+}
+
+/// One row in the "Largest meetings" disclosure group: title, size, and a
+/// tap that navigates to the meeting (same pattern as the search overlay
+/// and menu bar extra's recent-meetings items).
+private struct LargestMeetingRow: View {
+    let entry: LibrarySizeSummary.Entry
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack {
+                Text(entry.title)
+                    .font(Tokens.meta)
+                    .foregroundStyle(Tokens.textSecondary)
+                    .lineLimit(1)
+                Spacer()
+                Text(entry.bytes, format: .byteCount(style: .file))
+                    .font(Tokens.meta)
+                    .foregroundStyle(Tokens.textTertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
