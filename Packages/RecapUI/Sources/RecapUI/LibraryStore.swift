@@ -69,6 +69,10 @@ public final class LibraryStore {
     private let autosaver: NotesAutosaver?
     private let changeBus: LibraryChangeBus?
     private let defaults: UserDefaults?
+    /// Canned transcripts for fixture records (no disk in fixture mode), so
+    /// -fixtures runs and screenshot dumps can show the transcript pane —
+    /// avatars, rename affordance, playback follow. Empty in disk-backed mode.
+    private var fixtureTranscripts: [UUID: Transcript] = [:]
 
     private static let sortKey = "librarySort"
 
@@ -84,7 +88,10 @@ public final class LibraryStore {
     }
 
     /// Fixture store for previews and early UI work.
-    public init(fixtures: [MeetingRecord], queueSummary: QueueSummary? = nil) {
+    public init(
+        fixtures: [MeetingRecord], queueSummary: QueueSummary? = nil,
+        transcripts: [UUID: Transcript] = [:]
+    ) {
         self.storage = nil
         self.index = nil
         self.autosaver = nil
@@ -93,6 +100,7 @@ public final class LibraryStore {
         self.sort = .newest
         self.meetings = fixtures
         self.queueSummary = queueSummary
+        self.fixtureTranscripts = transcripts
     }
 
     /// `meetings` filtered then sorted — the source of truth (`meetings`,
@@ -257,7 +265,7 @@ public final class LibraryStore {
     }
 
     public func loadTranscript(for record: MeetingRecord) -> Transcript? {
-        guard let storage else { return nil }
+        guard let storage else { return fixtureTranscripts[record.meeting.id] }
         return try? storage.loadTranscript(in: record)
     }
 
@@ -342,16 +350,30 @@ extension LibraryStore {
                 folderURL: URL(filePath: "/dev/null")
             )
         }
+        let standup = record("Weekly standup", hoursAgo: 6, duration: 900, attendees: ["Maya", "Sam"], status: .ready)
+        // Canned transcript for the first ready meeting, so fixture runs can
+        // exercise the transcript pane (avatars, speaker rename, seek UI).
+        let standupTranscript = Transcript(
+            utterances: [
+                Utterance(speakerID: "S1", start: 0, end: 6, text: "Morning everyone — quick roundtable, then the roadmap check-in."),
+                Utterance(speakerID: "S2", start: 6, end: 14, text: "I shipped the Q3 draft yesterday. Feedback is due Friday, so please get comments in early."),
+                Utterance(speakerID: "S1", start: 14, end: 21, text: "Will do. One flag: the onboarding revision still needs a second usability pass."),
+                Utterance(speakerID: "S3", start: 21, end: 30, text: "I can take that — I have two sessions booked this week and can fold it in."),
+                Utterance(speakerID: "S2", start: 30, end: 38, text: "Great. Last thing: performance regressions on older laptops. Sam follows up with numbers next week."),
+            ],
+            engine: "fixture", model: "fixture", language: "en"
+        )
         return LibraryStore(
             fixtures: [
                 record("Design sync — Q3 roadmap", hoursAgo: 0.5, duration: 1_453, attendees: ["Maya", "Sam", "Priya"], status: .transcribing(progress: 0.42)),
                 record("Customer call — Meridian", hoursAgo: 3, duration: 1_800, attendees: ["Alex"], status: .queued),
                 record("Budget review", hoursAgo: 4, duration: 1_320, attendees: ["Priya"], status: .needsModel),
-                record("Weekly standup", hoursAgo: 6, duration: 900, attendees: ["Maya", "Sam"], status: .ready),
+                standup,
                 record("1:1 with Sam", hoursAgo: 26, duration: 1_680, attendees: ["Sam"], status: .ready),
                 record("Pricing brainstorm", hoursAgo: 30, duration: 2_400, attendees: ["Maya", "Alex", "Priya"], status: .ready),
             ],
-            queueSummary: QueueSummary(jobCount: 2, progress: 0.42)
+            queueSummary: QueueSummary(jobCount: 2, progress: 0.42),
+            transcripts: [standup.meeting.id: standupTranscript]
         )
     }
 }

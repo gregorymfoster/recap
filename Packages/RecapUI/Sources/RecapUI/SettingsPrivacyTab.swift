@@ -108,7 +108,7 @@ struct SettingsPrivacyTab: View {
         }
         LabeledContent("Library size") {
             if let sizeSummary {
-                Text(sizeSummary.totalBytes, format: .byteCount(style: .file))
+                Text(librarySizeLabel(sizeSummary))
                     .font(Tokens.meta)
                     .foregroundStyle(Tokens.textSecondary)
             } else {
@@ -141,6 +141,18 @@ struct SettingsPrivacyTab: View {
     private func tildePath(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+    }
+
+    /// "1.2 GB · 6 meetings" (design global #6 — never dev copy like
+    /// "Zero kB"). An empty or size-less library reads as plain prose.
+    private func librarySizeLabel(_ summary: LibrarySizeSummary) -> String {
+        let count = stores?.library.meetings.count ?? 0
+        let meetings = "\(count) meeting\(count == 1 ? "" : "s")"
+        guard summary.totalBytes > 0 else {
+            return count == 0 ? "Empty" : meetings
+        }
+        let size = summary.totalBytes.formatted(.byteCount(style: .file))
+        return "\(size) · \(meetings)"
     }
 
     private func refreshSizeSummary() async {

@@ -43,6 +43,9 @@ struct MeetingDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
+                editor
+                    .frame(minWidth: 320)
+                // Right-side inspector per design handoff v2 §6b.
                 if showTranscript {
                     TranscriptPane(
                         utterances: isLiveMeeting ? session.liveUtterances : savedTranscript?.utterances ?? [],
@@ -57,13 +60,12 @@ struct MeetingDetailView: View {
                             speakerNames[speakerID] = name
                         }
                     )
-                    .frame(minWidth: 260, idealWidth: 420)
+                    .frame(minWidth: 260, idealWidth: 340)
                 }
-                editor
-                    .frame(minWidth: 320)
             }
             bottomBar
         }
+        .navigationTitle(record.meeting.title)
         .environment(playback)
         .toolbar {
             ToolbarItem {
