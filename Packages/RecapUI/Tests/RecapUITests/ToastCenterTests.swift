@@ -45,12 +45,15 @@ import Testing
 
     @MainActor
     @Test func autoDismissAdvancesQueueToNextToast() async throws {
-        let center = ToastCenter(dismissDelay: .milliseconds(60))
+        let center = ToastCenter(dismissDelay: .milliseconds(30))
         center.show("First")
-        center.show("Second")
-        // Wait past the first toast's dismissal but well before the
-        // second's, so only the advance has had a chance to happen.
-        try await Task.sleep(for: .milliseconds(90))
+        // The second is an action toast so it never auto-dismisses: once the
+        // first times out and the queue advances, "Second" stays current with
+        // no upper time bound. This avoids a two-sided timing race (first gone
+        // AND second not yet gone) that flaked under CI test-parallelism, where
+        // the two independent timers don't stretch together under load.
+        center.show("Second", actionTitle: "Act") {}
+        try await Task.sleep(for: .milliseconds(200))
         #expect(center.current?.message == "Second")
     }
 
