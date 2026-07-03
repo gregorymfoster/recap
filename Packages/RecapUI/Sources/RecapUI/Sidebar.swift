@@ -29,6 +29,7 @@ struct Sidebar: View {
     @Binding var selection: SidebarItem?
     @Environment(LibraryStore.self) private var library
     @Environment(WhisperModelManager.self) private var models
+    @Environment(AppStores.self) private var stores
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +44,12 @@ struct Sidebar: View {
 
             if let queue = library.queueSummary {
                 QueueWidget(summary: queue)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 8)
+            }
+
+            if stores.updateStatus.isAvailable {
+                UpdateChip { stores.updateStatus.triggerInstall() }
                     .padding(.horizontal, 10)
                     .padding(.bottom, 8)
             }
@@ -86,6 +93,35 @@ struct Sidebar: View {
         .overlay(alignment: .top) {
             Divider()
         }
+    }
+}
+
+/// Sidebar footer card: a new version is ready. Clicking presents Sparkle's
+/// standard update dialog (release notes + Install).
+struct UpdateChip: View {
+    var onInstall: () -> Void
+
+    var body: some View {
+        Button(action: onInstall) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Tokens.accentBlue)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Update available")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(Tokens.textPrimary)
+                    Text("Click to install")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Tokens.textSecondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Tokens.accentBlue.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
     }
 }
 

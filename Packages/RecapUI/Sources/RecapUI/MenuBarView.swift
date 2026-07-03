@@ -28,6 +28,9 @@ public struct MenuBarLabel: View {
                         .monospacedDigit()
                 }
             }
+        } else if stores.updateStatus.isAvailable {
+            // Idle, but a new version is ready — signal it in the menu bar.
+            Image(systemName: "arrow.down.circle.fill")
         } else {
             Image(systemName: "waveform")
         }
@@ -73,6 +76,13 @@ public struct MenuBarContent: View {
                         activateApp()
                     }
                 }
+            }
+        }
+        if stores.updateStatus.isAvailable {
+            Divider()
+            Button("Update Available — Install…") {
+                stores.updateStatus.triggerInstall()
+                activateApp()
             }
         }
         Divider()

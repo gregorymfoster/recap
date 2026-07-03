@@ -26,6 +26,9 @@ public final class AppStores {
     public let queue: QueueStore?
     public let router = AppRouter()
     public let toasts = ToastCenter()
+    /// In-app "update available" indicator state. Driven by the app target's
+    /// Sparkle owner (`UpdaterModel`); read by the sidebar and menu bar.
+    public let updateStatus = UpdateStatus()
     /// nil in fixture/preview graphs, where nothing touches disk.
     private let storage: LibraryStorage?
     /// Fan-out of library changes to mirror/sync consumers. Constructed once

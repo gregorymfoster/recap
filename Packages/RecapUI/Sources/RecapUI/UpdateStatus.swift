@@ -10,7 +10,7 @@ public final class UpdateStatus {
     /// True once a background ("scheduled") check has found a newer version.
     public private(set) var isAvailable = false
     /// Opens Sparkle's standard update dialog. Set by the app target.
-    @ObservationIgnored public var install: (() -> Void)?
+    @ObservationIgnored public var install: (@MainActor () -> Void)?
 
     public init() {}
 

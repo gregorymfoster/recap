@@ -12,15 +12,17 @@ struct RecapApp: App {
     /// process, so this is constructed exactly once.
     @State private var stores: AppStores
 
-    private let updaterController = SPUStandardUpdaterController(
-        startingUpdater: true,
-        updaterDelegate: nil,
-        userDriverDelegate: nil
-    )
+    /// Owns Sparkle and drives the in-app "update available" indicator
+    /// (`stores.updateStatus`).
+    private let updater: UpdaterModel
 
     init() {
         let stores = AppStores()
         _stores = State(initialValue: stores)
+        updater = UpdaterModel(status: stores.updateStatus)
+        if ProcessInfo.processInfo.arguments.contains("-force-update-indicator") {
+            stores.updateStatus.markAvailable()
+        }
         // The delegate adaptor is created before any @State is readable from
         // it, so hand the graph over through a static hook; the delegate
         // buffers any file-open events that arrive first.
@@ -34,7 +36,7 @@ struct RecapApp: App {
         .defaultSize(width: 1060, height: 660)
         .commands {
             CommandGroup(after: .appInfo) {
-                CheckForUpdatesView(updater: updaterController.updater)
+                CheckForUpdatesView(updater: updater.updater)
             }
             CommandGroup(replacing: .appSettings) {
                 SettingsCommand(stores: stores)
