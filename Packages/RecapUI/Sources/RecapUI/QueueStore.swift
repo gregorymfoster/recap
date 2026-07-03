@@ -179,11 +179,17 @@ public final class QueueStore {
     ///   in addition to the row chip `updateStatus` already produces.
     /// - Parameter enhancer: Injectable so tests can hand in a fake through
     ///   this public surface; production always uses `FoundationModelEnhancer()`.
+    /// - Parameter onMeetingReady: Fired once per meeting transition into
+    ///   `.ready` (transcript done, enhancement done/skipped/unavailable —
+    ///   all three end here) — the one completion signal, whatever the exact
+    ///   path through the pipeline. `CompletionNotifier` hooks this to post
+    ///   the "‹meeting› is ready" notification.
     public init(
         library: LibraryStore, storage: LibraryStorage, models: WhisperModelManager,
         changeBus: LibraryChangeBus, settings: SettingsStore,
         enhancer: NoteEnhancer = FoundationModelEnhancer(),
-        onError: (@MainActor (String) -> Void)? = nil
+        onError: (@MainActor (String) -> Void)? = nil,
+        onMeetingReady: (@MainActor (UUID) -> Void)? = nil
     ) {
         // Two-phase init: the processor's chain closure needs the queue.
         let queueBox = QueueBox()
@@ -207,6 +213,9 @@ public final class QueueStore {
                 await library.updateStatus(id, to: status)
                 if case .error(let message) = status {
                     await onError?(message)
+                }
+                if status == .ready {
+                    await onMeetingReady?(id)
                 }
             },
             onDurationRecovered: { @Sendable id, duration in
