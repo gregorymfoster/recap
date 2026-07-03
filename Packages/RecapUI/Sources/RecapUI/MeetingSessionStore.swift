@@ -58,6 +58,8 @@ public final class MeetingSessionStore {
 
     private static let idleLevels = [Float](repeating: 0, count: 16)
     private let recorder: MeetingRecorder
+    private let requestMicPermission: @MainActor () async -> Bool
+    private let probeSystemAudio: @MainActor () async -> SystemAudioProbeResult
     private var levelTask: Task<Void, Never>?
     private var transcriptTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
@@ -67,11 +69,22 @@ public final class MeetingSessionStore {
     /// meeting still gets transcribed.
     public var onAutoStop: (@MainActor () -> Void)?
 
-    /// - Parameter makeRecorder: Factory for the recorder; defaults to a
-    ///   real `MeetingRecorder`. Tests inject one built with fake capture
-    ///   sources so record/pause/fallback flows can run without hardware.
-    public init(makeRecorder: @MainActor () -> MeetingRecorder = { MeetingRecorder() }) {
+    /// - Parameters:
+    ///   - makeRecorder: Factory for the recorder; defaults to a real
+    ///     `MeetingRecorder`. Tests inject one built with fake capture
+    ///     sources so record/pause/fallback flows can run without hardware.
+    ///   - requestMicPermission: Defaults to the real mic-permission prompt.
+    ///     Tests inject a stub to force `preflight(...)` outcomes.
+    ///   - probeSystemAudio: Defaults to the real tap probe. Tests inject a
+    ///     stub to force `preflight(...)` outcomes without touching Core Audio.
+    public init(
+        makeRecorder: @MainActor () -> MeetingRecorder = { MeetingRecorder() },
+        requestMicPermission: @MainActor @escaping () async -> Bool = { await MeetingRecorder.requestMicPermission() },
+        probeSystemAudio: @MainActor @escaping () async -> SystemAudioProbeResult = { await MeetingRecorder.probeSystemAudio() }
+    ) {
         recorder = makeRecorder()
+        self.requestMicPermission = requestMicPermission
+        self.probeSystemAudio = probeSystemAudio
     }
 
     /// Paused still counts as recording — every guard, calendar suppression,
@@ -80,29 +93,46 @@ public final class MeetingSessionStore {
 
     public var isPaused: Bool { clock?.isPaused ?? false }
 
+    /// Runs before any meeting record is created: awaits mic permission and,
+    /// when system audio is enabled but unverified, probes the tap so the
+    /// macOS prompt happens BEFORE recording, not mid-meeting.
+    ///
+    /// Returns the outcome plus the probe result (nil if no probe ran) so the
+    /// caller can persist `lastSystemAudioTapFailed`.
+    public func preflight(
+        includeSystemAudio: Bool, lastTapFailed: Bool?
+    ) async -> (outcome: RecordingPreflight.Outcome, probeResult: SystemAudioProbeResult?) {
+        let micGranted = await requestMicPermission()
+        var probeResult: SystemAudioProbeResult?
+        if RecordingPreflight.needsProbe(includeSystemAudio: includeSystemAudio, lastTapFailed: lastTapFailed) {
+            probeResult = await probeSystemAudio()
+        }
+        let outcome = RecordingPreflight.decide(
+            micGranted: micGranted, systemAudioEnabled: includeSystemAudio, probeResult: probeResult
+        )
+        return (outcome, probeResult)
+    }
+
     /// Starts capture; when a transcription engine is available, live
     /// transcription runs alongside it feeding the split view.
     public func start(
         record: MeetingRecord,
         engine: (any TranscriptionEngine)? = nil,
         includeSystemAudio: Bool = true,
+        includeMic: Bool = true,
         preferredInputUID: String? = nil
     ) async {
         guard activeRecord == nil else { return }
-        // Denied mic no longer aborts: the recorder falls back to system
-        // audio only (and the pill shows a "mic off" indicator). It only
-        // fails outright when there's no audio source at all.
-        let micGranted = await MeetingRecorder.requestMicPermission()
         permissionDenied = false
         micUnavailable = false
         startFailureMessage = nil
         recordingFailureMessage = nil
         do {
-            let output = try recorder.start(
+            let output = try await recorder.start(
                 writingTo: record.audioURL, includeSystemAudio: includeSystemAudio,
-                includeMic: micGranted, preferredInputUID: preferredInputUID
+                includeMic: includeMic, preferredInputUID: preferredInputUID
             )
-            micUnavailable = !micGranted
+            micUnavailable = !includeMic
             systemAudioUnavailable = includeSystemAudio && !recorder.systemAudioActive
             activeRecord = record
             clock = recorder.clock ?? RecordingClock(startedAt: .now)
@@ -132,13 +162,17 @@ public final class MeetingSessionStore {
                 liveTranscript.liveState = .noModelInstalled
             }
         } catch MeetingRecorder.RecorderError.noAudioSource {
-            // Mic denied and no system audio to fall back on — nothing to
-            // record. Surface it as the mic-permission problem it is.
+            // Belt-and-braces fallback: `preflight(...)` now gates this
+            // before a record is ever created, so this should be
+            // unreachable in practice.
             activeRecord = nil
             permissionDenied = true
         } catch MeetingRecorder.RecorderError.diskFull {
             activeRecord = nil
             startFailureMessage = "Not enough free disk space"
+        } catch MeetingRecorder.RecorderError.alreadyStarting {
+            activeRecord = nil
+            startFailureMessage = "Already starting a recording"
         } catch {
             activeRecord = nil
             startFailureMessage = "Couldn't start recording"

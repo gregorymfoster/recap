@@ -1,8 +1,47 @@
 import Foundation
+import RecapAudio
 import RecapCore
 import RecapTranscription
 import Testing
 @testable import RecapUI
+
+/// Fake mic/system-audio sources for the `startRecording` preflight-gate
+/// tests below, so a `MeetingRecorder` can actually run `start()`/`stop()`
+/// without touching real hardware.
+@MainActor
+private final class FakeMicSourceForGateTest: MicCapturing {
+    var preferredInputUID: String?
+    var onRebuild: (@MainActor (String) -> Void)?
+    var activeDeviceName: String? = "Fake Mic"
+    private var continuation: AsyncStream<[Float]>.Continuation?
+
+    func start() throws -> AsyncStream<[Float]> {
+        let (stream, continuation) = AsyncStream.makeStream(of: [Float].self)
+        self.continuation = continuation
+        return stream
+    }
+
+    func stop() {
+        continuation?.finish()
+        continuation = nil
+    }
+}
+
+@MainActor
+private final class FakeSystemAudioSourceForGateTest: SystemAudioCapturing {
+    private var continuation: AsyncStream<[Float]>.Continuation?
+
+    func start() async throws -> AsyncStream<[Float]> {
+        let (stream, continuation) = AsyncStream.makeStream(of: [Float].self)
+        self.continuation = continuation
+        return stream
+    }
+
+    func stop() {
+        continuation?.finish()
+        continuation = nil
+    }
+}
 
 /// Fake `MeetingEventWatching`: `start()` returns a configurable grant
 /// result and never touches EventKit; `fire(_:)` lets tests simulate a
@@ -69,17 +108,32 @@ private final class FakeRecordPrompter: RecordPrompting {
         try! SearchIndex()
     }
 
+    /// Session whose preflight always proceeds mic-only, without touching
+    /// real mic permission or the system-audio tap — the default for
+    /// `makeStores()` scenarios that don't care about audio-gate behavior
+    /// (calendar auto-record, exports, etc.) and just need `startRecording`
+    /// to actually create a library meeting.
+    private func makeAlwaysProceedsSession() -> MeetingSessionStore {
+        MeetingSessionStore(
+            makeRecorder: { MeetingRecorder(mic: FakeMicSourceForGateTest(), makeSystemTap: { FakeSystemAudioSourceForGateTest() }) },
+            requestMicPermission: { true },
+            probeSystemAudio: { .captured }
+        )
+    }
+
     /// Full graph with real disk-backed storage, matching what `AppStoresTests`
     /// scenarios need (export/backfill behavior requires `storage != nil`).
     private func makeStores(
         settings: SettingsStore? = nil,
         storage: LibraryStorage? = nil,
+        session: MeetingSessionStore? = nil,
         exportDebounce: Duration = .milliseconds(50),
         makeCalendarWatcher: ((@escaping @MainActor (CalendarEventSnapshot) -> Void) -> MeetingEventWatching)? = nil,
         makeRecordPrompter: ((@escaping @MainActor (CalendarEventSnapshot) -> Void) -> RecordPrompting)? = nil
     ) -> (AppStores, LibraryStorage, SettingsStore, LibraryChangeBus) {
         let settings = settings ?? makeSettings()
         let storage = storage ?? makeStorage()
+        let session = session ?? makeAlwaysProceedsSession()
         let changeBus = LibraryChangeBus()
         let index = makeIndex()
         let library = LibraryStore(storage: storage, index: index, changeBus: changeBus)
@@ -88,14 +142,14 @@ private final class FakeRecordPrompter: RecordPrompting {
         if let makeCalendarWatcher, let makeRecordPrompter {
             stores = AppStores(
                 settings: settings, storage: storage, library: library,
-                models: WhisperModelManager(), session: MeetingSessionStore(), queue: nil,
+                models: WhisperModelManager(), session: session, queue: nil,
                 changeBus: changeBus, exportDebounce: exportDebounce,
                 makeCalendarWatcher: makeCalendarWatcher, makeRecordPrompter: makeRecordPrompter
             )
         } else {
             stores = AppStores(
                 settings: settings, storage: storage, library: library,
-                models: WhisperModelManager(), session: MeetingSessionStore(), queue: nil,
+                models: WhisperModelManager(), session: session, queue: nil,
                 changeBus: changeBus, exportDebounce: exportDebounce
             )
         }
@@ -345,7 +399,7 @@ private final class FakeRecordPrompter: RecordPrompting {
         #expect(fakePrompter?.promptedEvents == [event])
     }
 
-    @Test func autoModeCreatesLibraryMeetingWithEventTitle() throws {
+    @Test func autoModeCreatesLibraryMeetingWithEventTitle() async throws {
         let (stores, _, settings, _) = makeStores(
             makeCalendarWatcher: { onStarting in FakeCalendarWatcher(onMeetingStarting: onStarting) },
             makeRecordPrompter: { _ in FakeRecordPrompter() }
@@ -358,6 +412,14 @@ private final class FakeRecordPrompter: RecordPrompting {
             otherAttendees: ["Maya"]
         )
         stores.meetingEventStarting(event)
+
+        // startRecording's preflight now runs on an async Task before the
+        // meeting record is created — poll rather than asserting synchronously.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !stores.library.meetings.contains(where: { $0.meeting.title == "Roadmap review" }),
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
 
         #expect(stores.library.meetings.contains { $0.meeting.title == "Roadmap review" })
     }
@@ -396,10 +458,12 @@ private final class FakeRecordPrompter: RecordPrompting {
         stores.applyCalendarAutoRecordSetting()
 
         stores.startRecording(title: "In progress")
-        // startRecording kicks off an async Task to actually start capture;
-        // isRecording flips synchronously via session.start's guard check —
-        // give it a brief moment to settle.
-        try await Task.sleep(for: .milliseconds(100))
+        // startRecording now runs preflight then start() on an async Task —
+        // poll for isRecording rather than guessing a fixed settle time.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !stores.session.isRecording, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
 
         let event = CalendarEventSnapshot(id: "4", title: "Should be ignored", start: .now, end: .now.addingTimeInterval(1_800))
         stores.meetingEventStarting(event)
@@ -449,7 +513,73 @@ private final class FakeRecordPrompter: RecordPrompting {
         #expect(stores.library.meetings.count == before)
     }
 
-    // Note: startRecording/stopRecording orchestration is not tested here —
-    // it requires the MeetingSessionStore -> MeetingRecorder seam.
-    // covered after recorder seam
+    // MARK: 7. startRecording preflight gate
+
+    @Test func startRecordingBlockedPreflightCreatesNoMeetingAndShowsToast() async throws {
+        let settings = makeSettings()
+        let storage = makeStorage()
+        let changeBus = LibraryChangeBus()
+        let library = LibraryStore(storage: storage, index: makeIndex(), changeBus: changeBus)
+        let session = MeetingSessionStore(
+            makeRecorder: { MeetingRecorder() },
+            requestMicPermission: { false },
+            probeSystemAudio: { .denied }
+        )
+        let stores = AppStores(
+            settings: settings, storage: storage, library: library,
+            models: WhisperModelManager(), session: session, queue: nil,
+            changeBus: changeBus
+        )
+        settings.includeSystemAudio = true
+        settings.lastSystemAudioTapFailed = nil
+        let countBefore = stores.library.meetings.count
+
+        stores.startRecording(title: "Should not be created")
+
+        // preflight runs on an async Task inside startRecording; poll for
+        // the toast rather than guessing a fixed sleep.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while stores.toasts.current == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(stores.toasts.current?.message == RecapCopy.noAudioAccessMessage)
+        #expect(stores.library.meetings.count == countBefore)
+        #expect(!stores.session.isRecording)
+    }
+
+    @Test func startRecordingProceedingPreflightCreatesMeeting() async throws {
+        let settings = makeSettings()
+        let storage = makeStorage()
+        let changeBus = LibraryChangeBus()
+        let library = LibraryStore(storage: storage, index: makeIndex(), changeBus: changeBus)
+        let session = MeetingSessionStore(
+            makeRecorder: {
+                MeetingRecorder(
+                    mic: FakeMicSourceForGateTest(),
+                    makeSystemTap: { FakeSystemAudioSourceForGateTest() }
+                )
+            },
+            requestMicPermission: { true },
+            probeSystemAudio: { .captured }
+        )
+        let stores = AppStores(
+            settings: settings, storage: storage, library: library,
+            models: WhisperModelManager(), session: session, queue: nil,
+            changeBus: changeBus
+        )
+        settings.includeSystemAudio = false
+        settings.lastSystemAudioTapFailed = nil
+
+        stores.startRecording(title: "Should be created")
+
+        let deadline = ContinuousClock.now + .seconds(5)
+        while stores.library.meetings.isEmpty, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(stores.library.meetings.contains { $0.meeting.title == "Should be created" })
+
+        stores.stopRecording()
+    }
 }

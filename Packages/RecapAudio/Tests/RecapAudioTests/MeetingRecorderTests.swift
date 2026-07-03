@@ -38,7 +38,14 @@ private final class FakeSystemAudioSource: SystemAudioCapturing {
     private(set) var stopCalled = false
     private(set) var continuation: AsyncStream<[Float]>.Continuation?
 
-    func start() throws -> AsyncStream<[Float]> {
+    /// When set, `start()` awaits this before returning/throwing — lets
+    /// tests hold the call suspended to exercise the re-entrancy guard.
+    var suspendUntil: (() async -> Void)?
+
+    func start() async throws -> AsyncStream<[Float]> {
+        if let suspendUntil {
+            await suspendUntil()
+        }
         if let startError { throw startError }
         let (stream, continuation) = AsyncStream.makeStream(of: [Float].self)
         self.continuation = continuation
@@ -99,7 +106,7 @@ private struct FakeError: Error {}
         let mic = FakeMicSource()
         let recorder = MeetingRecorder(mic: mic, makeSystemTap: { FakeSystemAudioSource() })
 
-        let output = try recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
+        let output = try await recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
         _ = output
         let micContinuation = try #require(mic.continuation)
 
@@ -128,7 +135,7 @@ private struct FakeError: Error {}
         let mic = FakeMicSource()
         let recorder = MeetingRecorder(mic: mic, makeSystemTap: { FakeSystemAudioSource() })
 
-        let output = try recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
+        let output = try await recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
         let micContinuation = try #require(mic.continuation)
 
         var collected: [AudioChunk] = []
@@ -167,7 +174,7 @@ private struct FakeError: Error {}
         let mic = FakeMicSource()
         let recorder = MeetingRecorder(mic: mic, makeSystemTap: { FakeSystemAudioSource() })
 
-        _ = try recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
+        _ = try await recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
         let micContinuation = try #require(mic.continuation)
 
         await push(micContinuation, seconds: 0.5)
@@ -193,8 +200,8 @@ private struct FakeError: Error {}
         let mic = FakeMicSource()
         let recorder = MeetingRecorder(mic: mic, makeSystemTap: { FakeSystemAudioSource() })
 
-        #expect(throws: MeetingRecorder.RecorderError.noAudioSource) {
-            try recorder.start(writingTo: url, includeSystemAudio: false, includeMic: false)
+        await #expect(throws: MeetingRecorder.RecorderError.noAudioSource) {
+            _ = try await recorder.start(writingTo: url, includeSystemAudio: false, includeMic: false)
         }
     }
 
@@ -207,8 +214,8 @@ private struct FakeError: Error {}
         let tap = FakeSystemAudioSource()
         let recorder = MeetingRecorder(mic: mic, makeSystemTap: { tap })
 
-        #expect(throws: FakeError.self) {
-            try recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
+        await #expect(throws: FakeError.self) {
+            _ = try await recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
         }
         #expect(tap.stopCalled)
     }
@@ -224,10 +231,45 @@ private struct FakeError: Error {}
         tap.startError = FakeError()
         let recorder = MeetingRecorder(mic: mic, makeSystemTap: { tap })
 
-        _ = try recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
+        _ = try await recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
 
         #expect(recorder.systemAudioActive == false)
         #expect(recorder.micActive == true)
+
+        _ = await recorder.stop()
+    }
+
+    // MARK: 5b. Re-entrancy guard
+
+    /// A second `start()` call arriving while the first is still suspended
+    /// inside `tap.start()` (mirroring a real await on the TCC prompt) must
+    /// be rejected rather than racing on `systemTap`/`engine` state.
+    @Test func concurrentStartWhileSuspendedThrowsAlreadyStarting() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("audio.m4a")
+        let mic = FakeMicSource()
+        let tap = FakeSystemAudioSource()
+        let (releaseSignal, releaseContinuation) = AsyncStream.makeStream(of: Void.self)
+        tap.suspendUntil = {
+            var iterator = releaseSignal.makeAsyncIterator()
+            _ = await iterator.next()
+        }
+        let recorder = MeetingRecorder(mic: mic, makeSystemTap: { tap })
+
+        let firstStart = Task {
+            _ = try await recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
+        }
+        // Give the first call a chance to reach and suspend inside tap.start().
+        try? await Task.sleep(for: .milliseconds(20))
+
+        await #expect(throws: MeetingRecorder.RecorderError.alreadyStarting) {
+            _ = try await recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
+        }
+
+        releaseContinuation.yield(())
+        releaseContinuation.finish()
+        try await firstStart.value
 
         _ = await recorder.stop()
     }
@@ -241,7 +283,7 @@ private struct FakeError: Error {}
         let mic = FakeMicSource()
         let recorder = MeetingRecorder(mic: mic, makeSystemTap: { FakeSystemAudioSource() })
 
-        let output = try recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
+        let output = try await recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
 
         var collected: [RecorderEvent] = []
         let collectorTask = Task {
@@ -269,7 +311,7 @@ private struct FakeError: Error {}
         let mic = FakeMicSource()
         let recorder = MeetingRecorder(mic: mic, makeSystemTap: { FakeSystemAudioSource() })
 
-        let output = try recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
+        let output = try await recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
         let micContinuation = try #require(mic.continuation)
 
         var collected: [Float] = []

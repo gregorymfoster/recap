@@ -28,8 +28,48 @@ public final class SystemAudioTap {
 
     public init() {}
 
+    /// Result of the nonisolated setup helper: the IDs the `@MainActor` class
+    /// needs to hold plus the stream to hand back to the caller. Every field
+    /// is a plain value type (`AudioObjectID`/`UInt32`, an `IOProcID`, and an
+    /// `AsyncStream`), so this crosses the actor boundary without needing to
+    /// be marked unsafe.
+    private struct SetupResult: Sendable {
+        let tapID: AudioObjectID
+        let aggregateID: AudioObjectID
+        let ioProcID: AudioDeviceIOProcID
+        let stream: AsyncStream<[Float]>
+        let continuation: AsyncStream<[Float]>.Continuation
+    }
+
     /// Starts the tap and returns a stream of 48 kHz mono sample blocks.
-    public func start() throws -> AsyncStream<[Float]> {
+    ///
+    /// All the blocking Core Audio setup — tap creation (which is what
+    /// surfaces the System Audio Recording TCC prompt), aggregate-device
+    /// creation, IOProc setup, and `AudioDeviceStart` — runs inside
+    /// `performSetup`, a `nonisolated static` helper, so it executes on the
+    /// global concurrent executor instead of blocking the main actor while
+    /// macOS shows (or waits on) that prompt.
+    public func start() async throws -> AsyncStream<[Float]> {
+        let result = try await Self.performSetup()
+        tapID = result.tapID
+        aggregateID = result.aggregateID
+        ioProcID = result.ioProcID
+        continuation = result.continuation
+        return result.stream
+    }
+
+    /// Does the actual Core Audio work off the main actor. Every non-Sendable
+    /// object it touches (`CATapDescription`, `AVAudioFormat`,
+    /// `AVAudioConverter`) is created and consumed entirely inside this
+    /// function — only the plain-value IDs and the stream/continuation (both
+    /// `Sendable`) cross back out to the caller.
+    ///
+    /// `@concurrent` rather than plain `nonisolated`: under the
+    /// `NonisolatedNonsendingByDefault` upcoming feature a nonisolated async
+    /// function runs on the *caller's* actor — the main actor here — which
+    /// would silently reintroduce the TCC-prompt UI freeze this exists to fix.
+    @concurrent
+    private static func performSetup() async throws -> SetupResult {
         // Exclude our own process so playback of past meetings is never re-captured.
         let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         description.isPrivate = true
@@ -40,7 +80,6 @@ public final class SystemAudioTap {
         guard status == noErr, tapID != kAudioObjectUnknown else {
             throw TapError.tapCreationFailed(status)
         }
-        self.tapID = tapID
 
         // The tap's stream format (typically 48 kHz stereo Float32).
         var formatAddress = AudioObjectPropertyAddress(
@@ -52,7 +91,7 @@ public final class SystemAudioTap {
         var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         status = AudioObjectGetPropertyData(tapID, &formatAddress, 0, nil, &size, &asbd)
         guard status == noErr, let tapFormat = AVAudioFormat(streamDescription: &asbd) else {
-            teardown()
+            teardown(tapID: tapID, aggregateID: AudioObjectID(kAudioObjectUnknown), ioProcID: nil)
             throw TapError.formatUnsupported
         }
 
@@ -72,10 +111,9 @@ public final class SystemAudioTap {
         var aggregateID = AudioObjectID(kAudioObjectUnknown)
         status = AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &aggregateID)
         guard status == noErr, aggregateID != kAudioObjectUnknown else {
-            teardown()
+            teardown(tapID: tapID, aggregateID: AudioObjectID(kAudioObjectUnknown), ioProcID: nil)
             throw TapError.aggregateCreationFailed(status)
         }
-        self.aggregateID = aggregateID
 
         guard
             let monoFormat = AVAudioFormat(
@@ -84,12 +122,11 @@ public final class SystemAudioTap {
             ),
             let converter = AVAudioConverter(from: tapFormat, to: monoFormat)
         else {
-            teardown()
+            teardown(tapID: tapID, aggregateID: aggregateID, ioProcID: nil)
             throw TapError.formatUnsupported
         }
 
         let (stream, continuation) = AsyncStream.makeStream(of: [Float].self)
-        self.continuation = continuation
 
         // The IO block must be @Sendable so it is nonisolated — it runs on the
         // HAL's realtime IO thread, and a MainActor-inherited closure would
@@ -111,17 +148,37 @@ public final class SystemAudioTap {
             continuation.yield(samples)
         }
         guard status == noErr, let ioProcID else {
-            teardown()
+            teardown(tapID: tapID, aggregateID: aggregateID, ioProcID: nil)
             throw TapError.ioSetupFailed(status)
         }
-        self.ioProcID = ioProcID
 
         status = AudioDeviceStart(aggregateID, ioProcID)
         guard status == noErr else {
-            teardown()
+            teardown(tapID: tapID, aggregateID: aggregateID, ioProcID: ioProcID)
             throw TapError.ioSetupFailed(status)
         }
-        return stream
+
+        return SetupResult(
+            tapID: tapID, aggregateID: aggregateID, ioProcID: ioProcID,
+            stream: stream, continuation: continuation
+        )
+    }
+
+    /// Static teardown used when setup fails partway through, before any
+    /// state has been stored on the (possibly not-yet-touched) instance.
+    private nonisolated static func teardown(
+        tapID: AudioObjectID, aggregateID: AudioObjectID, ioProcID: AudioDeviceIOProcID?
+    ) {
+        if let ioProcID, aggregateID != kAudioObjectUnknown {
+            AudioDeviceStop(aggregateID, ioProcID)
+            AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
+        }
+        if aggregateID != kAudioObjectUnknown {
+            AudioHardwareDestroyAggregateDevice(aggregateID)
+        }
+        if tapID != kAudioObjectUnknown {
+            AudioHardwareDestroyProcessTap(tapID)
+        }
     }
 
     public func stop() {
@@ -129,19 +186,10 @@ public final class SystemAudioTap {
     }
 
     private func teardown() {
-        if let ioProcID, aggregateID != kAudioObjectUnknown {
-            AudioDeviceStop(aggregateID, ioProcID)
-            AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
-        }
+        Self.teardown(tapID: tapID, aggregateID: aggregateID, ioProcID: ioProcID)
         ioProcID = nil
-        if aggregateID != kAudioObjectUnknown {
-            AudioHardwareDestroyAggregateDevice(aggregateID)
-            aggregateID = kAudioObjectUnknown
-        }
-        if tapID != kAudioObjectUnknown {
-            AudioHardwareDestroyProcessTap(tapID)
-            tapID = kAudioObjectUnknown
-        }
+        aggregateID = AudioObjectID(kAudioObjectUnknown)
+        tapID = AudioObjectID(kAudioObjectUnknown)
         continuation?.finish()
         continuation = nil
     }

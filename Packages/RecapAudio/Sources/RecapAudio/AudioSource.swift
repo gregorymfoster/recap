@@ -21,7 +21,7 @@ public protocol MicCapturing: AnyObject {
 /// stream.
 @MainActor
 public protocol SystemAudioCapturing: AnyObject {
-    func start() throws -> AsyncStream<[Float]>
+    func start() async throws -> AsyncStream<[Float]>
     func stop()
 }
 

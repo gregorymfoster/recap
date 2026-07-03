@@ -73,6 +73,9 @@ public final class AppStores {
     /// (`exportDebounce`, 5s in production) before the enabled exporters
     /// actually run, so rapid edits coalesce into one export instead of one
     /// per keystroke-flush.
+    /// True from a start trigger until its preflight + start settle; see
+    /// `startRecording` for why `session.isRecording` alone isn't enough.
+    @ObservationIgnored private var recordingStartInFlight = false
     @ObservationIgnored private var exportDebounceTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var changeBusConsumerTask: Task<Void, Never>?
     @ObservationIgnored private let exportDebounce: Duration
@@ -208,51 +211,76 @@ public final class AppStores {
     /// The one start-recording flow, shared by the Record button, the menu
     /// bar extra, the global hot key, and calendar auto-record.
     public func startRecording(title: String = "Untitled meeting", attendees: [String] = []) {
-        guard !session.isRecording,
-              let record = library.startNewMeeting(title: title, attendees: attendees)
-        else { return }
+        // `session.isRecording` only flips once capture is actually running,
+        // but preflight below can stay suspended for seconds (mic prompt,
+        // tap probe + TCC prompt). Without this latch, a second trigger in
+        // that window would run a whole second preflight/start in parallel.
+        guard !session.isRecording, !recordingStartInFlight else { return }
+        recordingStartInFlight = true
         // Keep the light streaming model topped up in the background — first
         // recording on a fresh install won't have it yet, and this makes
         // sure it's there for the next one even if this one starts without it.
         models.ensureStreamingModelDownloading()
         Task {
-            await session.start(
-                record: record,
-                engine: models.streamingEngine(language: settings.transcriptionLanguage),
+            defer { recordingStartInFlight = false }
+            let (outcome, probeResult) = await session.preflight(
                 includeSystemAudio: settings.includeSystemAudio,
-                preferredInputUID: settings.preferredInputUID
+                lastTapFailed: settings.lastSystemAudioTapFailed
             )
-            if session.permissionDenied {
-                library.markError(record, message: "Microphone access denied")
+            if let probeResult {
+                settings.lastSystemAudioTapFailed = (probeResult != .captured)
+            }
+            switch outcome {
+            case .blocked:
+                // No usable audio source — don't create a meeting record at
+                // all; there's nothing worth transcribing.
                 toasts.show(
-                    "Microphone access denied", actionTitle: "Open Settings"
+                    RecapCopy.noAudioAccessMessage, actionTitle: "Open Settings"
                 ) { [weak self] in
                     self?.router.section = .settings
                     PrivacyPane.open(PrivacyPane.microphone)
                 }
-            } else if let message = session.startFailureMessage {
-                library.markError(record, message: message)
-                toasts.show(message)
-            } else if session.micUnavailable {
-                // Recording is running system-audio only; the pill shows the
-                // "mic off" badge, and this offers the fix.
-                toasts.show(
-                    "Microphone access off — recording system audio only",
-                    actionTitle: "Open Settings"
-                ) { [weak self] in
-                    self?.router.section = .settings
-                    PrivacyPane.open(PrivacyPane.microphone)
+            case .proceed(let includeMic, let includeSystemAudio):
+                guard let record = library.startNewMeeting(title: title, attendees: attendees) else { return }
+                await session.start(
+                    record: record,
+                    engine: models.streamingEngine(language: settings.transcriptionLanguage),
+                    includeSystemAudio: includeSystemAudio,
+                    includeMic: includeMic,
+                    preferredInputUID: settings.preferredInputUID
+                )
+                if session.permissionDenied {
+                    library.markError(record, message: "Microphone access denied")
+                    toasts.show(
+                        "Microphone access denied", actionTitle: "Open Settings"
+                    ) { [weak self] in
+                        self?.router.section = .settings
+                        PrivacyPane.open(PrivacyPane.microphone)
+                    }
+                } else if let message = session.startFailureMessage {
+                    library.markError(record, message: message)
+                    toasts.show(message)
+                } else if session.micUnavailable {
+                    // Recording is running system-audio only; the pill shows the
+                    // "mic off" badge, and this offers the fix.
+                    toasts.show(
+                        "Microphone access off — recording system audio only",
+                        actionTitle: "Open Settings"
+                    ) { [weak self] in
+                        self?.router.section = .settings
+                        PrivacyPane.open(PrivacyPane.microphone)
+                    }
+                } else if session.systemAudioUnavailable {
+                    settings.lastSystemAudioTapFailed = true
+                    toasts.show(
+                        RecapCopy.systemAudioUnavailableMessage, actionTitle: "Open Settings"
+                    ) { [weak self] in
+                        self?.router.section = .settings
+                        PrivacyPane.open(PrivacyPane.systemAudio)
+                    }
+                } else if includeSystemAudio {
+                    settings.lastSystemAudioTapFailed = false
                 }
-            } else if session.systemAudioUnavailable {
-                settings.lastSystemAudioTapFailed = true
-                toasts.show(
-                    RecapCopy.systemAudioUnavailableMessage, actionTitle: "Open Settings"
-                ) { [weak self] in
-                    self?.router.section = .settings
-                    PrivacyPane.open(PrivacyPane.systemAudio)
-                }
-            } else if settings.includeSystemAudio {
-                settings.lastSystemAudioTapFailed = false
             }
         }
     }

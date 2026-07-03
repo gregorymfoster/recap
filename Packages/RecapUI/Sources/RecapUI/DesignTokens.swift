@@ -122,6 +122,11 @@ public enum RecapCopy {
     public static let systemAudioUnavailableMessage =
         "System audio isn't being captured — only your microphone is recording."
 
+    /// Toast fired when preflight finds no usable audio source at all — no
+    /// meeting record is created for this attempt.
+    public static let noAudioAccessMessage =
+        "Can't record — Recap has no audio access. Allow Microphone or System Audio in Settings, then try again."
+
     /// Fix-it hint under the Microphone permission row when denied.
     static let microphoneDeniedHint =
         "Turn on Recap under Microphone, then come back — status updates automatically."

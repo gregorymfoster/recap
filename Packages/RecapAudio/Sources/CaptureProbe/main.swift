@@ -68,7 +68,7 @@ func run() async {
     let recorder = MeetingRecorder()
     let output: MeetingRecorder.Output
     do {
-        output = try recorder.start(writingTo: url, preferredInputUID: deviceUID)
+        output = try await recorder.start(writingTo: url, preferredInputUID: deviceUID)
     } catch {
         print("FAIL: recorder start: \(error)")
         exit(1)

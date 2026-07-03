@@ -66,6 +66,9 @@ public final class MeetingRecorder {
         /// Neither the mic nor system audio is available (mic denied and
         /// system-audio capture off or unavailable) — nothing to record.
         case noAudioSource
+        /// A `start()` call arrived while a previous one was still
+        /// suspended (e.g. awaiting the system-audio TCC prompt).
+        case alreadyStarting
     }
 
     /// Refuse to start with less than this much free space — a meeting can
@@ -96,6 +99,11 @@ public final class MeetingRecorder {
     /// The mic device actually in use, for display (nil while not recording,
     /// or when it couldn't be determined).
     public var activeInputDeviceName: String? { mic.activeDeviceName }
+
+    /// Guards against a second concurrent `start()` call while the first is
+    /// still suspended awaiting `tap.start()` (e.g. a user double-triggering
+    /// record while the TCC prompt is up). Set for the duration of `start()`.
+    private var isStarting = false
 
     /// - Parameters:
     ///   - mic: Mic capture source; defaults to the real `MicSource`. Tests
@@ -139,24 +147,26 @@ public final class MeetingRecorder {
         makeTap: @MainActor () -> SystemAudioCapturing,
         sleep: () async -> Void
     ) async -> SystemAudioProbeResult {
-        var result = attemptSystemAudioProbe(makeTap: makeTap)
+        var result = await attemptSystemAudioProbe(makeTap: makeTap)
         if result == .denied {
             await sleep()
-            result = attemptSystemAudioProbe(makeTap: makeTap)
+            result = await attemptSystemAudioProbe(makeTap: makeTap)
         }
         recorderLog.info("system audio probe: \(String(describing: result), privacy: .public)")
         return result
     }
 
     /// One attempt: start a fresh tap and immediately stop it, discarding
-    /// any stream. Runs on the main actor because `SystemAudioTap` is.
+    /// any stream. Runs on the main actor because `SystemAudioTap` is;
+    /// `tap.start()` itself now suspends off the main actor internally so
+    /// the TCC prompt it may trigger never blocks the UI.
     @MainActor
     private static func attemptSystemAudioProbe(
         makeTap: @MainActor () -> SystemAudioCapturing
-    ) -> SystemAudioProbeResult {
+    ) async -> SystemAudioProbeResult {
         let tap = makeTap()
         do {
-            _ = try tap.start()
+            _ = try await tap.start()
             tap.stop()
             return .captured
         } catch {
@@ -175,7 +185,16 @@ public final class MeetingRecorder {
     public func start(
         writingTo url: URL, includeSystemAudio: Bool = true, includeMic: Bool = true,
         preferredInputUID: String? = nil
-    ) throws -> Output {
+    ) async throws -> Output {
+        // A second start() while the first is still suspended (e.g. awaiting
+        // the system-audio TCC prompt) would race on `systemTap`/`engine`
+        // state below — refuse it rather than corrupting that state.
+        guard !isStarting else {
+            throw RecorderError.alreadyStarting
+        }
+        isStarting = true
+        defer { isStarting = false }
+
         let folder = url.deletingLastPathComponent()
         if let free = try? folder.resourceValues(
             forKeys: [.volumeAvailableCapacityForImportantUsageKey]
@@ -190,7 +209,7 @@ public final class MeetingRecorder {
         if includeSystemAudio {
             let tap = makeSystemTap()
             do {
-                systemStream = try tap.start()
+                systemStream = try await tap.start()
                 systemTap = tap
                 systemAudioActive = true
             } catch {
