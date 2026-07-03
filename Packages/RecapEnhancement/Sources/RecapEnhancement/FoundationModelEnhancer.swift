@@ -1,6 +1,9 @@
 import Foundation
 import FoundationModels
+import os
 import RecapCore
+
+private let enhancementLog = Logger(subsystem: "com.gregfoster.recap", category: "Enhancement")
 
 /// What one transcript chunk contributed to the meeting — the "map" step.
 @Generable
@@ -56,15 +59,20 @@ public struct FoundationModelEnhancer: NoteEnhancer {
 
         // Map: digest each chunk.
         var digests: [ChunkDigest] = []
-        for chunk in chunks {
+        for (index, chunk) in chunks.enumerated() {
+            enhancementLog.info("digest \(index + 1, privacy: .public)/\(chunks.count, privacy: .public)")
             digests.append(try await digest(chunkText: chunk.text))
         }
 
         // Merge layer: keep the reduce prompt inside the context window.
+        var mergeRound = 0
         while digests.count > 6 {
+            mergeRound += 1
+            enhancementLog.info("merge round \(mergeRound, privacy: .public): \(digests.count, privacy: .public) digests")
             digests = try await mergeInPairs(digests)
         }
 
+        enhancementLog.info("reduce: \(digests.count, privacy: .public) digest(s)")
         return try await reduce(rawNotes: rawNotes, digests: digests)
     }
 
@@ -186,9 +194,11 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         do {
             return try await attempt()
         } catch {
+            enhancementLog.info("retrying after generation failure")
             do {
                 return try await attempt()
             } catch {
+                enhancementLog.error("generation failed after retry")
                 throw EnhancementError.generationFailed
             }
         }

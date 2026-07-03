@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let queueLog = Logger(subsystem: "com.gregfoster.recap", category: "ProcessingQueue")
 
 public struct ProcessingJob: Equatable, Sendable, Identifiable {
     public enum Kind: String, Sendable {
@@ -61,10 +64,14 @@ public actor ProcessingQueue {
 
     private let executor: JobExecutor
     private var observer: (@Sendable (QueueSnapshot) -> Void)?
+    private var lastLoggedPauseReason: String??
 
     public init(executor: JobExecutor, pausesOnBattery: Bool = true) {
         self.executor = executor
         self.pausesOnBattery = pausesOnBattery
+        // Seeded to "not paused" so the initial notify() (queue starts
+        // unpaused) doesn't log a spurious "resumed".
+        self.lastLoggedPauseReason = .some(nil)
     }
 
     /// Called after every state change with a fresh snapshot.
@@ -130,10 +137,16 @@ public actor ProcessingQueue {
         running = job
         runningProgress = 0
         notify()
+        queueLog.info("job started: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private)")
         runningTask = Task(priority: .utility) {
-            try? await executor.execute(job) { [weak self] fraction in
-                guard let self else { return }
-                Task { await self.updateProgress(fraction) }
+            do {
+                try await executor.execute(job) { [weak self] fraction in
+                    guard let self else { return }
+                    Task { await self.updateProgress(fraction) }
+                }
+                queueLog.info("job finished: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private)")
+            } catch {
+                queueLog.error("job failed: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private) error=\(String(describing: error), privacy: .private)")
             }
             self.jobFinished()
         }
@@ -153,6 +166,21 @@ public actor ProcessingQueue {
     }
 
     private func notify() {
+        logPauseReasonTransition()
         observer?(snapshot)
+    }
+
+    /// Pause reason is a pure function of state, not a stored transition — log
+    /// only when it actually changes so this stays a decision-point log, not
+    /// per-notify noise.
+    private func logPauseReasonTransition() {
+        let reason = pauseReason
+        guard lastLoggedPauseReason != .some(reason) else { return }
+        lastLoggedPauseReason = .some(reason)
+        if let reason {
+            queueLog.info("paused: \(reason, privacy: .public)")
+        } else {
+            queueLog.info("resumed")
+        }
     }
 }

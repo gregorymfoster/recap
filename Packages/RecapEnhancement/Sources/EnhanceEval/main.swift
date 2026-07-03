@@ -23,6 +23,32 @@ struct Expectations: Decodable {
     var mustNotContain: [String]?
 }
 
+// --json: in addition to the normal human-readable output, prints exactly one
+// JSON object as the LAST line of stdout, e.g.:
+//   {"ok":false,"cases":[{"name":"budget-sync","structure":true,"recall":true,"meta":true,"numbers":false}]}
+// `structure` is omitted (null) for cases with no rough notes, matching the
+// human "structure —" line. Exit codes are unchanged.
+
+/// Per-case machine-readable summary for `--json`.
+struct CaseSummary: Codable {
+    var name: String
+    var structure: Bool?
+    var recall: Bool
+    var meta: Bool
+    var numbers: Bool
+}
+
+struct EvalResult: Codable {
+    var ok: Bool
+    var cases: [CaseSummary]
+}
+
+func printJSON(_ result: EvalResult) {
+    let encoder = JSONEncoder()
+    guard let data = try? encoder.encode(result), let line = String(data: data, encoding: .utf8) else { return }
+    print(line)
+}
+
 struct CaseResult {
     var name: String
     var structureOK: Bool?
@@ -198,6 +224,8 @@ if let index = arguments.firstIndex(of: "--runs"), index + 1 < arguments.count {
 }
 let showOutput = arguments.contains("--show")
 arguments.removeAll { $0 == "--show" }
+let jsonOutput = arguments.contains("--json")
+arguments.removeAll { $0 == "--json" }
 
 let fixturesDir = URL(fileURLWithPath: arguments.first ?? "../../Fixtures/enhance")
 guard FileManager.default.fileExists(atPath: fixturesDir.path) else {
@@ -217,6 +245,7 @@ let caseDirs = try FileManager.default
     .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
 var failures = 0
+var caseSummaries: [CaseSummary] = []
 for run in 1...runs {
     if runs > 1 { print("— run \(run)/\(runs)") }
     for dir in caseDirs {
@@ -235,14 +264,23 @@ for run in 1...runs {
             if showOutput {
                 print(result.output.components(separatedBy: .newlines).map { "    " + $0 }.joined(separator: "\n"))
             }
-            if result.structureOK == false || result.recallHits < result.recallTotal
+            let recallOK = result.recallHits >= result.recallTotal
+            if result.structureOK == false || !recallOK
                 || !result.metaOK || !result.numbersOK || result.duplicateExtras > 0 {
                 failures += 1
             }
+            caseSummaries.append(CaseSummary(
+                name: name, structure: result.structureOK, recall: recallOK,
+                meta: result.metaOK, numbers: result.numbersOK
+            ))
         } catch {
             print("\(name): FAILED — \(error)")
             failures += 1
+            caseSummaries.append(CaseSummary(name: name, structure: nil, recall: false, meta: false, numbers: false))
         }
     }
 }
 print(failures == 0 ? "\nall checks passed" : "\n\(failures) case-run(s) with misses")
+if jsonOutput {
+    printJSON(EvalResult(ok: failures == 0, cases: caseSummaries))
+}

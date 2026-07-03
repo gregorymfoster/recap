@@ -36,12 +36,41 @@ Real hardware/models — the manual-verification layer for capture/transcription
 changes. Not run in CI.
 
 - `swift run --package-path Packages/RecapAudio capture-probe 5` — records mic + system audio for N seconds. Needs mic permission. Flags: `--list-devices`, `--device <uid>`, `--pause-test`.
-- `swift run --package-path Packages/RecapTranscription transcribe-probe Fixtures/meeting-fixture.m4a tiny [--stream]` — downloads the model on first run.
-- `swift run --package-path Packages/RecapTranscription diarize-probe Fixtures/two-speaker-fixture.m4a`
+- `swift run --package-path Packages/RecapTranscription transcribe-probe Fixtures/meeting-fixture.m4a tiny [--stream] [--language <code>] [--json]` — downloads the model on first run.
+- `swift run --package-path Packages/RecapTranscription diarize-probe Fixtures/two-speaker-fixture.m4a [--json]`
 - `swift run --package-path Packages/RecapEnhancement enhance-probe <transcript.json> [notes.md]` — needs Apple Intelligence; exits 2 when unavailable.
-- `swift run --package-path Packages/RecapEnhancement enhance-eval [--runs N]` — scores `Fixtures/enhance/` cases; run before/after any enhancement prompt change.
+- `swift run --package-path Packages/RecapEnhancement enhance-eval [--runs N] [--json]` — scores `Fixtures/enhance/` cases; run before/after any enhancement prompt change.
 
 See `Fixtures/README.md` for fixture details and expected output.
+
+### `--json` output (transcribe-probe, diarize-probe, enhance-eval)
+
+Human-readable output is unchanged by default. With `--json`, each probe additionally prints
+exactly one JSON object as the **last line** of stdout, so agents can parse a result without
+scraping prose:
+
+- `transcribe-probe`: `{"ok":true,"mode":"file","utterances":12,"duration":31.2,"text":"…first 200 chars…"}`
+- `diarize-probe`: `{"ok":true,"speakers":2,"turns":9}`
+- `enhance-eval`: `{"ok":false,"cases":[{"name":"budget-sync","structure":true,"recall":true,"meta":true,"numbers":false}]}`
+
+Exit codes are unchanged by `--json`: `0` success, `1` failure, `64` usage error (`diarize-probe`
+also uses `66` for a missing file, `enhance-eval` uses `66`/`69` for a missing fixtures dir /
+unavailable Apple Intelligence).
+
+## Observability: unified logging
+
+RecapCore, RecapAudio, and RecapEnhancement log decision points (not per-sample/per-chunk noise)
+via `os.Logger`, subsystem `com.gregfoster.recap`. Categories: `ProcessingQueue` (job
+start/finish/fail, pause-reason transitions), `LibraryStorage` (save/load failures, error level
+only), `MeetingRecorder` (start/pause/resume/stop, write-failure trips, spool salvage),
+`Enhancement` (map/merge/reduce pass boundaries, retries). Meeting/transcript content is never
+logged — dynamic strings are `.private` unless they're pure counts/durations.
+
+Watch a running app's logs live:
+
+```
+log stream --level debug --predicate 'subsystem == "com.gregfoster.recap"'
+```
 
 ## Conventions
 

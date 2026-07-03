@@ -1,6 +1,9 @@
 import AVFoundation
 import Accelerate
 import RecapCore
+import os
+
+private let recorderLog = Logger(subsystem: "com.gregfoster.recap", category: "MeetingRecorder")
 
 /// Mid-recording conditions the UI should know about.
 public enum RecorderEvent: Equatable, Sendable {
@@ -182,6 +185,7 @@ public final class MeetingRecorder {
         }
 
         clock = RecordingClock(startedAt: .now)
+        recorderLog.info("started: mic=\(self.micActive, privacy: .public) systemAudio=\(self.systemAudioActive, privacy: .public)")
         return Output(chunks: chunks, levels: levels, events: events)
     }
 
@@ -195,6 +199,7 @@ public final class MeetingRecorder {
         await engine.setPaused(true)
         clock.pause(at: .now)
         self.clock = clock
+        recorderLog.info("paused")
     }
 
     public func resume() async {
@@ -202,6 +207,7 @@ public final class MeetingRecorder {
         await engine.setPaused(false)
         clock.resume(at: .now)
         self.clock = clock
+        recorderLog.info("resumed")
     }
 
     @discardableResult
@@ -218,7 +224,9 @@ public final class MeetingRecorder {
         await engine?.finish()
         engine = nil
         defer { clock = nil }
-        return clock?.elapsed(at: .now) ?? 0
+        let duration = clock?.elapsed(at: .now) ?? 0
+        recorderLog.info("stopped: duration=\(duration, privacy: .public)")
+        return duration
     }
 }
 
@@ -330,6 +338,7 @@ private actor MixerEngine {
         file = nil
         spool = nil
         if fileWriteFailures >= Self.failureThreshold || (try? AVAudioFile(forReading: fileURL)) == nil {
+            recorderLog.info("salvaging spool: m4a unreadable or write failures reached threshold")
             AudioTranscoder.salvageSpool(caf: spoolURL, m4a: fileURL)
         } else {
             try? FileManager.default.removeItem(at: spoolURL)
@@ -368,6 +377,7 @@ private actor MixerEngine {
                fileWriteFailures >= Self.failureThreshold,
                spool == nil || spoolWriteFailures >= Self.failureThreshold {
                 reportedWriteFailure = true
+                recorderLog.error("write-failure threshold tripped: fileFailures=\(self.fileWriteFailures, privacy: .public) spoolFailures=\(self.spoolWriteFailures, privacy: .public)")
                 events.yield(.writeFailed)
             }
         }

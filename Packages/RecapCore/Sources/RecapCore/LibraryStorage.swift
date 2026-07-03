@@ -1,4 +1,7 @@
 import Foundation
+import os
+
+private let storageLog = Logger(subsystem: "com.gregfoster.recap", category: "LibraryStorage")
 
 /// A meeting together with its on-disk folder.
 public struct MeetingRecord: Equatable, Sendable, Identifiable {
@@ -40,12 +43,14 @@ public struct LibraryStorage: Sendable {
 
     /// Creates the meeting folder and writes initial metadata + empty notes.
     public func create(_ meeting: Meeting) throws -> MeetingRecord {
-        let folderURL = try uniqueFolderURL(for: meeting)
-        try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
-        let record = MeetingRecord(meeting: meeting, folderURL: folderURL)
-        try saveMetadata(record)
-        try Data().write(to: record.notesURL)
-        return record
+        try logOnFailure("create") {
+            let folderURL = try uniqueFolderURL(for: meeting)
+            try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+            let record = MeetingRecord(meeting: meeting, folderURL: folderURL)
+            try Self.encoder.encode(record.meeting).write(to: record.metadataURL, options: .atomic)
+            try Data().write(to: record.notesURL)
+            return record
+        }
     }
 
     /// Creates the folder for a meeting imported from an external audio file:
@@ -60,52 +65,89 @@ public struct LibraryStorage: Sendable {
     }
 
     public func saveMetadata(_ record: MeetingRecord) throws {
-        try Self.encoder.encode(record.meeting).write(to: record.metadataURL, options: .atomic)
+        try logOnFailure("saveMetadata") {
+            try Self.encoder.encode(record.meeting).write(to: record.metadataURL, options: .atomic)
+        }
     }
 
     /// Loads every meeting folder under the root. Folders without a readable
-    /// `meeting.json` are skipped (never deleted).
+    /// `meeting.json` are skipped (never deleted); the skip count is logged
+    /// so a bad folder doesn't silently vanish from view.
     public func loadAll() throws -> [MeetingRecord] {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: rootURL.path) else { return [] }
-        let folders = try fm.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: [.isDirectoryKey])
-        return folders.compactMap { folderURL in
-            guard (try? folderURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
-            let metadataURL = folderURL.appendingPathComponent("meeting.json")
-            guard let data = try? Data(contentsOf: metadataURL),
-                  let meeting = try? Self.decoder.decode(Meeting.self, from: data)
-            else { return nil }
-            return MeetingRecord(meeting: meeting, folderURL: folderURL)
+        try logOnFailure("loadAll") {
+            let fm = FileManager.default
+            guard fm.fileExists(atPath: rootURL.path) else { return [] }
+            let folders = try fm.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: [.isDirectoryKey])
+            var skipped = 0
+            let records = folders.compactMap { folderURL -> MeetingRecord? in
+                guard (try? folderURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
+                let metadataURL = folderURL.appendingPathComponent("meeting.json")
+                guard let data = try? Data(contentsOf: metadataURL),
+                      let meeting = try? Self.decoder.decode(Meeting.self, from: data)
+                else {
+                    skipped += 1
+                    return nil
+                }
+                return MeetingRecord(meeting: meeting, folderURL: folderURL)
+            }
+            .sorted { $0.meeting.date > $1.meeting.date }
+            if skipped > 0 {
+                storageLog.error("loadAll skipped \(skipped, privacy: .public) folder(s) with unreadable metadata")
+            }
+            return records
         }
-        .sorted { $0.meeting.date > $1.meeting.date }
     }
 
     // MARK: Content files
 
     public func saveNotes(_ notes: String, in record: MeetingRecord) throws {
-        try Data(notes.utf8).write(to: record.notesURL, options: .atomic)
+        try logOnFailure("saveNotes") {
+            try Data(notes.utf8).write(to: record.notesURL, options: .atomic)
+        }
     }
 
     public func loadNotes(in record: MeetingRecord) throws -> String {
-        try String(contentsOf: record.notesURL, encoding: .utf8)
+        try logOnFailure("loadNotes") {
+            try String(contentsOf: record.notesURL, encoding: .utf8)
+        }
     }
 
     public func saveEnhancedNotes(_ notes: String, in record: MeetingRecord) throws {
-        try Data(notes.utf8).write(to: record.enhancedURL, options: .atomic)
+        try logOnFailure("saveEnhancedNotes") {
+            try Data(notes.utf8).write(to: record.enhancedURL, options: .atomic)
+        }
     }
 
     public func loadEnhancedNotes(in record: MeetingRecord) throws -> String? {
         guard FileManager.default.fileExists(atPath: record.enhancedURL.path) else { return nil }
-        return try String(contentsOf: record.enhancedURL, encoding: .utf8)
+        return try logOnFailure("loadEnhancedNotes") {
+            try String(contentsOf: record.enhancedURL, encoding: .utf8)
+        }
     }
 
     public func saveTranscript(_ transcript: Transcript, in record: MeetingRecord) throws {
-        try Self.encoder.encode(transcript).write(to: record.transcriptURL, options: .atomic)
+        try logOnFailure("saveTranscript") {
+            try Self.encoder.encode(transcript).write(to: record.transcriptURL, options: .atomic)
+        }
     }
 
     public func loadTranscript(in record: MeetingRecord) throws -> Transcript? {
         guard FileManager.default.fileExists(atPath: record.transcriptURL.path) else { return nil }
-        return try Self.decoder.decode(Transcript.self, from: Data(contentsOf: record.transcriptURL))
+        return try logOnFailure("loadTranscript") {
+            try Self.decoder.decode(Transcript.self, from: Data(contentsOf: record.transcriptURL))
+        }
+    }
+
+    /// Runs `body`, logging (error level, no file contents) and rethrowing on
+    /// failure. `operation` and the underlying error are the only dynamic
+    /// content — never meeting titles/notes/transcript text.
+    private func logOnFailure<T>(_ operation: StaticString, _ body: () throws -> T) rethrows -> T {
+        do {
+            return try body()
+        } catch {
+            storageLog.error("\(operation) failed: \(String(describing: error), privacy: .private)")
+            throw error
+        }
     }
 
     // MARK: Folder naming

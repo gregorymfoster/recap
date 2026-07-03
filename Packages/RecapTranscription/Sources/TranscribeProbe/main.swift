@@ -4,15 +4,39 @@ import RecapCore
 import RecapTranscription
 
 // Manual verification harness for model download + transcription (M5/M7).
-// Usage: transcribe-probe <audio-file> [variant] [--stream] [--language <code>]
+// Usage: transcribe-probe <audio-file> [variant] [--stream] [--language <code>] [--json]
 // Downloads the variant (default: tiny) if needed, then transcribes the file —
 // in one shot, or with --stream by replaying it through the live streaming
 // path in 1-second chunks. --language forces decoding to an ISO 639-1 code
 // (e.g. "es") instead of WhisperKit's default auto-detection (J3).
+//
+// --json: in addition to the normal human-readable output, prints exactly one
+// JSON object as the LAST line of stdout, e.g.:
+//   {"ok":true,"mode":"file","utterances":12,"duration":31.2,"text":"…first 200 chars…"}
+// Exit codes are unchanged: 0 success, 1 failure, 64 usage error.
+
+/// Last-line machine-readable summary for `--json`. `mode` is "file" or
+/// "stream"; `duration` is the transcript's end time in seconds (file mode)
+/// or omitted (stream mode, where there is no single transcript object).
+struct ProbeResult: Codable {
+    var ok: Bool
+    var mode: String
+    var utterances: Int
+    var duration: Double?
+    var text: String?
+}
+
+func printJSON(_ result: ProbeResult) {
+    let encoder = JSONEncoder()
+    guard let data = try? encoder.encode(result), let line = String(data: data, encoding: .utf8) else { return }
+    print(line)
+}
 
 var argumentList = Array(CommandLine.arguments.dropFirst())
 let streaming = argumentList.contains("--stream")
 argumentList.removeAll { $0 == "--stream" }
+let jsonOutput = argumentList.contains("--json")
+argumentList.removeAll { $0 == "--json" }
 var language: String?
 if let flagIndex = argumentList.firstIndex(of: "--language") {
     let valueIndex = argumentList.index(after: flagIndex)
@@ -103,7 +127,11 @@ func runStreamProbe(engine: WhisperKitEngine, url: URL) async {
     }
     _ = await feed.value
     print("done — \(confirmed) confirmed utterances, live=\(sawLive), failed=\(sawFailure)")
-    exit(confirmed > 0 && sawLive && !sawFailure ? 0 : 1)
+    let ok = confirmed > 0 && sawLive && !sawFailure
+    if jsonOutput {
+        printJSON(ProbeResult(ok: ok, mode: "stream", utterances: confirmed, duration: nil, text: nil))
+    }
+    exit(ok ? 0 : 1)
 }
 
 @MainActor
@@ -152,9 +180,20 @@ func run() async {
         for utterance in transcript.utterances {
             print(String(format: "[%6.1f – %6.1f] %@", utterance.start, utterance.end, utterance.text))
         }
+        if jsonOutput {
+            let fullText = transcript.utterances.map(\.text).joined(separator: " ")
+            let duration = transcript.utterances.map(\.end).max() ?? 0
+            printJSON(ProbeResult(
+                ok: true, mode: "file", utterances: transcript.utterances.count,
+                duration: duration, text: String(fullText.prefix(200))
+            ))
+        }
         exit(0)
     } catch {
         print("FAIL: \(error)")
+        if jsonOutput {
+            printJSON(ProbeResult(ok: false, mode: "file", utterances: 0, duration: nil, text: nil))
+        }
         exit(1)
     }
 }
