@@ -9,6 +9,14 @@ public enum CalendarAutoRecordMode: String, CaseIterable, Sendable {
     case auto
 }
 
+/// How the floating always-on-top capsule renders while recording in the
+/// background. `.full` shows dot + timer + waveform; `.minimal` just dot + timer.
+public enum FloatingCapsuleStyle: String, CaseIterable, Sendable {
+    case off
+    case minimal
+    case full
+}
+
 /// User preferences, backed by UserDefaults.
 @MainActor
 @Observable
@@ -33,6 +41,10 @@ public final class SettingsStore {
 
     public var calendarAutoRecord: CalendarAutoRecordMode {
         didSet { defaults.set(calendarAutoRecord.rawValue, forKey: "calendarAutoRecord") }
+    }
+
+    public var floatingCapsuleStyle: FloatingCapsuleStyle {
+        didSet { defaults.set(floatingCapsuleStyle.rawValue, forKey: "floatingCapsuleStyle") }
     }
 
     /// Mirror finished meetings into an Obsidian vault folder as Markdown.
@@ -111,6 +123,8 @@ public final class SettingsStore {
         labelsSpeakers = defaults.object(forKey: "labelSpeakers") as? Bool ?? true
         calendarAutoRecord = defaults.string(forKey: "calendarAutoRecord")
             .flatMap(CalendarAutoRecordMode.init(rawValue:)) ?? .off
+        floatingCapsuleStyle = defaults.string(forKey: "floatingCapsuleStyle")
+            .flatMap(FloatingCapsuleStyle.init(rawValue:)) ?? .full
         syncsToObsidian = defaults.bool(forKey: "obsidianSync")
         obsidianVaultPath = defaults.string(forKey: "obsidianVaultPath") ?? ""
         mirrorBackupEnabled = defaults.bool(forKey: "mirrorBackup")

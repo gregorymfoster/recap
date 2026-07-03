@@ -20,6 +20,7 @@ struct MeetingDetailView: View {
     @State private var showingOriginal = false
     @State private var inputDevices: [AudioInputDevice] = []
     @State private var deviceListListener: AudioObjectPropertyListenerBlock?
+    @State private var playback = PlaybackStore()
 
     private var isLiveMeeting: Bool {
         session.activeRecord?.meeting.id == record.meeting.id
@@ -43,6 +44,7 @@ struct MeetingDetailView: View {
             }
             statusBar
         }
+        .environment(playback)
         .toolbar {
             ToolbarItem {
                 Toggle(isOn: $showTranscript) {
