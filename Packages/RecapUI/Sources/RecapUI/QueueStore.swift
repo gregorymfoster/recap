@@ -21,6 +21,9 @@ struct MeetingProcessor: JobExecutor {
     let onDurationRecovered: @Sendable (UUID, TimeInterval) async -> Void
     /// Enqueues a follow-up job (transcribe → enhance chaining).
     let chain: @Sendable (ProcessingJob) async -> Void
+    /// Announces a meeting is about to be exported, so other subscribers
+    /// (folder mirror, future CloudKit sync) see the same completion signal.
+    let changeBus: LibraryChangeBus
 
     func execute(_ job: ProcessingJob, progress: @escaping @Sendable (Double) -> Void) async throws {
         guard let record = try storage.loadAll().first(where: { $0.meeting.id == job.meetingID })
@@ -78,7 +81,7 @@ struct MeetingProcessor: JobExecutor {
                 } else {
                     // Apple Intelligence off → meeting completes transcript-only.
                     await onStatus(job.meetingID, .ready)
-                    exportToObsidianIfEnabled(record)
+                    exportToConfiguredDestinations(record)
                 }
             } catch {
                 processorLog.error("Transcription failed: \(error, privacy: .public)")
@@ -92,7 +95,7 @@ struct MeetingProcessor: JobExecutor {
                 !transcript.utterances.isEmpty
             else {
                 await onStatus(job.meetingID, .ready)
-                exportToObsidianIfEnabled(record)
+                exportToConfiguredDestinations(record)
                 return
             }
             await onStatus(job.meetingID, .enhancing)
@@ -105,14 +108,16 @@ struct MeetingProcessor: JobExecutor {
                 // its transcript; enhancement can be retried from the editor.
             }
             await onStatus(job.meetingID, .ready)
-            exportToObsidianIfEnabled(record)
+            exportToConfiguredDestinations(record)
         }
     }
 
     /// Mirrors a finished meeting to the configured sync destinations
-    /// (Obsidian vault, webhook). Best-effort: a failed export never affects
-    /// the meeting itself.
-    private func exportToObsidianIfEnabled(_ record: MeetingRecord) {
+    /// (Obsidian vault, folder-mirror backup, webhook). Best-effort: a failed
+    /// export never affects the meeting itself.
+    private func exportToConfiguredDestinations(_ record: MeetingRecord) {
+        changeBus.post(.meetingChanged(record.meeting.id))
+
         let defaults = UserDefaults.standard
         let notes = try? storage.loadNotes(in: record)
         let enhanced = (try? storage.loadEnhancedNotes(in: record)) ?? nil
@@ -125,6 +130,16 @@ struct MeetingProcessor: JobExecutor {
                 try exporter.export(record, notes: notes, enhanced: enhanced, transcript: transcript)
             } catch {
                 processorLog.error("Obsidian export failed: \(error, privacy: .public)")
+            }
+        }
+
+        let mirrorPath = defaults.string(forKey: "mirrorFolderPath") ?? ""
+        if defaults.bool(forKey: "mirrorBackup"), !mirrorPath.isEmpty {
+            let mirror = FolderMirrorExporter(destinationRootURL: URL(fileURLWithPath: mirrorPath))
+            do {
+                try mirror.mirror(record)
+            } catch {
+                processorLog.error("Folder-mirror backup failed: \(error, privacy: .public)")
             }
         }
 
@@ -159,6 +174,7 @@ public final class QueueStore {
     ///   in addition to the row chip `updateStatus` already produces.
     public init(
         library: LibraryStore, storage: LibraryStorage, models: WhisperModelManager,
+        changeBus: LibraryChangeBus,
         onError: (@MainActor (String) -> Void)? = nil
     ) {
         // Two-phase init: the processor's chain closure needs the queue.
@@ -183,7 +199,8 @@ public final class QueueStore {
             },
             chain: { @Sendable job in
                 await queueBox.queue?.enqueue(job)
-            }
+            },
+            changeBus: changeBus
         )
         let pausesOnBattery = UserDefaults.standard.object(forKey: "pauseOnBattery") as? Bool ?? true
         let queue = ProcessingQueue(executor: processor, pausesOnBattery: pausesOnBattery)

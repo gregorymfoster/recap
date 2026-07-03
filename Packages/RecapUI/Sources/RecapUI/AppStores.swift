@@ -28,6 +28,9 @@ public final class AppStores {
     public let toasts = ToastCenter()
     /// nil in fixture/preview graphs, where nothing touches disk.
     private let storage: LibraryStorage?
+    /// Fan-out of library changes to mirror/sync consumers. Constructed once
+    /// per process, even in the fixtures graph (harmless there).
+    private let changeBus: LibraryChangeBus
 
     /// ⌥⌘R anywhere toggles recording. nil when another app owns the combo.
     @ObservationIgnored private var recordHotKey: GlobalHotKey?
@@ -36,6 +39,12 @@ public final class AppStores {
     /// True when calendar auto-record is enabled in Settings but macOS
     /// calendar access was denied — surfaced as a warning there.
     public private(set) var calendarAccessDenied = false
+    /// Per-meeting debounce for the change-bus-driven re-export consumer:
+    /// each `.meetingChanged` cancels and restarts a ~5s sleep before the
+    /// enabled exporters actually run, so rapid edits coalesce into one
+    /// export instead of one per keystroke-flush.
+    @ObservationIgnored private var exportDebounceTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var changeBusConsumerTask: Task<Void, Never>?
 
     /// Disk-backed graph used by the app. `-fixtures` swaps in sample data
     /// for UI work and screenshots (no queue — fixtures never process).
@@ -47,20 +56,23 @@ public final class AppStores {
             session = MeetingSessionStore()
             queue = nil
             storage = nil
+            changeBus = LibraryChangeBus()
         } else {
             let settings = SettingsStore()
             let storage = LibraryStorage(rootURL: settings.saveRootURL)
             let index = (try? SearchIndex(databaseURL: SearchIndex.defaultDatabaseURL)) ?? (try! SearchIndex())
-            let library = LibraryStore(storage: storage, index: index)
+            let changeBus = LibraryChangeBus()
+            let library = LibraryStore(storage: storage, index: index, changeBus: changeBus)
             let models = WhisperModelManager()
             self.settings = settings
             self.library = library
             self.models = models
             self.storage = storage
+            self.changeBus = changeBus
             session = MeetingSessionStore()
             let toasts = toasts
             queue = QueueStore(
-                library: library, storage: storage, models: models,
+                library: library, storage: storage, models: models, changeBus: changeBus,
                 onError: { message in toasts.show(message) }
             )
             recordHotKey = GlobalHotKey(keyCode: kVK_ANSI_R, modifiers: cmdKey | optionKey) { [weak self] in
@@ -80,6 +92,7 @@ public final class AppStores {
                 }
                 self?.stopRecording()
             }
+            startChangeBusConsumer()
         }
     }
 
@@ -91,6 +104,7 @@ public final class AppStores {
         session = MeetingSessionStore()
         queue = nil
         storage = nil
+        changeBus = LibraryChangeBus()
     }
 
     // MARK: Recording control
@@ -229,6 +243,78 @@ public final class AppStores {
                     enhanced: (try? storage.loadEnhancedNotes(in: record)) ?? nil,
                     transcript: try? storage.loadTranscript(in: record)
                 )
+            }
+        }
+    }
+
+    // MARK: Folder-mirror backup
+
+    /// Mirrors every finished meeting to the configured backup folder.
+    /// Called when the backup toggle is switched on, mirroring
+    /// `exportAllReadyMeetingsToObsidian()`'s backfill shape.
+    public func backfillMirrorBackup() {
+        guard settings.mirrorBackupEnabled, !settings.mirrorFolderPath.isEmpty else { return }
+        let mirror = FolderMirrorExporter(destinationRootURL: URL(fileURLWithPath: settings.mirrorFolderPath))
+        let ready = library.meetings.filter { $0.meeting.status == .ready }
+        Task.detached(priority: .utility) {
+            for record in ready {
+                try? mirror.mirror(record)
+            }
+        }
+    }
+
+    // MARK: Change-bus consumer
+
+    /// Starts the one long-lived task that watches every library change and
+    /// re-runs the currently-enabled exporters for the affected meeting,
+    /// debounced per meeting ID. This is what makes notes edited *after*
+    /// processing (Obsidian export today only fires at completion) still
+    /// reach the configured destinations.
+    private func startChangeBusConsumer() {
+        changeBusConsumerTask = Task { [weak self] in
+            guard let self else { return }
+            for await change in self.changeBus.changes() {
+                guard case .meetingChanged(let id) = change else { continue }
+                self.scheduleDebouncedExport(for: id)
+            }
+        }
+    }
+
+    private func scheduleDebouncedExport(for meetingID: UUID) {
+        exportDebounceTasks[meetingID]?.cancel()
+        exportDebounceTasks[meetingID] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.exportDebounceTasks.removeValue(forKey: meetingID)
+            self.runEnabledExporters(for: meetingID)
+        }
+    }
+
+    /// Re-runs every currently-enabled exporter for one meeting, looked up
+    /// fresh from disk. Best-effort and detached — mirrors
+    /// `MeetingProcessor.exportToConfiguredDestinations`, but is driven by
+    /// the change bus instead of pipeline completion.
+    private func runEnabledExporters(for meetingID: UUID) {
+        guard let storage else { return }
+        let obsidianEnabled = settings.syncsToObsidian
+        let obsidianPath = settings.obsidianVaultPath
+        let mirrorEnabled = settings.mirrorBackupEnabled
+        let mirrorPath = settings.mirrorFolderPath
+        guard (obsidianEnabled && !obsidianPath.isEmpty) || (mirrorEnabled && !mirrorPath.isEmpty) else { return }
+
+        Task.detached(priority: .utility) {
+            guard let record = try? storage.loadAll().first(where: { $0.meeting.id == meetingID }) else { return }
+            let notes = try? storage.loadNotes(in: record)
+            let enhanced = (try? storage.loadEnhancedNotes(in: record)) ?? nil
+            let transcript = try? storage.loadTranscript(in: record)
+
+            if obsidianEnabled, !obsidianPath.isEmpty {
+                let exporter = ObsidianExporter(vaultFolderURL: URL(fileURLWithPath: obsidianPath))
+                _ = try? exporter.export(record, notes: notes, enhanced: enhanced, transcript: transcript)
+            }
+            if mirrorEnabled, !mirrorPath.isEmpty {
+                let mirror = FolderMirrorExporter(destinationRootURL: URL(fileURLWithPath: mirrorPath))
+                try? mirror.mirror(record)
             }
         }
     }

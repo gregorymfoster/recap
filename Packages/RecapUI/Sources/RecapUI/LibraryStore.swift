@@ -25,12 +25,14 @@ public final class LibraryStore {
     private let storage: LibraryStorage?
     private let index: SearchIndex?
     private let autosaver: NotesAutosaver?
+    private let changeBus: LibraryChangeBus?
 
     /// Disk-backed store: loads the library and rebuilds the search index.
-    public init(storage: LibraryStorage, index: SearchIndex) {
+    public init(storage: LibraryStorage, index: SearchIndex, changeBus: LibraryChangeBus) {
         self.storage = storage
         self.index = index
         self.autosaver = NotesAutosaver(storage: storage)
+        self.changeBus = changeBus
         reload()
     }
 
@@ -39,6 +41,7 @@ public final class LibraryStore {
         self.storage = nil
         self.index = nil
         self.autosaver = nil
+        self.changeBus = nil
         self.meetings = fixtures
         self.queueSummary = queueSummary
     }
@@ -106,12 +109,15 @@ public final class LibraryStore {
     }
 
     private func replace(_ record: MeetingRecord) {
+        var record = record
+        record.meeting.updatedAt = .now
         if let i = meetings.firstIndex(where: { $0.meeting.id == record.meeting.id }) {
             meetings[i] = record
         }
         guard let storage else { return }
         try? storage.saveMetadata(record)
         if let index { try? index.update(record, from: storage) }
+        changeBus?.post(.meetingChanged(record.meeting.id))
     }
 
     public func record(for id: UUID) -> MeetingRecord? {
@@ -152,9 +158,11 @@ public final class LibraryStore {
     /// Writes pending notes and refreshes the search index (call on blur/quit).
     public func flushNotes(for record: MeetingRecord) {
         guard let autosaver, let storage, let index else { return }
+        let changeBus = changeBus
         Task {
             await autosaver.flush()
             try? index.update(record, from: storage)
+            changeBus?.post(.meetingChanged(record.meeting.id))
         }
     }
 

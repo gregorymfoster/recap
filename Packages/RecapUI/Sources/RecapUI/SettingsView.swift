@@ -118,7 +118,7 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Sync") {
+            Section("Sync & Backup") {
                 Toggle("Copy finished meetings into an Obsidian vault", isOn: $settings.syncsToObsidian)
                     .onChange(of: settings.syncsToObsidian) {
                         if settings.syncsToObsidian {
@@ -146,6 +146,30 @@ struct SettingsView: View {
                     .textFieldStyle(.roundedBorder)
                     .font(Tokens.meta)
                 Text("Finished meetings are also POSTed to this URL as JSON (title, notes, transcript). Leave empty to disable.")
+                    .font(Tokens.caption)
+                    .foregroundStyle(Tokens.textTertiary)
+
+                Toggle("Back up meeting folders to another location", isOn: $settings.mirrorBackupEnabled)
+                    .onChange(of: settings.mirrorBackupEnabled) {
+                        if settings.mirrorBackupEnabled {
+                            if settings.mirrorFolderPath.isEmpty { pickMirrorFolder() }
+                            stores?.backfillMirrorBackup()
+                        }
+                    }
+                if settings.mirrorBackupEnabled {
+                    LabeledContent("Backup folder") {
+                        HStack(spacing: 10) {
+                            Text(settings.mirrorFolderPath.isEmpty
+                                ? "None selected"
+                                : tildePath(settings.mirrorFolderPath))
+                                .font(Tokens.meta)
+                                .foregroundStyle(Tokens.textSecondary)
+                            Button("Change…") { pickMirrorFolder() }
+                                .controlSize(.small)
+                        }
+                    }
+                }
+                Text("A complete, one-way copy of each meeting folder — including audio — is kept in sync here. Picking a folder inside iCloud Drive keeps an extra copy in iCloud automatically.")
                     .font(Tokens.caption)
                     .foregroundStyle(Tokens.textTertiary)
             }
@@ -177,6 +201,19 @@ struct SettingsView: View {
         if panel.runModal() == .OK, let url = panel.url {
             settings.obsidianVaultPath = url.path
             stores?.exportAllReadyMeetingsToObsidian()
+        }
+    }
+
+    private func pickMirrorFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Use Folder"
+        panel.message = "Choose a backup destination folder"
+        if panel.runModal() == .OK, let url = panel.url {
+            settings.mirrorFolderPath = url.path
+            stores?.backfillMirrorBackup()
         }
     }
 

@@ -44,6 +44,16 @@ public final class SettingsStore {
         didSet { defaults.set(obsidianVaultPath, forKey: "obsidianVaultPath") }
     }
 
+    /// Mirror finished meeting folders (incl. audio) into another folder —
+    /// typically iCloud Drive, for a one-way backup outside the app.
+    public var mirrorBackupEnabled: Bool {
+        didSet { defaults.set(mirrorBackupEnabled, forKey: "mirrorBackup") }
+    }
+
+    public var mirrorFolderPath: String {
+        didSet { defaults.set(mirrorFolderPath, forKey: "mirrorFolderPath") }
+    }
+
     /// POST finished meetings (JSON) to this URL; empty disables.
     public var webhookURL: String {
         didSet { defaults.set(webhookURL, forKey: "webhookURL") }
@@ -91,6 +101,8 @@ public final class SettingsStore {
             .flatMap(CalendarAutoRecordMode.init(rawValue:)) ?? .off
         syncsToObsidian = defaults.bool(forKey: "obsidianSync")
         obsidianVaultPath = defaults.string(forKey: "obsidianVaultPath") ?? ""
+        mirrorBackupEnabled = defaults.bool(forKey: "mirrorBackup")
+        mirrorFolderPath = defaults.string(forKey: "mirrorFolderPath") ?? ""
         webhookURL = defaults.string(forKey: "webhookURL") ?? ""
         saveRootPath = defaults.string(forKey: "saveRootPath") ?? LibraryStorage.defaultRootURL.path
         lastSystemAudioTapFailed = defaults.object(forKey: "lastSystemAudioTapFailed") as? Bool

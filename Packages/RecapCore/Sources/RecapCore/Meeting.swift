@@ -22,6 +22,11 @@ public struct Meeting: Codable, Equatable, Identifiable, Sendable {
     public var duration: TimeInterval
     public var attendees: [String]
     public var status: MeetingStatus
+    /// Last time this meeting's metadata or content changed. Optional so
+    /// pre-existing `meeting.json` files (written before this field existed)
+    /// decode unchanged. CloudKit sync (Milestone C) uses this for
+    /// last-writer-wins conflict resolution.
+    public var updatedAt: Date?
 
     public init(
         id: UUID = UUID(),
@@ -29,7 +34,8 @@ public struct Meeting: Codable, Equatable, Identifiable, Sendable {
         date: Date,
         duration: TimeInterval = 0,
         attendees: [String] = [],
-        status: MeetingStatus = .recording
+        status: MeetingStatus = .recording,
+        updatedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -37,5 +43,6 @@ public struct Meeting: Codable, Equatable, Identifiable, Sendable {
         self.duration = duration
         self.attendees = attendees
         self.status = status
+        self.updatedAt = updatedAt
     }
 }
