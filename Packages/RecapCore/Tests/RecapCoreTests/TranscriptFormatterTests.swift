@@ -50,4 +50,33 @@ import Testing
         #expect(TranscriptFormatter.speakerDisplayName("Sam") == "Sam")
         #expect(TranscriptFormatter.speakerDisplayName("speaker-a") == "speaker-a")
     }
+
+    /// Precedence: a custom rename wins over the "Speaker N" fallback, which
+    /// wins over passing the raw ID through unchanged.
+    @Test func speakerDisplayNamePrecedenceCustomNameOverFallback() {
+        let speakerNames = ["S1": "Maya", "S2": ""]
+
+        // Custom name wins over "Speaker N".
+        #expect(TranscriptFormatter.speakerDisplayName("S1", speakerNames: speakerNames) == "Maya")
+        // Empty string in the mapping doesn't count as a rename — falls back.
+        #expect(TranscriptFormatter.speakerDisplayName("S2", speakerNames: speakerNames) == "Speaker 2")
+        // Unmapped recognized label still falls back to "Speaker N".
+        #expect(TranscriptFormatter.speakerDisplayName("S3", speakerNames: speakerNames) == "Speaker 3")
+        // Unrecognized ID with no mapping passes through unchanged.
+        #expect(TranscriptFormatter.speakerDisplayName("guest", speakerNames: speakerNames) == "guest")
+        // A custom name can also be attached to a non-"S<n>" ID.
+        #expect(TranscriptFormatter.speakerDisplayName("guest", speakerNames: ["guest": "Front desk"]) == "Front desk")
+    }
+
+    @Test func plainTextUsesSpeakerNamesWhenProvided() {
+        let utterances = [
+            Utterance(speakerID: "S1", start: 0, end: 4, text: "Hello everyone."),
+            Utterance(speakerID: "S2", start: 4, end: 9, text: "Hi!"),
+        ]
+        let result = TranscriptFormatter.plainText(utterances: utterances, speakerNames: ["S1": "Maya"])
+        #expect(result == """
+        [0:00] Maya: Hello everyone.
+        [0:04] Speaker 2: Hi!
+        """)
+    }
 }

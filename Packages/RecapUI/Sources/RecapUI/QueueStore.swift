@@ -131,8 +131,9 @@ struct MeetingProcessor: JobExecutor {
 
         if s.syncsToObsidian, !s.obsidianVaultPath.isEmpty {
             let exporter = ObsidianExporter(vaultFolderURL: URL(fileURLWithPath: s.obsidianVaultPath))
+            let speakerNames = ((try? storage.loadSpeakerNames(in: record)) ?? SpeakerNames()).names
             do {
-                try exporter.export(record, notes: notes, enhanced: enhanced, transcript: transcript)
+                try exporter.export(record, notes: notes, enhanced: enhanced, transcript: transcript, speakerNames: speakerNames)
             } catch {
                 processorLog.error("Obsidian export failed: \(error, privacy: .public)")
             }

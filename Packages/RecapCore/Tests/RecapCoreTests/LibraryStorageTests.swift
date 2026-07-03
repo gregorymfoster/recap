@@ -126,6 +126,28 @@ import Testing
         #expect(loaded.first?.folderURL.resolvingSymlinksInPath() == record.folderURL.resolvingSymlinksInPath())
     }
 
+    @Test func speakerNamesRoundTripAndDefaultToEmpty() throws {
+        let storage = try makeStorage()
+        let record = try storage.create(Meeting(title: "Standup", date: .now))
+
+        // No speakers.json yet — empty mapping, not an error.
+        #expect(try storage.loadSpeakerNames(in: record) == SpeakerNames())
+
+        var speakerNames = SpeakerNames()
+        speakerNames["S1"] = "Maya"
+        speakerNames["S2"] = "Sam"
+        try storage.saveSpeakerNames(speakerNames, in: record)
+
+        #expect(FileManager.default.fileExists(atPath: record.speakerNamesURL.path))
+        #expect(try storage.loadSpeakerNames(in: record) == speakerNames)
+
+        // Overwriting persists the new mapping, not a merge of the old.
+        var updated = SpeakerNames()
+        updated["S1"] = "Maya Chen"
+        try storage.saveSpeakerNames(updated, in: record)
+        #expect(try storage.loadSpeakerNames(in: record) == updated)
+    }
+
     @Test func trashMovesFolderAndRemovesItFromLoadAll() throws {
         let storage = try makeStorage()
         let keep = try storage.create(Meeting(title: "Keep me", date: .now))

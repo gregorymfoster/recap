@@ -250,6 +250,45 @@ private actor ChangeCollector {
         #expect(store.record(for: record.meeting.id)?.meeting.preferredNotesView == nil)
     }
 
+    // MARK: renameSpeaker / loadSpeakerNames
+
+    @Test func renameSpeakerPersistsAndPostsChange() async throws {
+        let (store, storage, changeBus) = makeStore()
+        let record = try #require(store.startNewMeeting(title: "Meeting"))
+        let collector = ChangeCollector.make(changeBus)
+
+        #expect(store.loadSpeakerNames(for: record).isEmpty)
+
+        store.renameSpeaker("S1", to: "Maya", in: record)
+
+        #expect(store.loadSpeakerNames(for: record) == ["S1": "Maya"])
+        let onDisk = try storage.loadSpeakerNames(in: record)
+        #expect(onDisk.names == ["S1": "Maya"])
+
+        let changes = await collector.waitForCount(1)
+        #expect(changes == [.meetingChanged(record.meeting.id)])
+    }
+
+    @Test func renameSpeakerTwiceKeepsBothMappings() throws {
+        let (store, _, _) = makeStore()
+        let record = try #require(store.startNewMeeting(title: "Meeting"))
+
+        store.renameSpeaker("S1", to: "Maya", in: record)
+        store.renameSpeaker("S2", to: "Sam", in: record)
+
+        #expect(store.loadSpeakerNames(for: record) == ["S1": "Maya", "S2": "Sam"])
+    }
+
+    @Test func renameSpeakerWithBlankNameClearsTheMapping() throws {
+        let (store, _, _) = makeStore()
+        let record = try #require(store.startNewMeeting(title: "Meeting"))
+        store.renameSpeaker("S1", to: "Maya", in: record)
+
+        store.renameSpeaker("S1", to: "   ", in: record)
+
+        #expect(store.loadSpeakerNames(for: record).isEmpty)
+    }
+
     // MARK: insertImported
 
     @Test func insertImportedAddsRecordAtSortedPositionAndPostsChange() async throws {

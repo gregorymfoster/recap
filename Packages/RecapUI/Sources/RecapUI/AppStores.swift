@@ -499,7 +499,8 @@ public final class AppStores {
                     record,
                     notes: try? storage.loadNotes(in: record),
                     enhanced: (try? storage.loadEnhancedNotes(in: record)) ?? nil,
-                    transcript: try? storage.loadTranscript(in: record)
+                    transcript: try? storage.loadTranscript(in: record),
+                    speakerNames: ((try? storage.loadSpeakerNames(in: record)) ?? SpeakerNames()).names
                 )
             }
         }
@@ -569,7 +570,8 @@ public final class AppStores {
 
             if obsidianEnabled, !obsidianPath.isEmpty {
                 let exporter = ObsidianExporter(vaultFolderURL: URL(fileURLWithPath: obsidianPath))
-                _ = try? exporter.export(record, notes: notes, enhanced: enhanced, transcript: transcript)
+                let speakerNames = ((try? storage.loadSpeakerNames(in: record)) ?? SpeakerNames()).names
+                _ = try? exporter.export(record, notes: notes, enhanced: enhanced, transcript: transcript, speakerNames: speakerNames)
             }
             if mirrorEnabled, !mirrorPath.isEmpty {
                 let mirror = FolderMirrorExporter(destinationRootURL: URL(fileURLWithPath: mirrorPath))

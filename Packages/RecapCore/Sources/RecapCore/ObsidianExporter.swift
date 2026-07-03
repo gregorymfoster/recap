@@ -18,12 +18,13 @@ public struct ObsidianExporter: Sendable {
         _ record: MeetingRecord,
         notes: String?,
         enhanced: String?,
-        transcript: Transcript?
+        transcript: Transcript?,
+        speakerNames: [String: String] = [:]
     ) throws -> URL {
         let fm = FileManager.default
         try fm.createDirectory(at: vaultFolderURL, withIntermediateDirectories: true)
         let url = vaultFolderURL.appendingPathComponent(fileName(for: record.meeting))
-        let content = render(record.meeting, notes: notes, enhanced: enhanced, transcript: transcript)
+        let content = render(record.meeting, notes: notes, enhanced: enhanced, transcript: transcript, speakerNames: speakerNames)
         try Data(content.utf8).write(to: url, options: .atomic)
         return url
     }
@@ -46,7 +47,8 @@ public struct ObsidianExporter: Sendable {
         _ meeting: Meeting,
         notes: String?,
         enhanced: String?,
-        transcript: Transcript?
+        transcript: Transcript?,
+        speakerNames: [String: String] = [:]
     ) -> String {
         var lines: [String] = ["---"]
         lines.append("date: \(meeting.date.ISO8601Format())")
@@ -78,7 +80,7 @@ public struct ObsidianExporter: Sendable {
                 if let speaker = utterance.speakerID, speaker != currentSpeaker {
                     currentSpeaker = speaker
                     lines.append("")
-                    lines.append("**\(displayName(for: speaker))**")
+                    lines.append("**\(displayName(for: speaker, speakerNames: speakerNames))**")
                 }
                 lines.append(utterance.text)
             }
@@ -86,10 +88,7 @@ public struct ObsidianExporter: Sendable {
         return lines.joined(separator: "\n") + "\n"
     }
 
-    private func displayName(for speakerID: String) -> String {
-        if speakerID.hasPrefix("S"), let number = Int(speakerID.dropFirst()) {
-            return "Speaker \(number)"
-        }
-        return speakerID
+    private func displayName(for speakerID: String, speakerNames: [String: String]) -> String {
+        TranscriptFormatter.speakerDisplayName(speakerID, speakerNames: speakerNames)
     }
 }

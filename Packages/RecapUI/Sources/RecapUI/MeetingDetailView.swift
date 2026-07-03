@@ -17,6 +17,7 @@ struct MeetingDetailView: View {
     @State private var showTranscript = false
     @State private var savedTranscript: Transcript?
     @State private var enhancedNotes: String?
+    @State private var speakerNames: [String: String] = [:]
     @State private var showingOriginal = false
     @State private var inputDevices: [AudioInputDevice] = []
     @State private var deviceListListener: AudioObjectPropertyListenerBlock?
@@ -48,7 +49,13 @@ struct MeetingDetailView: View {
                         partial: isLiveMeeting ? session.partialUtterance : nil,
                         isLive: isLiveMeeting,
                         liveState: isLiveMeeting ? session.liveState : nil,
-                        onDownloadStreamingModel: { models.ensureStreamingModelDownloading() }
+                        onDownloadStreamingModel: { models.ensureStreamingModelDownloading() },
+                        speakerNames: speakerNames,
+                        attendees: record.meeting.attendees,
+                        onRenameSpeaker: isLiveMeeting ? nil : { speakerID, name in
+                            library.renameSpeaker(speakerID, to: name, in: record)
+                            speakerNames[speakerID] = name
+                        }
                     )
                     .frame(minWidth: 260, idealWidth: 420)
                 }
@@ -73,6 +80,7 @@ struct MeetingDetailView: View {
             notes = library.loadNotes(for: record)
             savedTranscript = library.loadTranscript(for: record)
             enhancedNotes = library.loadEnhancedNotes(for: record)
+            speakerNames = library.loadSpeakerNames(for: record)
             showingOriginal = record.meeting.preferredNotesView == .original
             // Default to the split view whenever there's a transcript to show —
             // live meetings (text appears as it's spoken) and finished ones

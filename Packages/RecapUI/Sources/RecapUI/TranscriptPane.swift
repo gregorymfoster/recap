@@ -17,6 +17,18 @@ struct TranscriptPane: View {
     /// Health of the live pipeline, when `isLive` — nil for saved meetings.
     var liveState: LiveState?
     var onDownloadStreamingModel: (() -> Void)?
+    /// Per-meeting speaker renames (design handoff v2 §8e), keyed by
+    /// diarization label ("S1" → "Maya"). Defaults empty so previews and any
+    /// host that doesn't load renames just show "Speaker N".
+    var speakerNames: [String: String] = [:]
+    /// Meeting attendees, used to build rename-popover suggestion chips
+    /// (alongside "Me"). Defaults empty — the popover still works, just
+    /// without suggestions.
+    var attendees: [String] = []
+    /// Persists a rename for `speakerID` within this meeting. Nil (the
+    /// default) disables the rename affordance entirely — used for live
+    /// transcripts, where renaming isn't offered.
+    var onRenameSpeaker: ((String, String) -> Void)?
 
     @Environment(PlaybackStore.self) private var playback: PlaybackStore?
     @Environment(LibraryStore.self) private var library: LibraryStore?
@@ -31,6 +43,10 @@ struct TranscriptPane: View {
     /// Stamped by `followPlayback` right before its own `scrollTo`, so the
     /// offset change *we* cause isn't misread as the user scrolling away.
     @State private var lastAutoScrollAt: Date?
+    /// Speaker ID whose rename popover is currently open, if any.
+    @State private var renamingSpeakerID: String?
+    @State private var renameDraft = ""
+    @FocusState private var renameFieldFocused: Bool
 
     private static let manualScrollGrace: TimeInterval = 3
     private static let autoScrollSettle: TimeInterval = 0.5
@@ -70,7 +86,7 @@ struct TranscriptPane: View {
                 // Confirmed utterances only — the in-progress partial is
                 // deliberately excluded from copies.
                 CopyButton(help: "Copy transcript") {
-                    TranscriptFormatter.plainText(utterances: utterances)
+                    TranscriptFormatter.plainText(utterances: utterances, speakerNames: speakerNames)
                 }
             }
         }
@@ -274,9 +290,7 @@ struct TranscriptPane: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     if let speakerID = utterance.speakerID {
-                        Text(displayName(for: speakerID))
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundStyle(color(for: speakerID))
+                        speakerNameLabel(for: speakerID)
                     }
                     Spacer()
                     Text(timestamp(utterance.start))
@@ -370,6 +384,133 @@ struct TranscriptPane: View {
             .padding(.leading, 40)  // aligns with the text column (22pt avatar + spacing)
     }
 
+    /// Speaker name in a transcript row. When renaming is available (saved
+    /// transcripts only — never live), unnamed speakers get a dashed
+    /// underline affordance and open the rename popover on click (§8e).
+    /// Renamed speakers just show the custom name; the popover is still
+    /// reachable so a rename can be corrected later.
+    @ViewBuilder
+    private func speakerNameLabel(for speakerID: String) -> some View {
+        let name = displayName(for: speakerID)
+        let isCustomName = speakerNames[speakerID]?.isEmpty == false
+        let canRename = !isLive && onRenameSpeaker != nil
+
+        Text(name)
+            .font(.system(size: 11.5, weight: .semibold))
+            .foregroundStyle(color(for: speakerID))
+            .overlay(alignment: .bottom) {
+                if canRename, !isCustomName {
+                    Rectangle()
+                        .fill(Tokens.textTertiary.opacity(0.5))
+                        .frame(height: 1)
+                        .mask(dashedLine)
+                        .offset(y: 2)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard canRename else { return }
+                beginRenaming(speakerID)
+            }
+            .popover(isPresented: renamingBinding(for: speakerID), arrowEdge: .bottom) {
+                renamePopover(for: speakerID)
+            }
+    }
+
+    /// Dashed-underline mask (design handoff v2 §8e: `1px dashed rgba(255,255,255,.3)`).
+    private var dashedLine: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<20, id: \.self) { _ in
+                Rectangle().frame(width: 2, height: 1)
+            }
+        }
+    }
+
+    private func renamingBinding(for speakerID: String) -> Binding<Bool> {
+        Binding(
+            get: { renamingSpeakerID == speakerID },
+            set: { isPresented in
+                if !isPresented, renamingSpeakerID == speakerID {
+                    renamingSpeakerID = nil
+                }
+            }
+        )
+    }
+
+    private func beginRenaming(_ speakerID: String) {
+        renameDraft = speakerNames[speakerID] ?? ""
+        renamingSpeakerID = speakerID
+        renameFieldFocused = true
+    }
+
+    /// "Rename Speaker N" popover (§8e): focused text field, suggestion chips
+    /// from attendees + "Me", segment count, blue Rename button. Return
+    /// submits the same as clicking Rename.
+    private func renamePopover(for speakerID: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Rename \(displayName(for: speakerID))")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(Tokens.textSecondary)
+
+            TextField("Name", text: $renameDraft)
+                .textFieldStyle(.roundedBorder)
+                .focused($renameFieldFocused)
+                .onSubmit { commitRename(speakerID) }
+
+            if !suggestionChips.isEmpty {
+                HStack(spacing: 5) {
+                    ForEach(suggestionChips, id: \.self) { suggestion in
+                        Button {
+                            renameDraft = suggestion
+                        } label: {
+                            Text(suggestion)
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(Tokens.textBody.opacity(0.85))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Tokens.chipBackground, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            HStack(spacing: 6) {
+                Text("Renames all \(segmentCount(for: speakerID)) segments")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Tokens.textTertiary)
+                Spacer()
+                Button("Rename") { commitRename(speakerID) }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Tokens.accentBlue)
+                    .controlSize(.small)
+                    .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(13)
+        .frame(width: 250)
+    }
+
+    private func commitRename(_ speakerID: String) {
+        let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        onRenameSpeaker?(speakerID, trimmed)
+        renamingSpeakerID = nil
+    }
+
+    /// Suggestion chips: meeting attendees + "Me" (design handoff v2 §8e).
+    private var suggestionChips: [String] {
+        var chips = attendees
+        chips.append("Me")
+        return chips
+    }
+
+    /// Number of utterances attributed to `speakerID` — shown in the popover
+    /// caption so a rename's blast radius is clear before committing.
+    private func segmentCount(for speakerID: String) -> Int {
+        utterances.filter { $0.speakerID == speakerID }.count
+    }
+
     /// Footer shown only while the meeting behind this pane is actively
     /// transcribing: "Transcribing · N%" + a thin progress bar (§6b).
     ///
@@ -420,7 +561,7 @@ struct TranscriptPane: View {
     // the on-screen transcript and clipboard copies never drift apart.
 
     private func displayName(for speakerID: String) -> String {
-        TranscriptFormatter.speakerDisplayName(speakerID)
+        TranscriptFormatter.speakerDisplayName(speakerID, speakerNames: speakerNames)
     }
 
     private func color(for speakerID: String) -> Color {

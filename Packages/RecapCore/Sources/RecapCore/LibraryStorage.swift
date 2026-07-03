@@ -20,6 +20,7 @@ public struct MeetingRecord: Equatable, Sendable, Identifiable {
     public var enhancedURL: URL { folderURL.appendingPathComponent("enhanced.md") }
     public var transcriptURL: URL { folderURL.appendingPathComponent("transcript.json") }
     public var metadataURL: URL { folderURL.appendingPathComponent("meeting.json") }
+    public var speakerNamesURL: URL { folderURL.appendingPathComponent("speakers.json") }
 }
 
 /// Reads and writes the user-visible meeting library on disk.
@@ -160,6 +161,23 @@ public struct LibraryStorage: Sendable {
         guard FileManager.default.fileExists(atPath: record.transcriptURL.path) else { return nil }
         return try logOnFailure("loadTranscript") {
             try Self.decoder.decode(Transcript.self, from: Data(contentsOf: record.transcriptURL))
+        }
+    }
+
+    /// Per-meeting speaker renames (design handoff v2 §8e). Scope is
+    /// intentionally per-meeting only — no cross-meeting voice-print identity.
+    public func saveSpeakerNames(_ speakerNames: SpeakerNames, in record: MeetingRecord) throws {
+        try logOnFailure("saveSpeakerNames") {
+            try Self.encoder.encode(speakerNames).write(to: record.speakerNamesURL, options: .atomic)
+        }
+    }
+
+    /// Empty mapping when `speakers.json` doesn't exist yet — every speaker
+    /// still unnamed is the common case, not an error.
+    public func loadSpeakerNames(in record: MeetingRecord) throws -> SpeakerNames {
+        guard FileManager.default.fileExists(atPath: record.speakerNamesURL.path) else { return SpeakerNames() }
+        return try logOnFailure("loadSpeakerNames") {
+            try Self.decoder.decode(SpeakerNames.self, from: Data(contentsOf: record.speakerNamesURL))
         }
     }
 

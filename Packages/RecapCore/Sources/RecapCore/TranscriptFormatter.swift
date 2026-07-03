@@ -6,19 +6,23 @@ import Foundation
 /// speaker display-name convention — the transcript UI uses it too, so copied
 /// text always matches what's on screen.
 public enum TranscriptFormatter {
-    public static func plainText(utterances: [Utterance]) -> String {
+    public static func plainText(utterances: [Utterance], speakerNames: [String: String] = [:]) -> String {
         utterances.map { utterance in
             let stamp = "[\(timestamp(utterance.start))]"
             if let speakerID = utterance.speakerID {
-                return "\(stamp) \(speakerDisplayName(speakerID)): \(utterance.text)"
+                return "\(stamp) \(speakerDisplayName(speakerID, speakerNames: speakerNames)): \(utterance.text)"
             }
             return "\(stamp) \(utterance.text)"
         }
         .joined(separator: "\n")
     }
 
-    /// "S1" → "Speaker 1"; unrecognized IDs pass through unchanged.
-    public static func speakerDisplayName(_ speakerID: String) -> String {
+    /// Resolves a display name for `speakerID`, in precedence order:
+    /// 1. A custom name from `speakerNames` (per-meeting rename), if present.
+    /// 2. "S1" → "Speaker 1" for recognized diarization labels.
+    /// 3. The raw ID, unchanged, for anything else.
+    public static func speakerDisplayName(_ speakerID: String, speakerNames: [String: String] = [:]) -> String {
+        if let custom = speakerNames[speakerID], !custom.isEmpty { return custom }
         if let number = speakerNumber(speakerID) { return "Speaker \(number)" }
         return speakerID
     }
