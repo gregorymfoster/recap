@@ -42,8 +42,17 @@ private final class FakeRecordPrompter: RecordPrompting {
     }
 }
 
+// Serialized: these tests exercise real elapsed-time behavior (debounce
+// windows, change-bus subscription races) via ContinuousClock/Task.sleep.
+// Swift Testing parallelizes every @Test in a suite by default, and on a
+// shared/CPU-constrained CI runner that contention can stretch Task.sleep
+// scheduling by 2x+ (observed: nominal 60s retry budgets manifesting as
+// ~120-270s of real wall-clock time in CI logs) — enough to blow through
+// even generous internal timeouts. Running this suite's tests one at a
+// time removes that contention at the source, which is more robust than
+// continuing to raise timeout constants to chase an inflating multiplier.
 @MainActor
-@Suite struct AppStoresTests {
+@Suite(.serialized) struct AppStoresTests {
     private func makeStorage() -> LibraryStorage {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AppStoresTests-\(UUID().uuidString)")
