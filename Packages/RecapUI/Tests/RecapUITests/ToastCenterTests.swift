@@ -1,7 +1,26 @@
 import Testing
 @testable import RecapUI
 
-@Suite struct ToastCenterTests {
+/// Serialized because the auto-dismiss timing assertions are sensitive to CPU
+/// contention: under the RecapUI target's default cross-suite parallelism on a
+/// loaded CI runner, the internal dismissal timer and a test's own wait race
+/// and stretch non-proportionally. Serialization plus `waitUntil` polling (vs.
+/// fixed-margin sleep-then-assert) removes both sources of flakiness.
+@Suite(.serialized) struct ToastCenterTests {
+    /// Polls `condition` until it holds or the timeout elapses. Robust to CI
+    /// schedulers that stretch timer scheduling, unlike a single fixed sleep.
+    @MainActor
+    private func waitUntil(
+        _ timeout: Duration = .seconds(2),
+        _ condition: () -> Bool
+    ) async {
+        let start = ContinuousClock.now
+        while ContinuousClock.now - start < timeout {
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     @MainActor
     @Test func showPresentsImmediatelyWhenIdle() {
         let center = ToastCenter()
@@ -39,7 +58,7 @@ import Testing
         let center = ToastCenter(dismissDelay: .milliseconds(30))
         center.show("Fleeting")
         #expect(center.current?.message == "Fleeting")
-        try await Task.sleep(for: .milliseconds(120))
+        await waitUntil { center.current == nil }
         #expect(center.current == nil)
     }
 
@@ -53,7 +72,7 @@ import Testing
         // AND second not yet gone) that flaked under CI test-parallelism, where
         // the two independent timers don't stretch together under load.
         center.show("Second", actionTitle: "Act") {}
-        try await Task.sleep(for: .milliseconds(200))
+        await waitUntil { center.current?.message == "Second" }
         #expect(center.current?.message == "Second")
     }
 
@@ -90,7 +109,7 @@ import Testing
         // advance the queue, then confirm the plain one still times out.
         center.dismissCurrent()
         #expect(center.current?.message == "Plain follow-up")
-        try await Task.sleep(for: .milliseconds(120))
+        await waitUntil { center.current == nil }
         #expect(center.current == nil)
     }
 }
