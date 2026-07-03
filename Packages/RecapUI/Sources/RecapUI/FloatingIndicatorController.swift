@@ -17,7 +17,12 @@ import SwiftUI
 public final class FloatingIndicatorController {
     private let stores: AppStores
     private var panel: NSPanel?
-    private var isAppActive = NSApp.isActive
+    // `NSApp` is still nil when this controller is constructed in
+    // `RecapApp.init` (before `NSApplicationMain` finishes wiring the shared
+    // application), so reading `NSApp.isActive` there force-unwrap-crashes on
+    // launch. The app isn't active yet at init regardless; the first
+    // `didBecomeActiveNotification` (observed below) flips this true.
+    private var isAppActive = NSApp?.isActive ?? false
     private var notificationTokens: [NSObjectProtocol] = []
     /// Position the user dragged the panel to this session; reused across
     /// show/hide cycles instead of resetting to the default corner. Not
