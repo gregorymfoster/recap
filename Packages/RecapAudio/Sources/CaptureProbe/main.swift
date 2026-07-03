@@ -11,9 +11,18 @@ import RecapAudio
 //   --list-devices        Print input devices (id, name, uid) and exit.
 //   --device <uid>         Bind explicitly to this device's persistent UID
 //                          (see --list-devices) instead of the system default.
+//   --pause-test           Record ~2s → pause ~2s → resume ~2s → stop, then
+//                          assert the m4a duration AND stop()'s elapsed are
+//                          both ≈4s (±0.5) — proof paused audio isn't written.
 //   <seconds>              Positional; how long to record (default 5).
 
 var arguments = Array(CommandLine.arguments.dropFirst())
+
+var pauseTest = false
+if let flagIndex = arguments.firstIndex(of: "--pause-test") {
+    arguments.remove(at: flagIndex)
+    pauseTest = true
+}
 
 if let listIndex = arguments.firstIndex(of: "--list-devices") {
     arguments.remove(at: listIndex)
@@ -79,19 +88,44 @@ func run() async {
         return (chunkCount, sampleCount, peakLevel)
     }
 
-    try? await Task.sleep(for: .seconds(seconds))
+    if pauseTest {
+        print("pause test: ~2s record → pause ~2s → resume → ~2s record → stop")
+        try? await Task.sleep(for: .seconds(2))
+        await recorder.pause()
+        print("paused (recorder.isPaused: \(recorder.isPaused))")
+        try? await Task.sleep(for: .seconds(2))
+        await recorder.resume()
+        print("resumed (recorder.isPaused: \(recorder.isPaused))")
+        try? await Task.sleep(for: .seconds(2))
+    } else {
+        try? await Task.sleep(for: .seconds(seconds))
+    }
     let duration = await recorder.stop()
     let (chunkCount, sampleCount, peak) = await statsTask.value
 
     print(String(format: "duration: %.1fs", duration))
     print("16k chunks: \(chunkCount), samples: \(sampleCount) (≈\(sampleCount / 16_000)s)")
     print(String(format: "peak amplitude: %.4f", peak))
-    if let audioFile = try? AVAudioFile(forReading: url) {
-        let fileSeconds = Double(audioFile.length) / audioFile.fileFormat.sampleRate
-        print(String(format: "file: %@ (%.1fs @ %.0f Hz)", url.lastPathComponent, fileSeconds, audioFile.fileFormat.sampleRate))
-    } else {
+    guard let audioFile = try? AVAudioFile(forReading: url) else {
         print("FAIL: output file unreadable")
         exit(1)
+    }
+    let fileSeconds = Double(audioFile.length) / audioFile.fileFormat.sampleRate
+    print(String(format: "file: %@ (%.1fs @ %.0f Hz)", url.lastPathComponent, fileSeconds, audioFile.fileFormat.sampleRate))
+
+    if pauseTest {
+        // ~6s of wall time passed but only ~4s were active; both the file on
+        // disk and stop()'s returned elapsed must reflect active time only.
+        let fileOK = abs(fileSeconds - 4.0) <= 0.5
+        let elapsedOK = abs(duration - 4.0) <= 0.5
+        print(String(format: "pause test: file %.2fs (want 4±0.5) %@, stop() %.2fs (want 4±0.5) %@",
+                     fileSeconds, fileOK ? "OK" : "FAIL",
+                     duration, elapsedOK ? "OK" : "FAIL"))
+        guard fileOK, elapsedOK else {
+            print("FAIL: pause test out of tolerance")
+            exit(1)
+        }
+        print("PASS: paused audio was not written")
     }
     exit(sampleCount > 0 ? 0 : 1)
 }

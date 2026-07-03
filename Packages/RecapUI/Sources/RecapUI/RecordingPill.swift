@@ -1,9 +1,14 @@
+import RecapCore
 import SwiftUI
 
 /// The floating dark capsule shown while recording (design mock 1a):
-/// pulsing red dot, elapsed timer, live waveform, "local" caption, Stop.
+/// pulsing red dot, elapsed timer, live waveform, "local" caption,
+/// pause/resume, Stop. While paused the dot goes static amber, a PAUSED
+/// micro-label appears, and the timer freezes to a static string (a ticking
+/// `Text(style: .timer)` cannot be frozen — rendering switches instead).
 struct RecordingPill: View {
-    var startedAt: Date
+    var clock: RecordingClock
+    var isPaused: Bool
     var levels: [Float]
     /// Name of the mic in use, when it's known — shown as a small hoverable
     /// label so the pill stays compact but the device is still visible.
@@ -12,16 +17,22 @@ struct RecordingPill: View {
     /// snippet under the waveform so confidence is visible even without the
     /// main window open — the whole point of the light streaming pass.
     var lastHeardText: String?
+    var onPauseToggle: () -> Void
     var onStop: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 14) {
-                PulsingDot()
-                TimelineView(.periodic(from: startedAt, by: 1)) { context in
-                    Text(elapsedLabel(at: context.date))
-                        .font(Tokens.timer)
-                        .foregroundStyle(.white)
+                PulsingDot(
+                    color: isPaused ? Tokens.warningAmber : Tokens.recordRed,
+                    pulsing: !isPaused
+                )
+                timer
+                if isPaused {
+                    Text("PAUSED")
+                        .font(Tokens.microLabel)
+                        .foregroundStyle(Tokens.warningAmber)
+                        .fixedSize()
                 }
                 waveform
                 HStack(spacing: 8) {
@@ -48,6 +59,16 @@ struct RecordingPill: View {
                         .frame(width: 1, height: 18)
                 }
                 .help(inputDeviceName.map { "Recording from \($0)" } ?? "")
+                Button(action: onPauseToggle) {
+                    Image(systemName: isPaused ? "play.fill" : "pause.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Tokens.textPrimary)
+                        .frame(width: 27, height: 27)
+                        .background(.white, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("p", modifiers: [.command, .option])
+                .help(isPaused ? "Resume recording (⌥⌘P)" : "Pause recording (⌥⌘P)")
                 Button(action: onStop) {
                     Text("Stop")
                         .font(.system(size: 12, weight: .semibold))
@@ -84,6 +105,23 @@ struct RecordingPill: View {
         .animation(.easeOut(duration: 0.15), value: lastHeardText)
     }
 
+    /// Running: a TimelineView ticking from the clock's synthetic start date
+    /// (so pauses already served are folded in). Paused: a static string.
+    @ViewBuilder private var timer: some View {
+        if isPaused {
+            Text(Self.elapsedLabel(seconds: Int(clock.elapsed(at: .now))))
+                .font(Tokens.timer)
+                .foregroundStyle(.white.opacity(0.7))
+        } else {
+            let start = clock.syntheticStartDate(at: .now)
+            TimelineView(.periodic(from: start, by: 1)) { context in
+                Text(Self.elapsedLabel(seconds: max(0, Int(context.date.timeIntervalSince(start)))))
+                    .font(Tokens.timer)
+                    .foregroundStyle(.white)
+            }
+        }
+    }
+
     private var waveform: some View {
         HStack(spacing: 2.5) {
             ForEach(levels.indices, id: \.self) { i in
@@ -96,8 +134,7 @@ struct RecordingPill: View {
         .animation(.easeOut(duration: 0.12), value: levels)
     }
 
-    private func elapsedLabel(at date: Date) -> String {
-        let seconds = max(0, Int(date.timeIntervalSince(startedAt)))
+    static func elapsedLabel(seconds: Int) -> String {
         if seconds >= 3600 {
             return String(format: "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
         }
@@ -107,6 +144,9 @@ struct RecordingPill: View {
 
 struct PulsingDot: View {
     var color: Color = Tokens.recordRed
+    /// False renders a steady dot (paused state) — a repeating animation
+    /// must not keep breathing once the recording is frozen.
+    var pulsing: Bool = true
     var size: CGFloat = 9
     @State private var dimmed = false
 
@@ -114,25 +154,47 @@ struct PulsingDot: View {
         Circle()
             .fill(color)
             .frame(width: size, height: size)
-            .opacity(dimmed ? 0.35 : 1)
-            .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: dimmed)
-            .onAppear { dimmed = true }
+            .opacity(pulsing && dimmed ? 0.35 : 1)
+            .animation(
+                pulsing ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : .easeOut(duration: 0.15),
+                value: dimmed
+            )
+            .onAppear { dimmed = pulsing }
+            .onChange(of: pulsing) { _, pulsing in
+                dimmed = pulsing
+            }
     }
 }
 
 #Preview {
     VStack(spacing: 24) {
         RecordingPill(
-            startedAt: .now.addingTimeInterval(-1453),
+            clock: RecordingClock(startedAt: .now.addingTimeInterval(-1453)),
+            isPaused: false,
             levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
             inputDeviceName: "AirPods Pro",
             lastHeardText: "…so I think we should ship the onboarding revamp next sprint.",
+            onPauseToggle: {},
             onStop: {}
         )
         RecordingPill(
-            startedAt: .now.addingTimeInterval(-1453),
+            clock: RecordingClock(startedAt: .now.addingTimeInterval(-1453)),
+            isPaused: false,
             levels: (0..<16).map { _ in Float.random(in: 0.1...0.9) },
             inputDeviceName: "AirPods Pro",
+            onPauseToggle: {},
+            onStop: {}
+        )
+        RecordingPill(
+            clock: {
+                var clock = RecordingClock(startedAt: .now.addingTimeInterval(-1453))
+                clock.pause(at: .now)
+                return clock
+            }(),
+            isPaused: true,
+            levels: [Float](repeating: 0, count: 16),
+            inputDeviceName: "AirPods Pro",
+            onPauseToggle: {},
             onStop: {}
         )
     }

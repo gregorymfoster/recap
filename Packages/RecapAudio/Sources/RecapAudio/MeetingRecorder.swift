@@ -40,7 +40,13 @@ public final class MeetingRecorder {
     private var systemTap: SystemAudioTap?
     private var engine: MixerEngine?
     private var pumpTasks: [Task<Void, Never>] = []
-    private var startedAt: Date?
+
+    /// Active-time bookkeeping for the current recording; nil while stopped.
+    /// `stop()` returns its elapsed active time, so paused stretches never
+    /// count toward the meeting duration.
+    public private(set) var clock: RecordingClock?
+
+    public var isPaused: Bool { clock?.isPaused ?? false }
 
     /// False when the system-audio tap couldn't start (permission denied or
     /// hardware trouble) and the recording is mic-only.
@@ -135,8 +141,27 @@ public final class MeetingRecorder {
             throw error
         }
 
-        startedAt = .now
+        clock = RecordingClock(startedAt: .now)
         return Output(chunks: chunks, levels: levels, events: events)
+    }
+
+    /// Gates capture at the mixer — both engines keep running (tearing them
+    /// down would re-enter the tap-permission and mic-rebuild paths), but no
+    /// samples reach the files or the streaming pass, so paused seconds
+    /// simply don't exist in the output. Awaits the mixer hop so the UI's
+    /// paused state and the sample gate can never disagree.
+    public func pause() async {
+        guard let engine, var clock, !clock.isPaused else { return }
+        await engine.setPaused(true)
+        clock.pause(at: .now)
+        self.clock = clock
+    }
+
+    public func resume() async {
+        guard let engine, var clock, clock.isPaused else { return }
+        await engine.setPaused(false)
+        clock.resume(at: .now)
+        self.clock = clock
     }
 
     @discardableResult
@@ -151,8 +176,8 @@ public final class MeetingRecorder {
         pumpTasks = []
         await engine?.finish()
         engine = nil
-        defer { startedAt = nil }
-        return startedAt.map { Date.now.timeIntervalSince($0) } ?? 0
+        defer { clock = nil }
+        return clock?.elapsed(at: .now) ?? 0
     }
 }
 
@@ -174,6 +199,10 @@ private actor MixerEngine {
     /// 0–2 samples carried between blocks so 3:1 decimation never drops audio.
     private var downsampleCarry: [Float] = []
     private var chunkPosition: TimeInterval = 0
+    /// While true, incoming samples are dropped at the gate — nothing reaches
+    /// the files, the level stream, or the 16 kHz chunk stream. `chunkPosition`
+    /// keeps counting active time only, so live timestamps stay file-aligned.
+    private var paused = false
 
     /// A handful of consecutive failures means the disk is genuinely stuck,
     /// not a transient hiccup.
@@ -227,11 +256,27 @@ private actor MixerEngine {
     }
 
     func pushMic(_ samples: [Float]) {
+        guard !paused else { return }
         emit(buffer.pushMic(samples))
     }
 
     func pushSystem(_ samples: [Float]) {
+        guard !paused else { return }
         emit(buffer.pushSystem(samples))
+    }
+
+    /// Opens/closes the sample gate. On pausing, the unpaired mic/system tail
+    /// is written first (mirroring `finish()`) rather than stitched across
+    /// the gap, and the decimation carry is reset so the pause boundary is
+    /// clean. `finish()` while paused stays legal — the buffer is empty, so
+    /// its flush is a no-op.
+    func setPaused(_ value: Bool) {
+        guard value != paused else { return }
+        if value {
+            emit(buffer.flushRemainder())
+            downsampleCarry = []
+        }
+        paused = value
     }
 
     /// Drains the tail, closes the files, and ends the output streams.

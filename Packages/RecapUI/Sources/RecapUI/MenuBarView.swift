@@ -1,9 +1,11 @@
 import AppKit
+import RecapCore
 import SwiftUI
 
 /// Menu bar extra: start/stop recording and jump to meetings without the app
 /// frontmost. The label carries the live state — a red dot plus ticking
-/// elapsed time while recording, the waveform glyph otherwise.
+/// elapsed time while recording (a pause glyph plus frozen time while
+/// paused), the waveform glyph otherwise.
 public struct MenuBarLabel: View {
     private let stores: AppStores
 
@@ -12,11 +14,19 @@ public struct MenuBarLabel: View {
     }
 
     public var body: some View {
-        if let startedAt = stores.session.startedAt {
+        if let clock = stores.session.clock {
             HStack(spacing: 4) {
-                Image(systemName: "record.circle.fill")
-                Text(startedAt, style: .timer)
-                    .monospacedDigit()
+                if stores.session.isPaused {
+                    Image(systemName: "pause.circle.fill")
+                    // A ticking Text(style: .timer) can't freeze — render the
+                    // frozen elapsed time as a plain string while paused.
+                    Text(RecordingPill.elapsedLabel(seconds: Int(clock.elapsed(at: .now))))
+                        .monospacedDigit()
+                } else {
+                    Image(systemName: "record.circle.fill")
+                    Text(clock.syntheticStartDate(at: .now), style: .timer)
+                        .monospacedDigit()
+                }
             }
         } else {
             Image(systemName: "waveform")
@@ -39,6 +49,10 @@ public struct MenuBarContent: View {
                 stores.stopRecording()
             }
             .keyboardShortcut("r", modifiers: [.command, .option])
+            Button(stores.session.isPaused ? "Resume Recording" : "Pause Recording") {
+                stores.togglePause()
+            }
+            .keyboardShortcut("p", modifiers: [.command, .option])
             if let record = stores.session.activeRecord {
                 Button("Open Meeting Notes") {
                     stores.showMeeting(record.meeting.id)

@@ -164,6 +164,20 @@ public final class AppStores {
         session.isRecording ? stopRecording() : startRecording()
     }
 
+    /// Pause/resume gate capture without ending the meeting. ⌥⌘P is a local
+    /// shortcut only (pill + menu bar extra) — no new GlobalHotKey in v1.
+    public func pauseRecording() {
+        Task { await session.pause() }
+    }
+
+    public func resumeRecording() {
+        Task { await session.resume() }
+    }
+
+    public func togglePause() {
+        session.isPaused ? resumeRecording() : pauseRecording()
+    }
+
     /// Navigates to a meeting (used by the menu bar extra's jump items).
     public func showMeeting(_ id: UUID) {
         router.section = .library

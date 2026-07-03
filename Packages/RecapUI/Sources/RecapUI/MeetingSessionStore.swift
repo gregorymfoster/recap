@@ -10,7 +10,9 @@ import RecapCore
 @Observable
 public final class MeetingSessionStore {
     public private(set) var activeRecord: MeetingRecord?
-    public private(set) var startedAt: Date?
+    /// Active-time clock for the current recording; nil while stopped.
+    /// A struct — pause/resume reassign it so @Observable sees the change.
+    public private(set) var clock: RecordingClock?
     /// Rolling window of recent RMS levels driving the pill's waveform bars.
     public private(set) var levels: [Float] = MeetingSessionStore.idleLevels
     public private(set) var permissionDenied = false
@@ -63,7 +65,11 @@ public final class MeetingSessionStore {
 
     public init() {}
 
+    /// Paused still counts as recording — every guard, calendar suppression,
+    /// and `isLiveMeeting` check keys off the active record, not the clock.
     public var isRecording: Bool { activeRecord != nil }
+
+    public var isPaused: Bool { clock?.isPaused ?? false }
 
     /// Starts capture; when a transcription engine is available, live
     /// transcription runs alongside it feeding the split view.
@@ -88,7 +94,7 @@ public final class MeetingSessionStore {
             )
             systemAudioUnavailable = includeSystemAudio && !recorder.systemAudioActive
             activeRecord = record
-            startedAt = .now
+            clock = recorder.clock ?? RecordingClock(startedAt: .now)
             liveTranscript = LiveTranscriptState()
             activeInputDeviceName = recorder.activeInputDeviceName
             levelTask = Task { [weak self] in
@@ -164,6 +170,27 @@ public final class MeetingSessionStore {
         liveTranscript = liveTranscript.applying(update)
     }
 
+    // MARK: Pause / resume
+
+    /// Gates capture without tearing anything down. Awaits the recorder (and
+    /// its mixer-actor hop) so the published paused state can't run ahead of
+    /// the sample gate.
+    public func pause() async {
+        guard isRecording, !isPaused else { return }
+        await recorder.pause()
+        // Reassign the struct — mutating in place wouldn't notify observers.
+        clock = recorder.clock
+        // The gated mixer stops yielding levels; flatten the waveform now
+        // instead of freezing it mid-utterance.
+        levels = Self.idleLevels
+    }
+
+    public func resume() async {
+        guard isRecording, isPaused else { return }
+        await recorder.resume()
+        clock = recorder.clock
+    }
+
     /// Stops capture and returns the finished record with its duration.
     @discardableResult
     public func stop() async -> (record: MeetingRecord, duration: TimeInterval)? {
@@ -176,7 +203,7 @@ public final class MeetingSessionStore {
         eventTask?.cancel()
         eventTask = nil
         activeRecord = nil
-        startedAt = nil
+        clock = nil
         levels = Self.idleLevels
         systemAudioUnavailable = false
         liveTranscript = LiveTranscriptState()

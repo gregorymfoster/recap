@@ -45,14 +45,14 @@ public struct RootView: View {
             detail
         }
         .overlay(alignment: .bottom) {
-            if let startedAt = session.startedAt {
+            if let clock = session.clock {
                 RecordingPill(
-                    startedAt: startedAt, levels: session.levels,
+                    clock: clock, isPaused: session.isPaused, levels: session.levels,
                     inputDeviceName: session.activeInputDeviceName,
-                    lastHeardText: session.lastHeardText
-                ) {
-                    stores.stopRecording()
-                }
+                    lastHeardText: session.lastHeardText,
+                    onPauseToggle: { stores.togglePause() },
+                    onStop: { stores.stopRecording() }
+                )
                 .padding(.bottom, 22)
             }
         }
@@ -71,7 +71,7 @@ public struct RootView: View {
             // Lift above the recording pill (~64pt tall + 22pt bottom
             // padding) when one is showing, so the two don't collide — the
             // system-audio-fallback toast fires right as recording starts.
-            ToastOverlay(toasts: stores.toasts, bottomInset: session.startedAt != nil ? 96 : 12)
+            ToastOverlay(toasts: stores.toasts, bottomInset: session.clock != nil ? 96 : 12)
         }
         .background {
             // Global ⌘K without a visible control.
