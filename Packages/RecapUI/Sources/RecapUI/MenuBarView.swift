@@ -3,9 +3,12 @@ import RecapCore
 import SwiftUI
 
 /// Menu bar extra: start/stop recording and jump to meetings without the app
-/// frontmost. The label carries the live state — a red dot plus ticking
+/// frontmost. The label carries the live state — a red dot plus per-second
 /// elapsed time while recording (a pause glyph plus frozen time while
-/// paused), the waveform glyph otherwise.
+/// paused), the waveform glyph otherwise. The elapsed time is a plain string
+/// ticked once per second by `MeetingSessionStore` — never `.timer` Text or
+/// `TimelineView`, which peg the CPU inside a MenuBarExtra label (see
+/// `MenuBarLabel.body`).
 public struct MenuBarLabel: View {
     private let stores: AppStores
 
@@ -14,19 +17,18 @@ public struct MenuBarLabel: View {
     }
 
     public var body: some View {
-        if let clock = stores.session.clock {
+        // No time-varying SwiftUI content here — `.timer` Text AND periodic
+        // TimelineView both degenerate into a zero-delay status-item render
+        // loop inside a MenuBarExtra label (100% CPU, unbounded memory;
+        // sampled live on macOS 26.4: MenuBarExtraHost.requestUpdate →
+        // setImage in every stack). The label renders only plain state;
+        // MeetingSessionStore mutates `menuBarElapsedLabel` once per second,
+        // so the label re-renders exactly once per visible tick.
+        if let elapsed = stores.session.menuBarElapsedLabel {
             HStack(spacing: 4) {
-                if stores.session.isPaused {
-                    Image(systemName: "pause.circle.fill")
-                    // A ticking Text(style: .timer) can't freeze — render the
-                    // frozen elapsed time as a plain string while paused.
-                    Text(RecordingPill.elapsedLabel(seconds: Int(clock.elapsed(at: .now))))
-                        .monospacedDigit()
-                } else {
-                    Image(systemName: "record.circle.fill")
-                    Text(clock.syntheticStartDate(at: .now), style: .timer)
-                        .monospacedDigit()
-                }
+                Image(systemName: stores.session.isPaused ? "pause.circle.fill" : "record.circle.fill")
+                Text(elapsed)
+                    .monospacedDigit()
             }
         } else if stores.updateStatus.isAvailable {
             // Idle, but a new version is ready — signal it in the menu bar.

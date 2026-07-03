@@ -159,6 +159,24 @@ private struct FakeError: Error {}
         _ = await store.stop()
     }
 
+    /// The menu bar's elapsed label is plain observable state ticked by the
+    /// store — never SwiftUI time machinery, which loops a MenuBarExtra
+    /// label at 100% CPU. Guards that the label appears on start and is
+    /// cleared on stop.
+    @Test func menuBarElapsedLabelSetOnStartClearedOnStop() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (store, _) = makeStore()
+        let record = makeRecord(in: dir)
+
+        #expect(store.menuBarElapsedLabel == nil)
+        await store.start(record: record, includeSystemAudio: true, includeMic: true)
+        #expect(store.menuBarElapsedLabel == "0:00")
+
+        _ = await store.stop()
+        #expect(store.menuBarElapsedLabel == nil)
+    }
+
     @Test func startMapsAlreadyStartingToStartFailureMessage() async throws {
         let dir = try tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

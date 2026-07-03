@@ -64,6 +64,21 @@ public final class MeetingSessionStore {
     private var transcriptTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
 
+    /// Elapsed-time string ("12:34") for the menu bar extra's label, updated
+    /// at most once per second while recording; nil when idle.
+    ///
+    /// Deliberately plain observable state, NOT SwiftUI time machinery: any
+    /// continuously-animating content inside a `MenuBarExtra` label — a
+    /// `.timer`-style `Text` or a `TimelineView` — makes SwiftUI re-render
+    /// the status-item image in a zero-delay loop (main thread pinned at
+    /// 100% CPU, unbounded memory growth; reproduced and sampled on
+    /// macOS 26.4). A string that only mutates when the visible second
+    /// changes re-renders the label exactly once per tick, and not at all
+    /// while paused.
+    public private(set) var menuBarElapsedLabel: String?
+    private var menuBarLabelTask: Task<Void, Never>?
+    private let menuBarTick: () async -> Void
+
     /// Called when the session stops itself (write failure) rather than via
     /// the user; AppStores routes this through the normal stop flow so the
     /// meeting still gets transcribed.
@@ -77,14 +92,28 @@ public final class MeetingSessionStore {
     ///     Tests inject a stub to force `preflight(...)` outcomes.
     ///   - probeSystemAudio: Defaults to the real tap probe. Tests inject a
     ///     stub to force `preflight(...)` outcomes without touching Core Audio.
+    ///   - menuBarTick: Delay between menu-bar elapsed-label refreshes;
+    ///     defaults to a 1s sleep. Tests inject an instant tick.
     public init(
         makeRecorder: @MainActor () -> MeetingRecorder = { MeetingRecorder() },
         requestMicPermission: @MainActor @escaping () async -> Bool = { await MeetingRecorder.requestMicPermission() },
-        probeSystemAudio: @MainActor @escaping () async -> SystemAudioProbeResult = { await MeetingRecorder.probeSystemAudio() }
+        probeSystemAudio: @MainActor @escaping () async -> SystemAudioProbeResult = { await MeetingRecorder.probeSystemAudio() },
+        menuBarTick: @escaping () async -> Void = { try? await Task.sleep(for: .seconds(1)) }
     ) {
         recorder = makeRecorder()
         self.requestMicPermission = requestMicPermission
         self.probeSystemAudio = probeSystemAudio
+        self.menuBarTick = menuBarTick
+    }
+
+    /// Recomputes the menu-bar label, mutating observable state only when the
+    /// visible string actually changed (pause freezes the clock, so paused
+    /// ticks are no-ops and cause no label re-render).
+    private func refreshMenuBarLabel() {
+        let label = clock.map { RecordingPill.elapsedLabel(seconds: Int($0.elapsed(at: .now))) }
+        if menuBarElapsedLabel != label {
+            menuBarElapsedLabel = label
+        }
     }
 
     /// Paused still counts as recording — every guard, calendar suppression,
@@ -138,6 +167,18 @@ public final class MeetingSessionStore {
             clock = recorder.clock ?? RecordingClock(startedAt: .now)
             liveTranscript = LiveTranscriptState()
             activeInputDeviceName = recorder.activeInputDeviceName
+            refreshMenuBarLabel()
+            menuBarLabelTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    // Copy the tick out so `self` isn't retained across the
+                    // sleep; a deallocated store ends the loop instead of
+                    // spinning on nil no-ops.
+                    guard let tick = self?.menuBarTick else { return }
+                    await tick()
+                    guard let self, !Task.isCancelled else { return }
+                    self.refreshMenuBarLabel()
+                }
+            }
             levelTask = Task { [weak self] in
                 for await level in output.levels {
                     self?.pushLevel(level)
@@ -252,6 +293,9 @@ public final class MeetingSessionStore {
         transcriptTask = nil
         eventTask?.cancel()
         eventTask = nil
+        menuBarLabelTask?.cancel()
+        menuBarLabelTask = nil
+        menuBarElapsedLabel = nil
         activeRecord = nil
         clock = nil
         levels = Self.idleLevels
