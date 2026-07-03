@@ -1,4 +1,5 @@
 import AppKit
+import RecapCore
 import RecapUI
 import Sparkle
 import SwiftUI
@@ -13,13 +14,14 @@ struct RecapApp: App {
     @State private var stores: AppStores
 
     /// Owns Sparkle and drives the in-app "update available" indicator
-    /// (`stores.updateStatus`).
-    private let updater: UpdaterModel
+    /// (`stores.updateStatus`). `nil` in dev builds — a dev build must never
+    /// update itself into the prod app, so Sparkle isn't even constructed.
+    private let updater: UpdaterModel?
 
     init() {
         let stores = AppStores()
         _stores = State(initialValue: stores)
-        updater = UpdaterModel(status: stores.updateStatus)
+        updater = AppIdentity.isDevBuild ? nil : UpdaterModel(status: stores.updateStatus)
         // The delegate adaptor is created before any @State is readable from
         // it, so hand the graph over through a static hook; the delegate
         // buffers any file-open events that arrive first.
@@ -33,7 +35,9 @@ struct RecapApp: App {
         .defaultSize(width: 1060, height: 660)
         .commands {
             CommandGroup(after: .appInfo) {
-                CheckForUpdatesView(updater: updater.updater)
+                if let updater {
+                    CheckForUpdatesView(updater: updater.updater)
+                }
             }
             CommandGroup(replacing: .appSettings) {
                 SettingsCommand(stores: stores)

@@ -30,6 +30,22 @@ Build, then launch with the `-fixtures` arg: `open <path>/Recap.app --args -fixt
 `Recap (Fixtures)` scheme in Xcode. Swaps in sample meetings and ephemeral settings — no disk
 writes, no processing queue. Use for UI work and screenshots.
 
+## Dev build vs prod
+
+Debug builds produce a fully independent **Recap Dev.app** (`com.gregfoster.recap.dev`) so a prod
+install and a dev build can coexist: separate TCC permission grants, separate UserDefaults,
+meetings in `~/Recap Dev` instead of `~/Recap`, and its own search index. Sparkle auto-update is
+never constructed in dev — a dev build must never update itself into the prod app. Release builds
+(and `Scripts/release.sh`) are unchanged: `com.gregfoster.recap`, plain `Recap.app`.
+
+```
+xcodegen && xcodebuild build -project Recap.xcodeproj -scheme Recap -destination 'platform=macOS' -derivedDataPath build/dev CODE_SIGNING_ALLOWED=NO
+open "build/dev/Build/Products/Debug/Recap Dev.app"
+```
+
+Reset permissions for a clean slate — only touches the dev app, prod is untouched:
+`tccutil reset All com.gregfoster.recap.dev`
+
 ## Verification probes
 
 Real hardware/models — the manual-verification layer for capture/transcription/enhancement

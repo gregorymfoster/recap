@@ -9,6 +9,18 @@ import Testing
         return (LibraryStorage(rootURL: root), try SearchIndex())
     }
 
+    @Test func defaultDatabaseURLIsRecapForProdBuild() {
+        let url = SearchIndex.defaultDatabaseURL(isDevBuild: false)
+        #expect(url.lastPathComponent == "index.db")
+        #expect(url.deletingLastPathComponent().lastPathComponent == "Recap")
+    }
+
+    @Test func defaultDatabaseURLIsRecapDevForDevBuild() {
+        let url = SearchIndex.defaultDatabaseURL(isDevBuild: true)
+        #expect(url.lastPathComponent == "index.db")
+        #expect(url.deletingLastPathComponent().lastPathComponent == "Recap Dev")
+    }
+
     @Test func searchFindsTextAcrossNotesTranscriptAndTitle() throws {
         let (storage, index) = try makeLibrary()
         let record = try storage.create(Meeting(title: "Roadmap review", date: .now))

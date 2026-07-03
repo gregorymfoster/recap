@@ -36,7 +36,14 @@ public struct LibraryStorage: Sendable {
     }
 
     public static var defaultRootURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Recap")
+        defaultRootURL(isDevBuild: AppIdentity.isDevBuild)
+    }
+
+    /// Pure, testable core: dev builds get their own `~/Recap Dev` tree so a
+    /// prod install and a dev build never share meeting data on disk.
+    static func defaultRootURL(isDevBuild: Bool) -> URL {
+        let folderName = isDevBuild ? "Recap Dev" : "Recap"
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(folderName)
     }
 
     // MARK: Meetings

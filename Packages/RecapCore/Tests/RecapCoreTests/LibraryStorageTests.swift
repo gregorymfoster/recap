@@ -9,6 +9,14 @@ import Testing
         return LibraryStorage(rootURL: root)
     }
 
+    @Test func defaultRootURLIsRecapForProdBuild() {
+        #expect(LibraryStorage.defaultRootURL(isDevBuild: false).lastPathComponent == "Recap")
+    }
+
+    @Test func defaultRootURLIsRecapDevForDevBuild() {
+        #expect(LibraryStorage.defaultRootURL(isDevBuild: true).lastPathComponent == "Recap Dev")
+    }
+
     @Test func createWritesFolderMetadataAndEmptyNotes() throws {
         let storage = try makeStorage()
         let meeting = Meeting(title: "Design sync", date: Date(timeIntervalSince1970: 1_780_400_000))

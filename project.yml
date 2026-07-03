@@ -37,7 +37,7 @@ targets:
     info:
       path: Recap/Info.plist
       properties:
-        CFBundleDisplayName: Recap
+        CFBundleDisplayName: $(PRODUCT_NAME)
         CFBundleShortVersionString: "0.12.1"
         CFBundleVersion: "71"
         LSMinimumSystemVersion: "26.0"
@@ -73,6 +73,10 @@ targets:
         MARKETING_VERSION: "0.12.1"
         CURRENT_PROJECT_VERSION: "71"
         ENABLE_USER_SCRIPT_SANDBOXING: true
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.gregfoster.recap.dev
+          PRODUCT_NAME: Recap Dev
 
 schemes:
   Recap:

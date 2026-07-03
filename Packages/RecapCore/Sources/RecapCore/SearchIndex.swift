@@ -37,8 +37,15 @@ public final class SearchIndex: Sendable {
     }
 
     public static var defaultDatabaseURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Recap/index.db")
+        defaultDatabaseURL(isDevBuild: AppIdentity.isDevBuild)
+    }
+
+    /// Pure, testable core: dev builds get their own `Recap Dev/index.db` so a
+    /// prod install and a dev build never share a search index.
+    static func defaultDatabaseURL(isDevBuild: Bool) -> URL {
+        let folderName = isDevBuild ? "Recap Dev" : "Recap"
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("\(folderName)/index.db")
     }
 
     private var migrator: DatabaseMigrator {
