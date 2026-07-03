@@ -24,12 +24,21 @@ struct RecordingPill: View {
                         .foregroundStyle(.white)
                 }
                 waveform
-                HStack(spacing: 4) {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 8))
-                    Text("local")
-                        .font(Tokens.microLabel)
-                        .fixedSize()
+                HStack(spacing: 8) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 8))
+                        Text("local")
+                            .font(Tokens.microLabel)
+                            .fixedSize()
+                    }
+                    if let inputDeviceName {
+                        Text(inputDeviceName)
+                            .font(Tokens.caption)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: 110, alignment: .leading)
+                    }
                 }
                 .foregroundStyle(.white.opacity(0.55))
                 .padding(.leading, 12)

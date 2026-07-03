@@ -126,7 +126,7 @@ public final class AppStores {
             } else if session.systemAudioUnavailable {
                 settings.lastSystemAudioTapFailed = true
                 toasts.show(
-                    "Recording mic only — system audio unavailable", actionTitle: "Open Settings"
+                    RecapCopy.systemAudioUnavailableMessage, actionTitle: "Open Settings"
                 ) { [weak self] in
                     self?.router.section = .settings
                 }

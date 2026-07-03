@@ -141,9 +141,9 @@ struct MeetingDetailView: View {
                     .foregroundStyle(Tokens.textSecondary)
                 OnDeviceBadge()
                 if session.systemAudioUnavailable, isLiveMeeting {
-                    Text("Other participants aren't being captured — check System Audio permission")
+                    Text(RecapCopy.systemAudioUnavailableMessage)
                         .font(Tokens.microLabel)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Tokens.warningAmberText)
                 }
             }
             HStack(spacing: 10) {

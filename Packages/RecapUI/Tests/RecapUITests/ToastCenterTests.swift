@@ -69,4 +69,25 @@ import Testing
         center.show("Plain message")
         #expect(center.current?.action == nil)
     }
+
+    @MainActor
+    @Test func actionToastDoesNotAutoDismiss() async throws {
+        let center = ToastCenter(dismissDelay: .milliseconds(30))
+        center.show("Needs action", actionTitle: "Do it") {}
+        try await Task.sleep(for: .milliseconds(120))
+        #expect(center.current?.message == "Needs action")
+    }
+
+    @MainActor
+    @Test func plainToastStillAutoDismissesWhenQueuedBehindAnActionToast() async throws {
+        let center = ToastCenter(dismissDelay: .milliseconds(30))
+        center.show("Needs action", actionTitle: "Do it") {}
+        center.show("Plain follow-up")
+        // The action toast never auto-dismisses, so manually dismiss it to
+        // advance the queue, then confirm the plain one still times out.
+        center.dismissCurrent()
+        #expect(center.current?.message == "Plain follow-up")
+        try await Task.sleep(for: .milliseconds(120))
+        #expect(center.current == nil)
+    }
 }

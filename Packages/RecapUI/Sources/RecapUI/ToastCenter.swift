@@ -81,6 +81,11 @@ public final class ToastCenter {
     private func present(_ toast: Toast) {
         current = toast
         dismissTask?.cancel()
+        dismissTask = nil
+        // Toasts with an action (e.g. "Open System Settings") persist until
+        // the user dismisses or taps the action — auto-dismissing on the
+        // usual timer risks the button vanishing before they react.
+        guard toast.action == nil else { return }
         dismissTask = Task { [weak self, dismissDelay] in
             try? await Task.sleep(for: dismissDelay)
             guard !Task.isCancelled else { return }

@@ -4,6 +4,10 @@ import SwiftUI
 /// window, above the recording pill. Attached once in RootView.
 struct ToastOverlay: View {
     var toasts: ToastCenter
+    /// Extra bottom padding for the banner, so it can lift above the
+    /// recording pill when one is showing. Defaults to the plain bottom
+    /// inset used when no pill is on screen.
+    var bottomInset: CGFloat = 12
 
     var body: some View {
         VStack {
@@ -12,7 +16,7 @@ struct ToastOverlay: View {
                 ToastBanner(toast: toast) {
                     toasts.dismissCurrent()
                 }
-                .padding(.bottom, 12)
+                .padding(.bottom, bottomInset)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }

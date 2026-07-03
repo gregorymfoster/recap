@@ -68,7 +68,10 @@ public struct RootView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            ToastOverlay(toasts: stores.toasts)
+            // Lift above the recording pill (~64pt tall + 22pt bottom
+            // padding) when one is showing, so the two don't collide — the
+            // system-audio-fallback toast fires right as recording starts.
+            ToastOverlay(toasts: stores.toasts, bottomInset: session.startedAt != nil ? 96 : 12)
         }
         .background {
             // Global ⌘K without a visible control.

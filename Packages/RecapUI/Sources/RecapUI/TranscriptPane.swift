@@ -93,6 +93,9 @@ struct TranscriptPane: View {
                     .font(Tokens.microLabel)
             }
             .foregroundStyle(Tokens.textSecondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2.5)
+            .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: Tokens.radiusChip))
         case .noModelInstalled:
             HStack(spacing: 4) {
                 Image(systemName: "arrow.down.circle")

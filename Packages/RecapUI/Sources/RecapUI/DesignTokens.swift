@@ -49,6 +49,15 @@ public enum Tokens {
     public static let timer = Font.system(size: 13, weight: .semibold).monospacedDigit()
 }
 
+/// Shared copy strings that appear in more than one place, so wording stays
+/// in sync instead of drifting into near-duplicate phrasings.
+public enum RecapCopy {
+    /// Shown in the live meeting header and the toast fired when a
+    /// recording starts without system audio.
+    public static let systemAudioUnavailableMessage =
+        "System audio isn't being captured — only your microphone is recording."
+}
+
 /// The Recap logo: rounded dark square containing three waveform bars.
 public struct RecapLogo: View {
     var size: CGFloat

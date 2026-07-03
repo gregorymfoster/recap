@@ -64,7 +64,7 @@ struct SettingsView: View {
             }
 
             Section("Recording") {
-                Picker("Microphone", selection: $settings.preferredInputUID) {
+                Picker("Input device", selection: $settings.preferredInputUID) {
                     Text("System default").tag(String?.none)
                     ForEach(inputDevices) { device in
                         Text(device.name).tag(String?.some(device.uid))
@@ -202,7 +202,7 @@ struct SettingsView: View {
     private var systemAudioStatus: PermissionStatus {
         switch settings.lastSystemAudioTapFailed {
         case .some(true): .unavailable
-        case .some(false): .granted
+        case .some(false): .workedLastTime
         case nil: .notDetermined
         }
     }
@@ -222,6 +222,11 @@ private enum PermissionStatus {
     case notDetermined
     /// System-audio only: the tap failed the last time a recording started.
     case unavailable
+    /// System-audio only: the tap succeeded the last time a recording
+    /// started. Unlike mic/calendar, there's no query API to re-verify this
+    /// live, so it's a distinct, more honest state than "Granted" — the
+    /// permission could have been revoked since.
+    case workedLastTime
 
     var label: String {
         switch self {
@@ -229,12 +234,13 @@ private enum PermissionStatus {
         case .denied: "Denied"
         case .notDetermined: "Not yet asked"
         case .unavailable: "Unavailable at last recording"
+        case .workedLastTime: "Worked at last recording"
         }
     }
 
     var color: Color {
         switch self {
-        case .granted: Tokens.successGreenText
+        case .granted, .workedLastTime: Tokens.successGreenText
         case .denied, .unavailable: Tokens.warningAmberText
         case .notDetermined: Tokens.textTertiary
         }
@@ -242,7 +248,7 @@ private enum PermissionStatus {
 
     var systemImage: String {
         switch self {
-        case .granted: "checkmark.circle.fill"
+        case .granted, .workedLastTime: "checkmark.circle.fill"
         case .denied, .unavailable: "exclamationmark.triangle.fill"
         case .notDetermined: "circle.dashed"
         }
@@ -252,7 +258,7 @@ private enum PermissionStatus {
     var showsSettingsButton: Bool {
         switch self {
         case .denied, .unavailable: true
-        case .granted, .notDetermined: false
+        case .granted, .notDetermined, .workedLastTime: false
         }
     }
 }
