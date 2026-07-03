@@ -101,14 +101,18 @@ private final class FakeRecordPrompter: RecordPrompting {
     /// `timeout`. Exports run on detached background tasks after the
     /// debounce window, so a single fixed sleep is prone to flaking under
     /// parallel test load — poll instead of guessing one wait long enough.
+    /// The default is generous (well beyond what a healthy machine needs)
+    /// because Swift Testing runs every `@Test` in this file concurrently,
+    /// and a shared, CPU-constrained CI runner can stretch `Task.sleep`
+    /// scheduling by an order of magnitude under that contention.
     private func waitForNonEmptyDirectory(
-        at url: URL, timeout: Duration = .seconds(3)
+        at url: URL, timeout: Duration = .seconds(30)
     ) async throws -> [String] {
         try await waitForDirectory(at: url, timeout: timeout) { !$0.isEmpty }
     }
 
     private func waitForDirectory(
-        at url: URL, timeout: Duration = .seconds(3),
+        at url: URL, timeout: Duration = .seconds(30),
         until predicate: ([String]) -> Bool
     ) async throws -> [String] {
         let deadline = ContinuousClock.now + timeout
@@ -133,7 +137,7 @@ private final class FakeRecordPrompter: RecordPrompting {
     /// milliseconds to run its first iteration.
     private func withRetriedPost(
         _ changeBus: LibraryChangeBus, _ change: LibraryChange, until vaultDir: URL,
-        retryInterval: Duration = .seconds(1), timeout: Duration = .seconds(10)
+        retryInterval: Duration = .seconds(1), timeout: Duration = .seconds(60)
     ) async throws -> [String] {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
@@ -246,7 +250,7 @@ private final class FakeRecordPrompter: RecordPrompting {
         try await Task.sleep(for: debounce / 2)
         #expect(!FileManager.default.fileExists(atPath: vaultDir.path))
 
-        let exported = try await waitForNonEmptyDirectory(at: vaultDir, timeout: .seconds(5))
+        let exported = try await waitForNonEmptyDirectory(at: vaultDir)
         #expect(exported.count == 1)
     }
 
