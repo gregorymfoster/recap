@@ -20,9 +20,6 @@ struct RecapApp: App {
         let stores = AppStores()
         _stores = State(initialValue: stores)
         updater = UpdaterModel(status: stores.updateStatus)
-        if ProcessInfo.processInfo.arguments.contains("-force-update-indicator") {
-            stores.updateStatus.markAvailable()
-        }
         // The delegate adaptor is created before any @State is readable from
         // it, so hand the graph over through a static hook; the delegate
         // buffers any file-open events that arrive first.
