@@ -2,9 +2,17 @@ import Foundation
 import Observation
 import SwiftUI
 
-/// A transient banner: a message, an optional action button, and how long
-/// it stays before auto-dismissing.
+/// A transient banner: a message, an optional action button, how it's
+/// tinted, and how long it stays before auto-dismissing.
 public struct Toast: Identifiable, Equatable {
+    /// Visual tint. `.warning` is the amber "something needs attention but
+    /// isn't fatal" style (design mock 6c's mic-loss toast); `.standard` is
+    /// the existing plain dark banner used for permission/error messages.
+    public enum Style: Equatable {
+        case standard
+        case warning
+    }
+
     public struct Action: Equatable {
         public let title: String
         public let handler: @MainActor () -> Void
@@ -21,10 +29,12 @@ public struct Toast: Identifiable, Equatable {
 
     public let id = UUID()
     public let message: String
+    public let style: Style
     public let action: Action?
 
-    public init(message: String, action: Action? = nil) {
+    public init(message: String, style: Style = .standard, action: Action? = nil) {
         self.message = message
+        self.style = style
         self.action = action
     }
 
@@ -62,12 +72,15 @@ public final class ToastCenter {
     }
 
     /// Convenience for the common case of a plain message with no action.
-    public func show(_ message: String, actionTitle: String? = nil, action: (@MainActor () -> Void)? = nil) {
+    public func show(
+        _ message: String, style: Toast.Style = .standard,
+        actionTitle: String? = nil, action: (@MainActor () -> Void)? = nil
+    ) {
         let toastAction: Toast.Action? = {
             guard let actionTitle, let action else { return nil }
             return Toast.Action(title: actionTitle, handler: action)
         }()
-        show(Toast(message: message, action: toastAction))
+        show(Toast(message: message, style: style, action: toastAction))
     }
 
     /// Dismisses the current toast (manual close) and advances the queue.

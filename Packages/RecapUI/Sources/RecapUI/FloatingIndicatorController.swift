@@ -6,13 +6,16 @@ import SwiftUI
 /// recording indicator whenever Recap is recording and backgrounded — the
 /// Granola-style "still recording" confidence capsule.
 ///
-/// Show/hide is driven by two independent signals, both observed without
+/// Show/hide is driven by three independent signals, all observed without
 /// polling:
 ///   - App activation: `NSApplication.didBecomeActiveNotification` /
 ///     `didResignActiveNotification` via `NotificationCenter`.
 ///   - Session state: `session.isRecording` / `session.isPaused` via a
 ///     self-re-arming `withObservationTracking` loop (the standard pattern
 ///     for observing `@Observable` state outside SwiftUI view bodies).
+///   - Settings: `settings.floatingCapsuleStyle` via the same
+///     `withObservationTracking` mechanism — flipping to `.off` hides the
+///     panel immediately even mid-recording.
 @MainActor
 public final class FloatingIndicatorController {
     private let stores: AppStores
@@ -24,13 +27,23 @@ public final class FloatingIndicatorController {
     // `didBecomeActiveNotification` (observed below) flips this true.
     private var isAppActive = NSApp?.isActive ?? false
     private var notificationTokens: [NSObjectProtocol] = []
-    /// Position the user dragged the panel to this session; reused across
-    /// show/hide cycles instead of resetting to the default corner. Not
-    /// persisted to disk — in-memory only, per the spec.
+    /// Position the user dragged the panel to, reused across show/hide
+    /// cycles instead of resetting to the default corner. Persisted to
+    /// UserDefaults so it survives relaunches too; validated against the
+    /// currently connected screens before reuse, since a saved position from
+    /// a since-disconnected external monitor must not strand the capsule
+    /// offscreen.
     private var lastOrigin: NSPoint?
+    private let positionStore: FloatingIndicatorPositionStore
+    /// Style last used to size the panel's content — tracked so a
+    /// `.minimal` ↔ `.full` change (different content width) triggers a
+    /// re-fit instead of leaving stale dead space or clipping.
+    private var lastStyle: FloatingCapsuleStyle?
 
-    public init(stores: AppStores) {
+    public init(stores: AppStores, positionStore: FloatingIndicatorPositionStore = FloatingIndicatorPositionStore()) {
         self.stores = stores
+        self.positionStore = positionStore
+        lastOrigin = positionStore.position
         observeAppActivation()
         observeSessionState()
     }
@@ -77,6 +90,7 @@ public final class FloatingIndicatorController {
         withObservationTracking {
             _ = stores.session.isRecording
             _ = stores.session.isPaused
+            _ = stores.settings.floatingCapsuleStyle
         } onChange: { [weak self] in
             MainActor.assumeIsolated {
                 self?.refreshVisibility()
@@ -86,11 +100,12 @@ public final class FloatingIndicatorController {
     }
 
     private func refreshVisibility() {
+        let style = stores.settings.floatingCapsuleStyle
         let visible = FloatingIndicatorVisibility.isVisible(
-            isRecording: stores.session.isRecording, isAppActive: isAppActive
+            isRecording: stores.session.isRecording, isAppActive: isAppActive, style: style
         )
         if visible {
-            showPanel()
+            showPanel(style: style)
         } else {
             hidePanel()
         }
@@ -98,9 +113,16 @@ public final class FloatingIndicatorController {
 
     // MARK: Panel lifecycle
 
-    private func showPanel() {
+    private func showPanel(style: FloatingCapsuleStyle) {
         if panel == nil {
             panel = makePanel()
+            lastStyle = style
+        } else if lastStyle != style {
+            // `.minimal` and `.full` fit different content widths — resize in
+            // place rather than tearing down and recreating the panel, which
+            // would also drop the user's dragged position for this show.
+            lastStyle = style
+            refit(panel!)
         }
         panel?.orderFrontRegardless()
     }
@@ -114,9 +136,8 @@ public final class FloatingIndicatorController {
             self?.activate()
         }
         let hosting = FirstMouseHostingView(rootView: content)
-        // Size the panel to exactly fit the capsule (the view has a fixed
-        // 260pt width), so no invisible dead area blocks clicks on windows
-        // underneath.
+        // Size the panel to exactly fit the capsule, so no invisible dead
+        // area blocks clicks on windows underneath.
         hosting.frame = NSRect(origin: .zero, size: hosting.fittingSize)
 
         let panel = NSPanel(
@@ -142,26 +163,55 @@ public final class FloatingIndicatorController {
         panel.isReleasedWhenClosed = false
         panel.contentView = hosting
         panel.setContentSize(hosting.frame.size)
+        placeAtStartingOrigin(panel)
 
-        if let origin = lastOrigin {
-            panel.setFrameOrigin(origin)
-        } else if let screen = NSScreen.main {
-            panel.setFrameOrigin(FloatingIndicatorPlacement.defaultOrigin(
-                panelSize: panel.frame.size, visibleFrame: screen.visibleFrame
-            ))
-        }
-
-        // Remember wherever the user drags it, for the rest of the session.
+        // Remember wherever the user drags it (in-memory for the rest of the
+        // session, and persisted to UserDefaults for the next launch).
         let moveToken = NotificationCenter.default.addObserver(
             forName: NSWindow.didMoveNotification, object: panel, queue: .main
         ) { [weak self, weak panel] _ in
             MainActor.assumeIsolated {
-                self?.lastOrigin = panel?.frame.origin
+                guard let origin = panel?.frame.origin else { return }
+                self?.lastOrigin = origin
+                self?.positionStore.position = origin
             }
         }
         notificationTokens.append(moveToken)
 
         return panel
+    }
+
+    /// Re-fits an already-shown panel's content after a style change
+    /// (`.minimal` ↔ `.full` sizes differently) without disturbing its
+    /// current on-screen position, so the capsule doesn't jump to the
+    /// default corner just because the user toggled a Settings option while
+    /// it happened to be visible.
+    private func refit(_ panel: NSPanel) {
+        guard let hosting = panel.contentView as? FirstMouseHostingView<FloatingIndicatorHostView> else { return }
+        let origin = panel.frame.origin
+        let newSize = hosting.fittingSize
+        hosting.frame = NSRect(origin: .zero, size: newSize)
+        panel.setContentSize(newSize)
+        panel.setFrameOrigin(origin)
+    }
+
+    /// Places a freshly created panel: reuses the last known/persisted
+    /// position if it's still on some connected screen, otherwise falls
+    /// back to the default bottom-right corner (e.g. first-ever launch, or
+    /// an external monitor holding the saved position got disconnected).
+    private func placeAtStartingOrigin(_ panel: NSPanel) {
+        let visibleFrames = NSScreen.screens.map(\.visibleFrame)
+        if let origin = lastOrigin,
+            FloatingIndicatorPlacement.isOnScreen(origin: origin, panelSize: panel.frame.size, visibleFrames: visibleFrames)
+        {
+            panel.setFrameOrigin(origin)
+        } else if let screen = NSScreen.main {
+            let origin = FloatingIndicatorPlacement.defaultOrigin(
+                panelSize: panel.frame.size, visibleFrame: screen.visibleFrame
+            )
+            panel.setFrameOrigin(origin)
+            lastOrigin = origin
+        }
     }
 
     // MARK: Click action
@@ -202,18 +252,18 @@ private final class FirstMouseHostingView<Content: View>: NSHostingView<Content>
 }
 
 /// Thin SwiftUI wrapper feeding `FloatingIndicatorView` from the live
-/// `MeetingSessionStore`, so the hosting view re-renders on the same
-/// `@Observable` change tracking as the rest of the app.
-private struct FloatingIndicatorHostView: View {
+/// `MeetingSessionStore`/`SettingsStore`, so the hosting view re-renders on
+/// the same `@Observable` change tracking as the rest of the app.
+struct FloatingIndicatorHostView: View {
     let stores: AppStores
     let onActivate: () -> Void
 
     var body: some View {
         FloatingIndicatorView(
+            style: stores.settings.floatingCapsuleStyle,
             isPaused: stores.session.isPaused,
-            levels: stores.session.levels,
+            levels: WaveformDownsample.bars(from: stores.session.levels, count: 4),
             elapsedLabel: stores.session.menuBarElapsedLabel,
-            lastHeardText: stores.session.lastHeardText,
             onActivate: onActivate
         )
         .fixedSize()

@@ -53,8 +53,21 @@ public final class MeetingSessionStore {
 
     /// A brief note about a mid-recording input switch ("Input switched to
     /// AirPods Pro"), cleared automatically after a few seconds.
+    ///
+    /// Superseded by `onInputRebuilt` routing an amber `ToastCenter` toast
+    /// (design mock 6c's mic-loss toast) — kept around, still updated, only
+    /// because `MeetingDetailView`'s live-header rendering of this property
+    /// is owned by another package/agent to remove. Don't add new readers.
     public private(set) var inputSwitchNote: String?
     private var inputSwitchNoteTask: Task<Void, Never>?
+
+    /// Fires whenever the recorder rebuilds its input mid-recording (device
+    /// unplugged, switched, etc.) — `AppStores` wires this to an amber
+    /// "Mic disconnected — switched to <device>" toast. `reason` is the raw
+    /// device-facing string from `RecorderEvent.inputRebuilt`; the active
+    /// device name (if resolved) is passed separately so the toast can name
+    /// it without re-deriving it from prose.
+    public var onInputRebuilt: (@MainActor (_ reason: String, _ deviceName: String?) -> Void)?
 
     private static let idleLevels = [Float](repeating: 0, count: 16)
     private let recorder: MeetingRecorder
@@ -235,6 +248,7 @@ public final class MeetingSessionStore {
             // the main signal, but a brief note confirms which device won.
             activeInputDeviceName = recorder.activeInputDeviceName
             showInputSwitchNote(reason)
+            onInputRebuilt?(reason, activeInputDeviceName)
         case .writeFailed:
             // Audio can't reach disk — stop now so what was captured
             // survives, and tell the user why the recording ended.

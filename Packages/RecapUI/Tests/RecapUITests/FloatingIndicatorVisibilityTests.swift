@@ -3,23 +3,33 @@ import Testing
 @testable import RecapUI
 
 /// `FloatingIndicatorVisibility.isVisible` — the pure show/hide rule for the
-/// Granola-style floating recording capsule: visible only while recording
-/// AND Recap is not the frontmost app.
+/// Granola-style floating recording capsule: visible only while recording,
+/// Recap is not the frontmost app, AND the capsule style isn't `.off`.
 @Suite struct FloatingIndicatorVisibilityTests {
     @Test func hiddenWhenNotRecordingAndAppInactive() {
-        #expect(!FloatingIndicatorVisibility.isVisible(isRecording: false, isAppActive: false))
+        #expect(!FloatingIndicatorVisibility.isVisible(isRecording: false, isAppActive: false, style: .full))
     }
 
     @Test func hiddenWhenNotRecordingAndAppActive() {
-        #expect(!FloatingIndicatorVisibility.isVisible(isRecording: false, isAppActive: true))
+        #expect(!FloatingIndicatorVisibility.isVisible(isRecording: false, isAppActive: true, style: .full))
     }
 
     @Test func hiddenWhenRecordingButAppActive() {
-        #expect(!FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: true))
+        #expect(!FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: true, style: .full))
     }
 
     @Test func visibleWhenRecordingAndAppInactive() {
-        #expect(FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: false))
+        #expect(FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: false, style: .full))
+    }
+
+    @Test func visibleWithMinimalStyleToo() {
+        #expect(FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: false, style: .minimal))
+    }
+
+    /// The whole point of the `.off` style: never show the capsule, even
+    /// while actively recording and backgrounded.
+    @Test func hiddenWhenStyleIsOffRegardlessOfOtherState() {
+        #expect(!FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: false, style: .off))
     }
 
     /// Paused recordings are still "recording" per `MeetingSessionStore` —
@@ -29,26 +39,27 @@ import Testing
         // isPaused is not a parameter of isVisible at all — this documents
         // that the caller must pass isRecording (activeRecord != nil), not
         // some pause-aware derivative.
-        #expect(FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: false))
+        #expect(FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: false, style: .full))
     }
 }
 
 /// `FloatingIndicatorPlacement.defaultOrigin` — pure first-show placement:
-/// trailing edge, center at the upper third, clamped inside the frame.
+/// bottom-right corner (above the Dock, via `visibleFrame`), inset from the
+/// trailing/bottom edges.
 @Suite struct FloatingIndicatorPlacementTests {
     // A 1512x945 visible frame at a 25pt menu-bar offset, like a 14" MBP.
     private let frame = CGRect(x: 0, y: 0, width: 1512, height: 920)
-    private let panel = CGSize(width: 260, height: 40)
+    private let panel = CGSize(width: 150, height: 30)
 
     @Test func hugsTrailingEdgeWithInset() {
         let origin = FloatingIndicatorPlacement.defaultOrigin(panelSize: panel, visibleFrame: frame)
         #expect(origin.x == frame.maxX - 16 - panel.width)
     }
 
-    @Test func centersPanelAtUpperThird() {
+    @Test func hugsBottomEdgeWithInset() {
         let origin = FloatingIndicatorPlacement.defaultOrigin(panelSize: panel, visibleFrame: frame)
-        // Panel center at 2/3 of the frame height (AppKit y grows upward).
-        #expect(origin.y == frame.minY + frame.height * 2 / 3 - panel.height / 2)
+        // AppKit y grows upward, so "bottom" is minY + inset.
+        #expect(origin.y == frame.minY + 16)
     }
 
     @Test func respectsCustomInset() {
@@ -56,22 +67,7 @@ import Testing
             panelSize: panel, visibleFrame: frame, inset: 32
         )
         #expect(origin.x == frame.maxX - 32 - panel.width)
-    }
-
-    @Test func clampsTallPanelInsideShortFrame() {
-        let tall = CGSize(width: 260, height: 900)
-        let short = CGRect(x: 0, y: 0, width: 1512, height: 400)
-        let origin = FloatingIndicatorPlacement.defaultOrigin(panelSize: tall, visibleFrame: short)
-        // Bottom clamp wins once the top clamp would push it below minY.
-        #expect(origin.y == short.minY + 16)
-    }
-
-    @Test func clampsTopEdgeWhenUpperThirdWouldOverflow() {
-        let tallish = CGSize(width: 260, height: 320)
-        let short = CGRect(x: 0, y: 0, width: 1512, height: 500)
-        let origin = FloatingIndicatorPlacement.defaultOrigin(panelSize: tallish, visibleFrame: short)
-        #expect(origin.y == short.maxY - 16 - tallish.height)
-        #expect(origin.y >= short.minY + 16)
+        #expect(origin.y == frame.minY + 32)
     }
 
     @Test func honorsNonZeroFrameOrigin() {
@@ -79,6 +75,41 @@ import Testing
         let offset = CGRect(x: 1512, y: 200, width: 1000, height: 700)
         let origin = FloatingIndicatorPlacement.defaultOrigin(panelSize: panel, visibleFrame: offset)
         #expect(origin.x == offset.maxX - 16 - panel.width)
-        #expect(origin.y == offset.minY + offset.height * 2 / 3 - panel.height / 2)
+        #expect(origin.y == offset.minY + 16)
+    }
+}
+
+/// `FloatingIndicatorPlacement.isOnScreen` — validates a persisted position
+/// still lands fully inside some connected screen before reusing it.
+@Suite struct FloatingIndicatorOnScreenTests {
+    private let panel = CGSize(width: 150, height: 30)
+    private let mainScreen = CGRect(x: 0, y: 0, width: 1512, height: 920)
+
+    @Test func onScreenWhenFullyInsideAKnownFrame() {
+        let origin = CGPoint(x: 1000, y: 100)
+        #expect(FloatingIndicatorPlacement.isOnScreen(origin: origin, panelSize: panel, visibleFrames: [mainScreen]))
+    }
+
+    @Test func offScreenWhenNoFrameContainsIt() {
+        // A saved position from a since-disconnected external monitor.
+        let origin = CGPoint(x: 3000, y: 100)
+        #expect(!FloatingIndicatorPlacement.isOnScreen(origin: origin, panelSize: panel, visibleFrames: [mainScreen]))
+    }
+
+    @Test func offScreenWhenPartiallyOffTheEdge() {
+        let origin = CGPoint(x: mainScreen.maxX - 10, y: 100)
+        #expect(!FloatingIndicatorPlacement.isOnScreen(origin: origin, panelSize: panel, visibleFrames: [mainScreen]))
+    }
+
+    @Test func onScreenWhenAnySecondDisplayContainsIt() {
+        let secondDisplay = CGRect(x: 1512, y: 0, width: 1000, height: 700)
+        let origin = CGPoint(x: 1600, y: 50)
+        #expect(FloatingIndicatorPlacement.isOnScreen(
+            origin: origin, panelSize: panel, visibleFrames: [mainScreen, secondDisplay]
+        ))
+    }
+
+    @Test func offScreenWithNoScreensAtAll() {
+        #expect(!FloatingIndicatorPlacement.isOnScreen(origin: .zero, panelSize: panel, visibleFrames: []))
     }
 }
