@@ -71,16 +71,6 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
     }
 }
 
-/// Fake `RecordPrompting`: records every event it's asked to prompt for.
-@MainActor
-private final class FakeRecordPrompter: RecordPrompting {
-    private(set) var promptedEvents: [CalendarEventSnapshot] = []
-
-    func promptToRecord(_ event: CalendarEventSnapshot) {
-        promptedEvents.append(event)
-    }
-}
-
 // Serialized: these tests exercise real elapsed-time behavior (debounce
 // windows, change-bus subscription races) via ContinuousClock/Task.sleep.
 // Swift Testing parallelizes every @Test in a suite by default, and on a
@@ -123,13 +113,17 @@ private final class FakeRecordPrompter: RecordPrompting {
 
     /// Full graph with real disk-backed storage, matching what `AppStoresTests`
     /// scenarios need (export/backfill behavior requires `storage != nil`).
+    /// Always wires `onNudgePresented` to a capture array — real `NSPanel`s
+    /// must never appear during `swift test`, so every scenario that reaches
+    /// `presentNudge` needs this hook installed before `applyCalendarAutoRecordSetting()`
+    /// is called.
     private func makeStores(
         settings: SettingsStore? = nil,
         storage: LibraryStorage? = nil,
         session: MeetingSessionStore? = nil,
         exportDebounce: Duration = .milliseconds(50),
         makeCalendarWatcher: ((@escaping @MainActor (CalendarEventSnapshot) -> Void) -> MeetingEventWatching)? = nil,
-        makeRecordPrompter: ((@escaping @MainActor (CalendarEventSnapshot) -> Void) -> RecordPrompting)? = nil
+        presentedNudges: PresentedNudges? = nil
     ) -> (AppStores, LibraryStorage, SettingsStore, LibraryChangeBus) {
         let settings = settings ?? makeSettings()
         let storage = storage ?? makeStorage()
@@ -139,12 +133,12 @@ private final class FakeRecordPrompter: RecordPrompting {
         let library = LibraryStore(storage: storage, index: index, changeBus: changeBus)
 
         let stores: AppStores
-        if let makeCalendarWatcher, let makeRecordPrompter {
+        if let makeCalendarWatcher {
             stores = AppStores(
                 settings: settings, storage: storage, library: library,
                 models: WhisperModelManager(), session: session, queue: nil,
                 changeBus: changeBus, exportDebounce: exportDebounce,
-                makeCalendarWatcher: makeCalendarWatcher, makeRecordPrompter: makeRecordPrompter
+                makeCalendarWatcher: makeCalendarWatcher
             )
         } else {
             stores = AppStores(
@@ -153,7 +147,18 @@ private final class FakeRecordPrompter: RecordPrompting {
                 changeBus: changeBus, exportDebounce: exportDebounce
             )
         }
+        if let presentedNudges {
+            stores.onNudgePresented = { nudge in presentedNudges.nudges.append(nudge) }
+        }
         return (stores, storage, settings, changeBus)
+    }
+
+    /// Test-only capture box for nudges presented via `AppStores.onNudgePresented`
+    /// — a class so the closure above and the test assertion share the same
+    /// storage without fighting Swift's value-capture rules.
+    @MainActor
+    private final class PresentedNudges {
+        var nudges: [MeetingNudge] = []
     }
 
     private func makeReadyMeeting(in storage: LibraryStorage, title: String = "Standup") throws -> MeetingRecord {
@@ -376,18 +381,14 @@ private final class FakeRecordPrompter: RecordPrompting {
 
     @Test func promptModeCallsPrompterWhenEventStarts() throws {
         var fakeWatcher: FakeCalendarWatcher?
-        var fakePrompter: FakeRecordPrompter?
+        let presentedNudges = PresentedNudges()
         let (stores, _, settings, _) = makeStores(
             makeCalendarWatcher: { onStarting in
                 let watcher = FakeCalendarWatcher(onMeetingStarting: onStarting)
                 fakeWatcher = watcher
                 return watcher
             },
-            makeRecordPrompter: { _ in
-                let prompter = FakeRecordPrompter()
-                fakePrompter = prompter
-                return prompter
-            }
+            presentedNudges: presentedNudges
         )
         settings.calendarAutoRecord = .prompt
         stores.applyCalendarAutoRecordSetting()
@@ -396,13 +397,14 @@ private final class FakeRecordPrompter: RecordPrompting {
         let event = CalendarEventSnapshot(id: "1", title: "Standup", start: .now, end: .now.addingTimeInterval(1_800))
         stores.meetingEventStarting(event)
 
-        #expect(fakePrompter?.promptedEvents == [event])
+        #expect(presentedNudges.nudges == [.ask(appID: nil, appName: nil, match: event)])
     }
 
     @Test func autoModeCreatesLibraryMeetingWithEventTitle() async throws {
+        let presentedNudges = PresentedNudges()
         let (stores, _, settings, _) = makeStores(
             makeCalendarWatcher: { onStarting in FakeCalendarWatcher(onMeetingStarting: onStarting) },
-            makeRecordPrompter: { _ in FakeRecordPrompter() }
+            presentedNudges: presentedNudges
         )
         settings.calendarAutoRecord = .auto
         stores.applyCalendarAutoRecordSetting()
@@ -422,17 +424,20 @@ private final class FakeRecordPrompter: RecordPrompting {
         }
 
         #expect(stores.library.meetings.contains { $0.meeting.title == "Roadmap review" })
+        // Auto-record also surfaces the recording-started confirmation nudge.
+        #expect(presentedNudges.nudges.count == 1)
+        if case .recordingStarted(let presentedEvent, _) = presentedNudges.nudges.first {
+            #expect(presentedEvent.id == "2")
+        } else {
+            Issue.record("Expected a .recordingStarted nudge, got \(String(describing: presentedNudges.nudges.first))")
+        }
     }
 
     @Test func offModeIgnoresStartingEvents() throws {
-        var fakePrompter: FakeRecordPrompter?
+        let presentedNudges = PresentedNudges()
         let (stores, _, settings, _) = makeStores(
             makeCalendarWatcher: { onStarting in FakeCalendarWatcher(onMeetingStarting: onStarting) },
-            makeRecordPrompter: { _ in
-                let prompter = FakeRecordPrompter()
-                fakePrompter = prompter
-                return prompter
-            }
+            presentedNudges: presentedNudges
         )
         settings.calendarAutoRecord = .off
 
@@ -440,19 +445,15 @@ private final class FakeRecordPrompter: RecordPrompting {
         let event = CalendarEventSnapshot(id: "3", title: "Ignored", start: .now, end: .now.addingTimeInterval(1_800))
         stores.meetingEventStarting(event)
 
-        #expect(fakePrompter?.promptedEvents.isEmpty != false)
+        #expect(presentedNudges.nudges.isEmpty)
         #expect(stores.library.meetings.count == meetingCountBefore)
     }
 
     @Test func alreadyRecordingIgnoresStartingEvents() async throws {
-        var fakePrompter: FakeRecordPrompter?
+        let presentedNudges = PresentedNudges()
         let (stores, _, settings, _) = makeStores(
             makeCalendarWatcher: { onStarting in FakeCalendarWatcher(onMeetingStarting: onStarting) },
-            makeRecordPrompter: { _ in
-                let prompter = FakeRecordPrompter()
-                fakePrompter = prompter
-                return prompter
-            }
+            presentedNudges: presentedNudges
         )
         settings.calendarAutoRecord = .prompt
         stores.applyCalendarAutoRecordSetting()
@@ -468,7 +469,7 @@ private final class FakeRecordPrompter: RecordPrompting {
         let event = CalendarEventSnapshot(id: "4", title: "Should be ignored", start: .now, end: .now.addingTimeInterval(1_800))
         stores.meetingEventStarting(event)
 
-        #expect(fakePrompter?.promptedEvents.isEmpty != false)
+        #expect(presentedNudges.nudges.isEmpty)
     }
 
     @Test func applyCalendarAutoRecordSettingSurfacesAccessDenied() async throws {
@@ -478,7 +479,7 @@ private final class FakeRecordPrompter: RecordPrompting {
                 watcher.grantsAccess = false
                 return watcher
             },
-            makeRecordPrompter: { _ in FakeRecordPrompter() }
+            presentedNudges: PresentedNudges()
         )
         settings.calendarAutoRecord = .prompt
         stores.applyCalendarAutoRecordSetting()

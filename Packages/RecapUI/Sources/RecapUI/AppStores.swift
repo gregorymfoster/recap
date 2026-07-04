@@ -20,15 +20,7 @@ public protocol MeetingEventWatching: AnyObject {
     func stop()
 }
 
-/// Seam over `RecordPrompter`, matching its real shape. Tests inject a fake
-/// to observe prompt calls without posting real notifications.
-@MainActor
-public protocol RecordPrompting: AnyObject {
-    func promptToRecord(_ event: CalendarEventSnapshot)
-}
-
 extension CalendarWatcher: MeetingEventWatching {}
-extension RecordPrompter: RecordPrompting {}
 
 /// App-lifetime store graph, constructed exactly once (held by the App struct).
 ///
@@ -68,14 +60,36 @@ public final class AppStores {
     /// ⌥⌘R anywhere toggles recording. nil when another app owns the combo.
     @ObservationIgnored private var recordHotKey: GlobalHotKey?
     @ObservationIgnored private var calendarWatcher: MeetingEventWatching?
-    @ObservationIgnored private var recordPrompter: RecordPrompting?
-    /// Factories for the calendar seam, defaulting to the real types in the
-    /// production path; tests substitute fakes via the injected init.
+    /// Factory for the calendar seam, defaulting to the real type in the
+    /// production path; tests substitute a fake via the injected init.
     @ObservationIgnored private let makeCalendarWatcher: (@escaping @MainActor (CalendarEventSnapshot) -> Void) -> MeetingEventWatching
-    @ObservationIgnored private let makeRecordPrompter: (@escaping @MainActor (CalendarEventSnapshot) -> Void) -> RecordPrompting
     /// True when calendar auto-record is enabled in Settings but macOS
     /// calendar access was denied — surfaced as a warning there.
     public private(set) var calendarAccessDenied = false
+
+    /// The "Meeting started?" nudge (design mock 9b) — trigger/dedupe brain
+    /// plus its top-right slide-in panel. Built lazily by
+    /// `applyCalendarAutoRecordSetting()` the first time policy != `.off`,
+    /// and torn down (monitor stopped, panel dismissed) when it flips back
+    /// to `.off`.
+    @ObservationIgnored private var nudgeCenter: MeetingNudgeCenter?
+    @ObservationIgnored private var nudgePanel: MeetingNudgePanelController?
+    @ObservationIgnored private var callAudioMonitor: CallAudioMonitoring?
+    /// Factory for the call-audio monitor seam. Defaults to `{ nil }`
+    /// everywhere — including the production `init()` — so the graph no-ops
+    /// gracefully until the integrator flips this to
+    /// `{ ProcessAudioMonitor() }` at merge (another agent owns that type;
+    /// it doesn't exist on this branch yet).
+    @ObservationIgnored private let makeCallAudioMonitor: () -> CallAudioMonitoring?
+    /// Injectable source of "today's remaining calendar events", used by the
+    /// nudge center to find a calendar match for a call-audio trigger.
+    /// Defaults to `{ _ in [] }`; the production `init()` path builds it
+    /// from a dedicated `CalendarWatcher` query instance.
+    @ObservationIgnored private let todayEventsProvider: @MainActor (Date) -> [CalendarEventSnapshot]
+    /// Test-only hook: when set, `presentNudge` calls this instead of
+    /// driving a real `NSPanel`, so tests can assert on presented nudges
+    /// without a panel ever appearing on screen.
+    @ObservationIgnored var onNudgePresented: ((MeetingNudge) -> Void)?
     /// Per-meeting debounce for the change-bus-driven re-export consumer:
     /// each `.meetingChanged` cancels and restarts a debounce sleep
     /// (`exportDebounce`, 5s in production) before the enabled exporters
@@ -102,7 +116,8 @@ public final class AppStores {
             upcoming = .fixture()
             exportDebounce = .seconds(5)
             makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
-            makeRecordPrompter = { RecordPrompter(onRecord: $0) }
+            makeCallAudioMonitor = { nil }
+            todayEventsProvider = { _ in [] }
         } else if ProcessInfo.processInfo.arguments.contains("-soak") {
             // Soak-test graph: real recording pipeline (mixer, writer, clock,
             // menu bar) driven by synthetic zero-hardware audio sources, no
@@ -128,7 +143,8 @@ public final class AppStores {
             upcoming = .live()
             exportDebounce = .seconds(5)
             makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
-            makeRecordPrompter = { RecordPrompter(onRecord: $0) }
+            makeCallAudioMonitor = { nil }
+            todayEventsProvider = { _ in [] }
             let session = self.session
             Task { @MainActor in
                 guard let record = library.startNewMeeting(title: "Soak recording") else { return }
@@ -150,7 +166,13 @@ public final class AppStores {
             upcoming = .live()
             exportDebounce = .seconds(5)
             makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
-            makeRecordPrompter = { RecordPrompter(onRecord: $0) }
+            // TODO(merge): the integrator flips this to
+            // `{ ProcessAudioMonitor() }` once that type lands from the
+            // parallel RecapAudio branch. Until then the call-audio trigger
+            // stays inert everywhere, including production.
+            makeCallAudioMonitor = { nil }
+            let calendarQuery = CalendarWatcher(onMeetingStarting: { _ in })
+            todayEventsProvider = { calendarQuery.todayEvents(now: $0) }
             let toasts = toasts
             let router = router
             let notifier = CompletionNotifier(
@@ -220,7 +242,8 @@ public final class AppStores {
         upcoming = .fixture()
         exportDebounce = .seconds(5)
         makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
-        makeRecordPrompter = { RecordPrompter(onRecord: $0) }
+        makeCallAudioMonitor = { nil }
+        todayEventsProvider = { _ in [] }
     }
 
     /// Test/fixture seam: every dependency injectable, side-effectful
@@ -242,7 +265,8 @@ public final class AppStores {
         registersHotKey: Bool = false,
         exportDebounce: Duration = .seconds(5),
         makeCalendarWatcher: @escaping (@escaping @MainActor (CalendarEventSnapshot) -> Void) -> MeetingEventWatching = { CalendarWatcher(onMeetingStarting: $0) },
-        makeRecordPrompter: @escaping (@escaping @MainActor (CalendarEventSnapshot) -> Void) -> RecordPrompting = { RecordPrompter(onRecord: $0) }
+        makeCallAudioMonitor: @escaping () -> CallAudioMonitoring? = { nil },
+        todayEventsProvider: @escaping @MainActor (Date) -> [CalendarEventSnapshot] = { _ in [] }
     ) {
         self.settings = settings
         self.storage = storage
@@ -254,7 +278,8 @@ public final class AppStores {
         self.upcoming = upcoming
         self.exportDebounce = exportDebounce
         self.makeCalendarWatcher = makeCalendarWatcher
-        self.makeRecordPrompter = makeRecordPrompter
+        self.makeCallAudioMonitor = makeCallAudioMonitor
+        self.todayEventsProvider = todayEventsProvider
 
         if registersHotKey {
             recordHotKey = GlobalHotKey(keyCode: kVK_ANSI_R, modifiers: cmdKey | optionKey) { [weak self] in
@@ -459,14 +484,20 @@ public final class AppStores {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    // MARK: Calendar auto-record
+    // MARK: Calendar auto-record + Meeting nudge (design mock 9b)
 
-    /// Starts or stops the calendar watcher to match Settings. Called at
-    /// launch and whenever the setting changes.
+    /// Starts or stops the calendar watcher, the call-audio monitor, and the
+    /// nudge center/panel to match Settings. Called at launch and whenever
+    /// the setting (or `disabledCallAppIDs`) changes — a change to the
+    /// disabled set must restart the monitor with the new bundle-id set, so
+    /// this always tears down and rebuilds the monitor's watched set rather
+    /// than only acting on a `.off` transition.
     public func applyCalendarAutoRecordSetting() {
         guard settings.calendarAutoRecord != .off else {
             calendarWatcher?.stop()
             calendarAccessDenied = false
+            callAudioMonitor?.stop()
+            nudgePanel?.dismiss()
             return
         }
         if calendarWatcher == nil {
@@ -474,33 +505,68 @@ public final class AppStores {
                 self?.meetingEventStarting(event)
             }
         }
-        if recordPrompter == nil {
-            recordPrompter = makeRecordPrompter { [weak self] event in
-                self?.startRecording(for: event)
-            }
-        }
+        ensureNudgeCenter()
         Task {
             let granted = await calendarWatcher?.start() ?? false
             calendarAccessDenied = !granted
+        }
+
+        if callAudioMonitor == nil {
+            callAudioMonitor = makeCallAudioMonitor()
+        }
+        let bundleIDs = CallAppCatalog.enabledBundleIDs(disabledAppIDs: settings.disabledCallAppIDs)
+        callAudioMonitor?.start(bundleIDs: bundleIDs) { [weak self] event in
+            self?.nudgeCenter?.callAudioEvent(event)
         }
     }
 
     /// Internal (not private) so tests can invoke it directly without going
     /// through the real `CalendarWatcher`'s EventKit polling.
     func meetingEventStarting(_ event: CalendarEventSnapshot) {
-        guard !session.isRecording else { return }
-        switch settings.calendarAutoRecord {
-        case .off:
-            break
-        case .prompt:
-            recordPrompter?.promptToRecord(event)
-        case .auto:
-            startRecording(for: event)
-        }
+        ensureNudgeCenter()
+        nudgeCenter?.calendarEventStarting(event)
     }
 
-    private func startRecording(for event: CalendarEventSnapshot) {
-        startRecording(title: event.title, attendees: event.otherAttendees)
+    /// Builds the nudge center + panel once, wiring the center's closures to
+    /// live settings/session state and the panel to the center's action
+    /// entry points.
+    private func ensureNudgeCenter() {
+        guard nudgeCenter == nil else { return }
+        let panel = MeetingNudgePanelController()
+        let center = MeetingNudgeCenter(
+            policy: { [weak self] in
+                MeetingDetectionRules.Policy(rawValue: self?.settings.calendarAutoRecord.rawValue ?? "off") ?? .off
+            },
+            isRecording: { [weak self] in self?.session.isRecording ?? false },
+            disabledAppIDs: { [weak self] in self?.settings.disabledCallAppIDs ?? [] },
+            todayEvents: { [weak self] date in self?.todayEventsProvider(date) ?? [] },
+            present: { [weak self] nudge in self?.presentNudge(nudge) },
+            startRecording: { [weak self] title, attendees in
+                self?.startRecording(title: title, attendees: attendees)
+            }
+        )
+        panel.onRecord = { [weak center] nudge in center?.recordTapped(for: nudge) }
+        panel.onNotNow = { [weak center] nudge in center?.notNowTapped(for: nudge) }
+        panel.onDontAsk = { [weak self, weak center] appID in
+            center?.dontAskTapped(appID: appID) { appID in
+                self?.settings.disabledCallAppIDs.insert(appID)
+                self?.applyCalendarAutoRecordSetting()
+            }
+        }
+        panel.onStop = { [weak self] in self?.stopRecording() }
+        nudgeCenter = center
+        nudgePanel = panel
+    }
+
+    /// Presents a nudge — through the test hook when one's installed (tests
+    /// must never construct a real `NSPanel`), otherwise through the real
+    /// panel controller.
+    private func presentNudge(_ nudge: MeetingNudge) {
+        if let onNudgePresented {
+            onNudgePresented(nudge)
+        } else {
+            nudgePanel?.present(nudge)
+        }
     }
 
     // MARK: Obsidian sync
