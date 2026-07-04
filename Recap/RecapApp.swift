@@ -107,6 +107,19 @@ struct RecapApp: App {
         }
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(.suppressed)
+
+        // Debug hook for the "Meeting started?" nudge (design mock 9b),
+        // opened the same way as `-show-menubar-content` above: the real
+        // panel is a borderless, non-activating, all-spaces `NSPanel` that
+        // headless screenshot tooling can't reliably find, so this stacks
+        // all three content variants in an ordinary window instead. Pure
+        // view hosting — no `MeetingNudgePanelController`, no
+        // `MeetingNudgeCenter` — so nothing here can misfire a real nudge.
+        Window("Nudge Preview", id: "nudge-preview-debug") {
+            NudgePreviewDebugView()
+        }
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)
     }
 }
 
@@ -133,7 +146,59 @@ struct MenuBarContentDebugOpener: ViewModifier {
             if ProcessInfo.processInfo.arguments.contains("-show-menubar-content") {
                 openWindow(id: "menubar-content-debug")
             }
+            if ProcessInfo.processInfo.arguments.contains("-fixtures"),
+                ProcessInfo.processInfo.arguments.contains("-show-nudge")
+            {
+                openWindow(id: "nudge-preview-debug")
+            }
         }
+    }
+}
+
+/// Content view for the `-fixtures -show-nudge` debug window: stacks all
+/// three `MeetingNudgeView` variants (ask with a calendar match, ask
+/// app-only, and the auto-record confirmation) so the fixture app can
+/// screenshot every state of design mock 9b in one shot.
+private struct NudgePreviewDebugView: View {
+    private static let now = Date.now
+
+    private static let matchedEvent = CalendarEventSnapshot(
+        id: "nudge-preview-match",
+        title: "Design crit — mobile",
+        start: now.addingTimeInterval(-30),
+        end: now.addingTimeInterval(30 * 60),
+        otherAttendees: ["Maya Chen", "Priya Patel"],
+        hasConferenceURL: true,
+        conferenceProvider: "Zoom"
+    )
+
+    private static let recordingEvent = CalendarEventSnapshot(
+        id: "nudge-preview-recording",
+        title: "Roadmap review",
+        start: now.addingTimeInterval(-40),
+        end: now.addingTimeInterval(20 * 60),
+        otherAttendees: ["Jordan Lee"],
+        hasConferenceURL: true,
+        conferenceProvider: "Zoom"
+    )
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            MeetingNudgeView(
+                nudge: .ask(appID: "us.zoom.xos", appName: "Zoom", match: Self.matchedEvent),
+                onRecord: {}, onNotNow: {}, onDontAsk: {}
+            )
+            MeetingNudgeView(
+                nudge: .ask(appID: "com.microsoft.teams2", appName: "Microsoft Teams", match: nil),
+                onRecord: {}, onNotNow: {}, onDontAsk: {}
+            )
+            MeetingNudgeView(
+                nudge: .recordingStarted(event: Self.recordingEvent, missedSeconds: 40),
+                onRecord: {}, onNotNow: {}, onStop: {}
+            )
+        }
+        .padding(24)
+        .background(Tokens.surface)
     }
 }
 
