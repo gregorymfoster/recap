@@ -80,7 +80,22 @@ if [[ -d "$SPARKLE_FW" ]]; then
   sign "$SPARKLE_FW/Versions/B/XPCServices/Installer.xpc"
   sign "$SPARKLE_FW"
 fi
-sign "$APP"
+# The outer app must be re-signed WITH its entitlements: a bare
+# `codesign --force` replaces xcodebuild's signature and silently drops
+# them, and a hardened-runtime app without the audio-input/calendars
+# entitlements is auto-denied by TCC with no prompt (mic "Denied",
+# Calendar request no-ops) — this shipped broken through v0.16.0.
+codesign --force --options runtime --timestamp \
+  --entitlements Recap/Recap.entitlements \
+  --sign "Developer ID Application" "$APP"
+
+echo "==> Verify entitlements survived signing"
+for KEY in com.apple.security.device.audio-input com.apple.security.personal-information.calendars; do
+  if ! codesign -d --entitlements - "$APP" 2>/dev/null | grep -q "$KEY"; then
+    echo "Signed app is missing entitlement $KEY; aborting release." >&2
+    exit 1
+  fi
+done
 
 echo "==> Notarize"
 /usr/bin/ditto -c -k --keepParent "$APP" "$BUILD_DIR/Recap.zip"
