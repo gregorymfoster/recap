@@ -146,9 +146,14 @@ struct MeetingDetailView: View {
             if let enhancedNotes, !showingOriginal {
                 EnhancedNotesView(markdown: enhancedNotes)
                     .padding(.top, 8)
-                enhancedCaption
-                    .padding(.horizontal, 40)
-                    .padding(.bottom, 16)
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        enhancedCaption
+                            .padding(.horizontal, 40)
+                            .padding(.top, 10)
+                            .padding(.bottom, 16)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Tokens.surface)
+                    }
             } else {
                 TextEditor(text: $notes)
                     .font(Tokens.body)
@@ -158,6 +163,7 @@ struct MeetingDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 34)
                     .padding(.top, 16)
+                    .padding(.bottom, 12)
             }
         }
         .background(Tokens.surface)

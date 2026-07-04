@@ -36,6 +36,11 @@ struct ChunkDigest {
 /// the map/merge/reduce orchestration around it, so it's testable with a
 /// fake model and no Apple Intelligence.
 public struct FoundationModelEnhancer: NoteEnhancer {
+    /// Below this many whitespace-separated words, a transcript has too
+    /// little substance to enhance meaningfully — the on-device model tends
+    /// to hallucinate content echoing its own response-format schema instead.
+    static let minimumTranscriptWords = 20
+
     var model: EnhancerModel
 
     public init() {
@@ -57,11 +62,19 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         let chunks = TranscriptChunker.chunk(transcript)
         guard !chunks.isEmpty else { throw EnhancementError.emptyTranscript }
 
+        let wordCount = transcript.utterances.reduce(0) { total, utterance in
+            total + utterance.text.split(whereSeparator: \.isWhitespace).count
+        }
+        guard wordCount >= Self.minimumTranscriptWords else {
+            enhancementLog.info("transcript too short: \(wordCount, privacy: .public) word(s)")
+            throw EnhancementError.transcriptTooShort
+        }
+
         // Map: digest each chunk.
         var digests: [ChunkDigest] = []
         for (index, chunk) in chunks.enumerated() {
             enhancementLog.info("digest \(index + 1, privacy: .public)/\(chunks.count, privacy: .public)")
-            digests.append(try await digest(chunkText: chunk.text))
+            digests.append(DigestSanitizer.sanitize(try await digest(chunkText: chunk.text)))
         }
 
         // Merge layer: keep the reduce prompt inside the context window.
@@ -70,6 +83,11 @@ public struct FoundationModelEnhancer: NoteEnhancer {
             mergeRound += 1
             enhancementLog.info("merge round \(mergeRound, privacy: .public): \(digests.count, privacy: .public) digests")
             digests = try await mergeInPairs(digests)
+        }
+
+        if digests.allSatisfy(DigestSanitizer.isEmpty) {
+            enhancementLog.info("all digests empty after sanitizing")
+            throw EnhancementError.transcriptTooShort
         }
 
         enhancementLog.info("reduce: \(digests.count, privacy: .public) digest(s)")
@@ -102,7 +120,8 @@ public struct FoundationModelEnhancer: NoteEnhancer {
             trimmed.removeLast()
             trimmed = trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        return trimmed.isEmpty ? nil : trimmed
+        if trimmed.isEmpty || DigestSanitizer.isEcho(trimmed) { return nil }
+        return trimmed
     }
 
     // MARK: Map
@@ -119,9 +138,11 @@ public struct FoundationModelEnhancer: NoteEnhancer {
             if pair + 1 < digests.count {
                 let combined = render([digests[pair], digests[pair + 1]])
                 merged.append(
-                    try await respondWithRetry {
-                        try await model.merge(renderedPair: combined)
-                    }
+                    DigestSanitizer.sanitize(
+                        try await respondWithRetry {
+                            try await model.merge(renderedPair: combined)
+                        }
+                    )
                 )
             } else {
                 merged.append(digests[pair])
@@ -143,9 +164,12 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         let digestText = render(digests)
 
         if noteLines.isEmpty {
-            return try await respondWithRetry {
+            let raw = try await respondWithRetry {
                 try await model.summarize(digestText: digestText)
             }
+            let cleaned = DigestSanitizer.cleanSummaryMarkdown(raw)
+            guard !cleaned.isEmpty else { throw EnhancementError.transcriptTooShort }
+            return cleaned
         }
 
         // One call per note line: the code owns the structure, so no line can
@@ -210,7 +234,7 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         }
         return items
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+            .filter { !$0.isEmpty && !DigestSanitizer.isEcho($0) }
     }
 
     private func render(_ digests: [ChunkDigest]) -> String {
@@ -246,6 +270,11 @@ public enum EnhancementError: Error, Equatable {
     case emptyTranscript
     /// The model refused or errored twice; the meeting completes without enhancement.
     case generationFailed
+    /// The transcript has too little substance to enhance meaningfully (e.g. a
+    /// few-word recording) — the on-device model tends to hallucinate content
+    /// echoing its own response-format schema instead of real notes. The
+    /// meeting completes transcript-only, same as any other thrown error here.
+    case transcriptTooShort
 }
 
 /// Fallback when FoundationModels can't run; also used by unit tests.

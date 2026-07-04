@@ -92,6 +92,14 @@ private actor FakeEnhancerModel: EnhancerModel {
 }
 
 @Suite struct EnhancerOrchestrationTests {
+    /// 20+ words — clears `FoundationModelEnhancer.minimumTranscriptWords` so
+    /// tests that aren't specifically about the short-transcript guard still
+    /// exercise the normal map/merge/reduce path.
+    private static let longEnoughText = """
+    We reviewed the quarterly roadmap today and discussed several open items \
+    that need follow-up before the next planning cycle begins in earnest.
+    """
+
     private func transcript(_ texts: [String]) -> Transcript {
         var utterances: [Utterance] = []
         var t: TimeInterval = 0
@@ -168,7 +176,7 @@ private actor FakeEnhancerModel: EnhancerModel {
     @Test func emptyNotesUsesSummarizePath() async throws {
         let model = FakeEnhancerModel(summarize: { _ in "## Summary\nfinal summary text" })
         let enhancer = FoundationModelEnhancer(model: model)
-        let result = try await enhancer.enhance(rawNotes: "   \n  \n", transcript: transcript(["Hello there."]))
+        let result = try await enhancer.enhance(rawNotes: "   \n  \n", transcript: transcript([Self.longEnoughText]))
         #expect(result.notes == "## Summary\nfinal summary text")
         let summarizeCount = await model.summarizeCalls.count
         let rewriteCount = await model.rewriteCalls.count
@@ -182,7 +190,7 @@ private actor FakeEnhancerModel: EnhancerModel {
         let model = FakeEnhancerModel(rewrite: { line, _ in "Rewritten: \(line)" })
         let enhancer = FoundationModelEnhancer(model: model)
         let rawNotes = "- first line\n\n• second line\nthird line"
-        let result = try await enhancer.enhance(rawNotes: rawNotes, transcript: transcript(["Hello there."]))
+        let result = try await enhancer.enhance(rawNotes: rawNotes, transcript: transcript([Self.longEnoughText]))
 
         let calls = await model.rewriteCalls
         #expect(calls.count == 3)
@@ -209,7 +217,7 @@ private actor FakeEnhancerModel: EnhancerModel {
     func metaCommentaryFallsBackToOriginalLine(rewriteResponse: String) async throws {
         let model = FakeEnhancerModel(rewrite: { _, _ in rewriteResponse })
         let enhancer = FoundationModelEnhancer(model: model)
-        let result = try await enhancer.enhance(rawNotes: "- original line text", transcript: transcript(["Hello."]))
+        let result = try await enhancer.enhance(rawNotes: "- original line text", transcript: transcript([Self.longEnoughText]))
         #expect(result.notes == "- original line text")
     }
 
@@ -225,7 +233,7 @@ private actor FakeEnhancerModel: EnhancerModel {
             extraFacts: { _, _ in ["Budget approved launch project.", "Legal review starts Monday morning."] }
         )
         let enhancer = FoundationModelEnhancer(model: model)
-        let result = try await enhancer.enhance(rawNotes: "- budget", transcript: transcript(["Hello."]))
+        let result = try await enhancer.enhance(rawNotes: "- budget", transcript: transcript([Self.longEnoughText]))
 
         #expect(result.notes.contains("## Also discussed"))
         #expect(result.notes.contains("Legal review starts Monday morning."))
@@ -238,7 +246,7 @@ private actor FakeEnhancerModel: EnhancerModel {
             extraFacts: { _, _ in ["Budget approved launch project."] }
         )
         let enhancer = FoundationModelEnhancer(model: model)
-        let result = try await enhancer.enhance(rawNotes: "- budget", transcript: transcript(["Hello."]))
+        let result = try await enhancer.enhance(rawNotes: "- budget", transcript: transcript([Self.longEnoughText]))
         #expect(!result.notes.contains("## Also discussed"))
     }
 
@@ -254,7 +262,7 @@ private actor FakeEnhancerModel: EnhancerModel {
             return ChunkDigest(keyPoints: ["ok"], decisions: [], actionItems: [])
         })
         let enhancer = FoundationModelEnhancer(model: model)
-        let result = try await enhancer.enhance(rawNotes: "", transcript: transcript(["Hello there."]))
+        let result = try await enhancer.enhance(rawNotes: "", transcript: transcript([Self.longEnoughText]))
         #expect(!result.notes.isEmpty)
         let calls = await model.digestCalls.count
         #expect(calls == 2)
@@ -264,7 +272,7 @@ private actor FakeEnhancerModel: EnhancerModel {
         let model = FakeEnhancerModel(digest: { _ in throw TestError.failed })
         let enhancer = FoundationModelEnhancer(model: model)
         await #expect(throws: EnhancementError.generationFailed) {
-            _ = try await enhancer.enhance(rawNotes: "", transcript: transcript(["Hello there."]))
+            _ = try await enhancer.enhance(rawNotes: "", transcript: transcript([Self.longEnoughText]))
         }
         let calls = await model.digestCalls.count
         #expect(calls == 2)
@@ -276,7 +284,7 @@ private actor FakeEnhancerModel: EnhancerModel {
         let model = FakeEnhancerModel(isAvailable: false)
         let enhancer = FoundationModelEnhancer(model: model)
         await #expect(throws: EnhancementError.unavailable) {
-            _ = try await enhancer.enhance(rawNotes: "- notes", transcript: transcript(["Hello."]))
+            _ = try await enhancer.enhance(rawNotes: "- notes", transcript: transcript([Self.longEnoughText]))
         }
     }
 
@@ -288,12 +296,93 @@ private actor FakeEnhancerModel: EnhancerModel {
         }
     }
 
+    @Test func shortTranscriptThrowsTranscriptTooShortWithoutCallingModel() async {
+        let model = FakeEnhancerModel()
+        let enhancer = FoundationModelEnhancer(model: model)
+        await #expect(throws: EnhancementError.transcriptTooShort) {
+            _ = try await enhancer.enhance(rawNotes: "", transcript: transcript(["Thank you."]))
+        }
+        let digestCalls = await model.digestCalls.count
+        let mergeCalls = await model.mergeCalls.count
+        let summarizeCalls = await model.summarizeCalls.count
+        let rewriteCalls = await model.rewriteCalls.count
+        let subtitleCalls = await model.subtitleCalls.count
+        #expect(digestCalls == 0)
+        #expect(mergeCalls == 0)
+        #expect(summarizeCalls == 0)
+        #expect(rewriteCalls == 0)
+        #expect(subtitleCalls == 0)
+    }
+
+    // MARK: 9a. Digest sanitization
+
+    @Test func allEchoDigestsThrowTranscriptTooShortBeforeSummarize() async throws {
+        let model = FakeEnhancerModel(
+            digest: { _ in ChunkDigest(keyPoints: ["Response format in json"], decisions: ["Decision:"], actionItems: ["Action:  "]) }
+        )
+        let enhancer = FoundationModelEnhancer(model: model)
+        await #expect(throws: EnhancementError.transcriptTooShort) {
+            _ = try await enhancer.enhance(rawNotes: "", transcript: transcript([Self.longEnoughText]))
+        }
+        let summarizeCalls = await model.summarizeCalls.count
+        #expect(summarizeCalls == 0)
+    }
+
+    @Test func echoItemsRemovedFromDigestBeforeRender() async throws {
+        let model = FakeEnhancerModel(
+            digest: { _ in
+                ChunkDigest(
+                    keyPoints: ["Response format in json", "Real budget fact discussed here"],
+                    decisions: ["Decision:"],
+                    actionItems: ["Action: follow up with legal team"]
+                )
+            }
+        )
+        let enhancer = FoundationModelEnhancer(model: model)
+        _ = try await enhancer.enhance(rawNotes: "", transcript: transcript([Self.longEnoughText]))
+
+        let digestText = await model.summarizeCalls.first
+        let text = try #require(digestText)
+        #expect(text.contains("Real budget fact discussed here"))
+        #expect(text.contains("follow up with legal team"))
+        #expect(!text.lowercased().contains("response format"))
+        #expect(!text.contains("Decision:\n") && !text.contains("- Decision:"))
+    }
+
+    @Test func summarizeOutputWithEchoBulletsIsCleaned() async throws {
+        let model = FakeEnhancerModel(
+            summarize: { _ in
+                """
+                ## Summary
+                - Real fact about the roadmap discussion
+                - Decision:
+                - Response format in json
+
+                ## Action items
+                - Response format in json
+                """
+            }
+        )
+        let enhancer = FoundationModelEnhancer(model: model)
+        let result = try await enhancer.enhance(rawNotes: "", transcript: transcript([Self.longEnoughText]))
+        #expect(result.notes.contains("Real fact about the roadmap discussion"))
+        #expect(!result.notes.lowercased().contains("response format"))
+        #expect(!result.notes.contains("## Action items"))
+    }
+
+    @Test func echoSubtitleYieldsNilSubtitle() async throws {
+        let model = FakeEnhancerModel(subtitle: { _ in "Response format in json" })
+        let enhancer = FoundationModelEnhancer(model: model)
+        let result = try await enhancer.enhance(rawNotes: "", transcript: transcript([Self.longEnoughText]))
+        #expect(result.subtitle == nil)
+    }
+
     // MARK: 9. Subtitle
 
     @Test func subtitleLandsInResultTrimmedAndPeriodStripped() async throws {
         let model = FakeEnhancerModel(subtitle: { _ in "  Q3 budget approved, launch moves to Sept 12. \n" })
         let enhancer = FoundationModelEnhancer(model: model)
-        let result = try await enhancer.enhance(rawNotes: "", transcript: transcript(["Hello there."]))
+        let result = try await enhancer.enhance(rawNotes: "", transcript: transcript([Self.longEnoughText]))
         #expect(result.subtitle == "Q3 budget approved, launch moves to Sept 12")
         let calls = await model.subtitleCalls.count
         #expect(calls == 1)
@@ -305,7 +394,7 @@ private actor FakeEnhancerModel: EnhancerModel {
             subtitle: { _ in throw TestError.failed }
         )
         let enhancer = FoundationModelEnhancer(model: model)
-        let result = try await enhancer.enhance(rawNotes: "", transcript: transcript(["Hello there."]))
+        let result = try await enhancer.enhance(rawNotes: "", transcript: transcript([Self.longEnoughText]))
         #expect(result.notes == "## Summary\nstill here")
         #expect(result.subtitle == nil)
         // The retry wrapper gives the subtitle call two attempts before giving up.
@@ -316,7 +405,7 @@ private actor FakeEnhancerModel: EnhancerModel {
     @Test func whitespaceOnlySubtitleBecomesNil() async throws {
         let model = FakeEnhancerModel(subtitle: { _ in " . " })
         let enhancer = FoundationModelEnhancer(model: model)
-        let result = try await enhancer.enhance(rawNotes: "", transcript: transcript(["Hello there."]))
+        let result = try await enhancer.enhance(rawNotes: "", transcript: transcript([Self.longEnoughText]))
         #expect(result.subtitle == nil)
     }
 }
