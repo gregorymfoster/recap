@@ -44,6 +44,7 @@ public struct RootView: View {
         } detail: {
             detail
         }
+        .axID(.rootView)
         .overlay(alignment: .bottom) {
             if let clock = session.clock {
                 RecordingPill(
@@ -108,6 +109,7 @@ public struct RootView: View {
                                 library.flushNotes(for: record)
                                 library.selectedMeetingID = nil
                             }
+                            .axID(.libraryBackButton)
                         }
                     }
             } else {

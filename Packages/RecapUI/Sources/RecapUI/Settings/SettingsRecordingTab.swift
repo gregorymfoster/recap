@@ -24,10 +24,12 @@ struct SettingsRecordingTab: View {
                         Text(device.name).tag(String?.some(device.uid))
                     }
                 }
+                .axID(.settingsInputDevicePicker)
                 .onChange(of: settings.preferredInputUID) {
                     stores?.session.setPreferredInputUID(settings.preferredInputUID)
                 }
                 Toggle("Capture system audio", isOn: $settings.includeSystemAudio)
+                    .axID(.settingsSystemAudioToggle)
                 LabeledContent("Start or stop recording anywhere") {
                     Text("⌥⌘R")
                         .font(Tokens.meta.monospacedDigit())
@@ -54,6 +56,7 @@ struct SettingsRecordingTab: View {
             Section {
                 LabeledContent("Processing priority", value: "Low — never interrupts")
                 Toggle("Pause processing on battery", isOn: $settings.pausesOnBattery)
+                    .axID(.settingsPauseOnBatteryToggle)
                     .onChange(of: settings.pausesOnBattery) {
                         queue?.setPausesOnBattery(settings.pausesOnBattery)
                     }
@@ -62,12 +65,14 @@ struct SettingsRecordingTab: View {
 
             Section {
                 Toggle("Label speakers in transcripts", isOn: $settings.labelsSpeakers)
+                    .axID(.settingsLabelSpeakersToggle)
                 Picker("Transcription language", selection: $settings.transcriptionLanguage) {
                     Text("Auto-detect").tag(String?.none)
                     ForEach(TranscriptionLanguages.common) { language in
                         Text(language.displayName).tag(String?.some(language.code))
                     }
                 }
+                .axID(.settingsTranscriptionLanguagePicker)
                 SettingsFootnote("Speaker labeling runs on-device and downloads a small model (~50 MB) the first time; if it isn't ready yet, transcripts are simply unlabeled. Auto-detect works well for most meetings — force a language for short or heavily accented recordings.")
             }
         }

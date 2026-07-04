@@ -23,7 +23,8 @@ struct SettingsPrivacyTab: View {
                     icon: "mic.fill",
                     title: "Microphone",
                     status: micStatus.permissionStatus,
-                    kind: .microphone
+                    kind: .microphone,
+                    actionAXID: .settingsMicrophonePermissionButton
                 ) {
                     switch $0 {
                     case .allow:
@@ -41,7 +42,8 @@ struct SettingsPrivacyTab: View {
                     icon: "speaker.wave.2.fill",
                     title: "System Audio",
                     status: systemAudioStatus,
-                    kind: .systemAudio
+                    kind: .systemAudio,
+                    actionAXID: .settingsSystemAudioPermissionButton
                 ) {
                     if $0 == .openSystemSettings {
                         PrivacyPane.open(PrivacyPane.systemAudio)
@@ -56,13 +58,15 @@ struct SettingsPrivacyTab: View {
                                 settings.lastSystemAudioTapFailed = true
                             }
                         }
+                        .axID(.settingsSystemAudioProbeButton)
                     }
                 }
                 PermissionRow(
                     icon: "calendar",
                     title: "Calendar",
                     status: calendarStatus.permissionStatus,
-                    kind: .calendar
+                    kind: .calendar,
+                    actionAXID: .settingsCalendarPermissionButton
                 ) {
                     switch $0 {
                     case .allow:
@@ -103,6 +107,7 @@ struct SettingsPrivacyTab: View {
                     .font(Tokens.meta)
                     .foregroundStyle(Tokens.textSecondary)
                 Button("Change…") { pickFolder() }
+                    .axID(.settingsMeetingsFolderChangeButton)
                     .controlSize(.small)
             }
         }
@@ -191,6 +196,7 @@ private struct PermissionRow<TrailingContent: View>: View {
     let title: String
     let status: PermissionStatus
     let kind: PermissionKind
+    let actionAXID: AXID
     let onAction: (PermissionAction) -> Void
     @ViewBuilder var trailingContent: () -> TrailingContent
 
@@ -199,6 +205,7 @@ private struct PermissionRow<TrailingContent: View>: View {
         title: String,
         status: PermissionStatus,
         kind: PermissionKind,
+        actionAXID: AXID,
         onAction: @escaping (PermissionAction) -> Void,
         @ViewBuilder trailingContent: @escaping () -> TrailingContent = { EmptyView() }
     ) {
@@ -206,6 +213,7 @@ private struct PermissionRow<TrailingContent: View>: View {
         self.title = title
         self.status = status
         self.kind = kind
+        self.actionAXID = actionAXID
         self.onAction = onAction
         self.trailingContent = trailingContent
     }
@@ -222,11 +230,13 @@ private struct PermissionRow<TrailingContent: View>: View {
                     switch action {
                     case .allow:
                         Button("Request…") { onAction(.allow) }
+                            .axID(actionAXID)
                             .controlSize(.small)
                             .buttonStyle(.borderedProminent)
                             .tint(Tokens.accentBlue)
                     case .openSystemSettings:
                         Button("Open System Settings…") { onAction(.openSystemSettings) }
+                            .axID(actionAXID)
                             .controlSize(.small)
                         trailingContent()
                     case .test, .none:

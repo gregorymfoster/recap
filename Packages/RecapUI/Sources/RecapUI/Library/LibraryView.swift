@@ -49,6 +49,7 @@ struct LibraryView: View {
             }
         }
         .background(Tokens.surface)
+        .axID(.libraryList)
         .dropDestination(for: URL.self) { urls, _ in
             handleDrop(urls)
         } isTargeted: { dropTargeted = $0 }
@@ -134,6 +135,7 @@ struct LibraryView: View {
         }
         .buttonStyle(.plain)
         .help("Search titles, notes, and transcripts")
+        .axID(.searchField)
     }
 
     private var recordButton: some View {
@@ -154,6 +156,7 @@ struct LibraryView: View {
         }
         .buttonStyle(.plain)
         .keyboardShortcut("n", modifiers: .command)
+        .axID(.libraryRecordButton)
     }
 
     private var sortFilterMenu: some View {
@@ -197,6 +200,7 @@ struct LibraryView: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .help("Sort and filter the library")
+        .axID(.librarySortFilterMenu)
     }
 
     // MARK: Drag & drop import
@@ -305,6 +309,7 @@ struct LibraryView: View {
             .contextMenu {
                 rowContextMenu(for: record)
             }
+            .axID(.meetingRow(record.meeting.id.uuidString))
     }
 
     @ViewBuilder
@@ -312,25 +317,31 @@ struct LibraryView: View {
         Button("Open") {
             library.selectedMeetingID = record.meeting.id
         }
+        .axID(.libraryRowOpen)
         Button("Copy notes as Markdown") {
             copyNotes(for: record)
         }
+        .axID(.libraryRowCopyNotes)
         Button("Reveal in Finder") {
             revealInFinder(record)
         }
         .disabled(!isOnDisk(record))
+        .axID(.libraryRowReveal)
         Divider()
         Button("Rename…") {
             renameTarget = record
         }
+        .axID(.libraryRowRename)
         Button("Re-transcribe") {
             queue?.retranscribe(record, in: library)
         }
+        .axID(.libraryRowRetranscribe)
         Divider()
         Button("Move to Trash", role: .destructive) {
             stores?.moveToTrash(record)
         }
         .disabled(!isOnDisk(record) || isActivelyRecording(record))
+        .axID(.libraryRowTrash)
     }
 
     /// Fixture records live at `/dev/null` — Reveal/Trash have nothing real
@@ -477,12 +488,14 @@ private struct RenameSheetModifier: ViewModifier {
             presenting: target
         ) { record in
             TextField("Title", text: $title)
+                .axID(.libraryRenameField)
             Button("Cancel", role: .cancel) { target = nil }
             Button("Rename") {
                 let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty { onRename(record, trimmed) }
                 target = nil
             }
+            .axID(.libraryRenameConfirm)
         } message: { record in
             Text("Choose a new title for \"\(record.meeting.title)\".")
         }

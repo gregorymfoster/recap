@@ -77,14 +77,17 @@ public struct MenuBarContent: View {
                     }
                     activateApp()
                 }
+                .axID(.menuBarOpenMeetingButton)
                 menuRow("Settings…", trailing: "⌘,") {
                     openSettings()
                 }
+                .axID(.menuBarSettingsButton)
             } else {
                 menuRow("Start recording", trailing: "⌥⌘R") {
                     stores.startRecording()
                     dismiss()
                 }
+                .axID(.menuBarStartRecordingButton)
                 if let upNext {
                     Divider().padding(.vertical, 5)
                     microHeader("Up next · Calendar")
@@ -104,21 +107,26 @@ public struct MenuBarContent: View {
                         stores.updateStatus.triggerInstall()
                         activateApp()
                     }
+                    .axID(.menuBarUpdateAvailableButton)
                 }
                 Divider().padding(.vertical, 5)
                 menuRow("Open Recap") {
                     activateApp()
                 }
+                .axID(.menuBarOpenAppButton)
                 menuRow("Settings…", trailing: "⌘,") {
                     openSettings()
                 }
+                .axID(.menuBarSettingsButton)
                 menuRow("Quit Recap", trailing: "⌘Q") {
                     NSApp.terminate(nil)
                 }
+                .axID(.menuBarQuitButton)
             }
         }
         .padding(6)
         .frame(width: 270)
+        .axID(.menuBarContent)
         .onAppear(perform: refreshUpNext)
     }
 
@@ -152,6 +160,7 @@ public struct MenuBarContent: View {
                     .background(.white, in: Circle())
             }
             .buttonStyle(.plain)
+            .axID(.menuBarPauseButton)
             Button {
                 stores.stopRecording()
             } label: {
@@ -163,6 +172,7 @@ public struct MenuBarContent: View {
                     .background(.white, in: Capsule())
             }
             .buttonStyle(.plain)
+            .axID(.menuBarStopButton)
         }
         .padding(.horizontal, 4)
         .padding(.top, 3)
@@ -207,6 +217,7 @@ public struct MenuBarContent: View {
             .buttonStyle(.plain)
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(Tokens.recordRed)
+            .axID(.menuBarUpNextRecordButton)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -241,6 +252,7 @@ public struct MenuBarContent: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .contentShape(Rectangle())
+        .axID(.menuBarRecentRow(record.meeting.id.uuidString))
     }
 
     // MARK: Standard rows

@@ -25,6 +25,7 @@ struct ModelManagerView: View {
                         ModelRow(model: model, state: manager.states[model.id] ?? .available, freeDiskBytes: freeDiskBytes)
                     }
                 }
+                .axID(.settingsModelsList)
             }
             .padding(28)
         }
@@ -101,6 +102,7 @@ private struct ModelRow: View {
         switch state {
         case .available:
             Button("Download") { manager.download(model) }
+                .axID(.settingsModelDownloadButton(model.id))
                 .buttonStyle(.bordered)
                 .controlSize(.small)
         case .downloading(let progress):
@@ -112,6 +114,7 @@ private struct ModelRow: View {
                     .font(Tokens.caption.monospacedDigit())
                     .foregroundStyle(Tokens.textSecondary)
                 Button("Pause") { manager.pauseDownload(of: model) }
+                    .axID(.settingsModelPauseButton(model.id))
                     .buttonStyle(.borderless)
                     .controlSize(.small)
             }
@@ -119,9 +122,11 @@ private struct ModelRow: View {
             HStack(spacing: 8) {
                 if !isActive {
                     Button("Use") { manager.setActive(model.id) }
+                        .axID(.settingsModelUseButton(model.id))
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                     Button("Delete", role: .destructive) { manager.delete(model) }
+                        .axID(.settingsModelDeleteButton(model.id))
                         .buttonStyle(.borderless)
                         .controlSize(.small)
                 }

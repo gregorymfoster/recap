@@ -46,6 +46,7 @@ struct RecordingPill: View {
             .buttonStyle(.plain)
             .keyboardShortcut("p", modifiers: [.command, .option])
             .help(isPaused ? "Resume recording (⌥⌘P)" : "Pause recording (⌥⌘P)")
+            .axID(.recordingPauseButton)
             Button(action: onStop) {
                 // stays: dark text pinned to black on a solid white control-button
                 // in both modes (Tokens.textPrimary would invert to near-white here)
@@ -58,6 +59,7 @@ struct RecordingPill: View {
             }
             .buttonStyle(.plain)
             .keyboardShortcut(".", modifiers: .command)
+            .axID(.recordingStopButton)
         }
         .padding(.leading, 18)
         .padding(.trailing, 10)
@@ -72,6 +74,7 @@ struct RecordingPill: View {
         // The bottom overlay proposes a narrow width; without this the HStack
         // compresses.
         .fixedSize()
+        .axID(.recordingPill)
     }
 
     /// Running: a TimelineView ticking from the clock's synthetic start date

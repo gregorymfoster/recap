@@ -18,6 +18,7 @@ struct SettingsCalendarTab: View {
                     Text("Ask to record").tag(CalendarAutoRecordMode.prompt)
                     Text("Record automatically").tag(CalendarAutoRecordMode.auto)
                 }
+                .axID(.settingsCalendarAutoRecordPicker)
                 .onChange(of: settings.calendarAutoRecord) {
                     stores?.applyCalendarAutoRecordSetting()
                 }
@@ -46,6 +47,7 @@ struct SettingsCalendarTab: View {
                             }
                         )
                     )
+                    .axID(.settingsCallAppToggle(app.id))
                 }
                 SettingsFootnote("Detection watches audio activity from call apps only — nothing is captured until you record.")
             }

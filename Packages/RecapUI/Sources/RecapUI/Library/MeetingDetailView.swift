@@ -61,6 +61,7 @@ struct MeetingDetailView: View {
                         }
                     )
                     .frame(minWidth: 260, idealWidth: 340)
+                    .axID(.transcriptPane)
                 }
             }
             bottomBar
@@ -145,6 +146,7 @@ struct MeetingDetailView: View {
             }
             if let enhancedNotes, !showingOriginal {
                 EnhancedNotesView(markdown: enhancedNotes)
+                    .axID(.enhancedNotesView)
                     .padding(.top, 8)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         enhancedCaption
@@ -164,9 +166,11 @@ struct MeetingDetailView: View {
                     .padding(.horizontal, 34)
                     .padding(.top, 16)
                     .padding(.bottom, 12)
+                    .axID(.notesEditor)
             }
         }
         .background(Tokens.surface)
+        .axID(.detailPane)
     }
 
     /// True when the editor pane is currently showing the enhanced summary
@@ -185,6 +189,7 @@ struct MeetingDetailView: View {
             CopyButton(help: isShowingEnhanced ? "Copy summary" : "Copy notes", toolbarStyle: true) {
                 isShowingEnhanced ? (enhancedNotes ?? "") : notes
             }
+            .axID(.detailCopyNotesButton)
         }
     }
 
@@ -210,6 +215,7 @@ struct MeetingDetailView: View {
         }
         .buttonStyle(.plain)
         .help(showTranscript ? "Hide transcript" : "Show transcript")
+        .axID(.transcriptToggleButton)
     }
 
     /// Blue-tinted banner shown while this meeting's notes are being
@@ -255,6 +261,7 @@ struct MeetingDetailView: View {
                     .foregroundStyle(Tokens.accentBlue)
             }
             .buttonStyle(.plain)
+            .axID(.enhancedNotesUndoButton)
         }
     }
 
@@ -273,6 +280,7 @@ struct MeetingDetailView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
+            .axID(.notesModeToggle)
         }
     }
 
@@ -368,6 +376,7 @@ struct MeetingDetailView: View {
             .labelsHidden()
             .controlSize(.small)
             .fixedSize()
+            .axID(.liveInputDevicePicker)
             .onChange(of: settings.preferredInputUID) {
                 session.setPreferredInputUID(settings.preferredInputUID)
             }

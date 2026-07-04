@@ -12,6 +12,7 @@ struct SettingsSyncTab: View {
         Form {
             Section {
                 Toggle("Copy finished meetings into an Obsidian vault", isOn: $settings.syncsToObsidian)
+                    .axID(.settingsObsidianSyncToggle)
                     .onChange(of: settings.syncsToObsidian) {
                         if settings.syncsToObsidian {
                             if settings.obsidianVaultPath.isEmpty { pickVaultFolder() }
@@ -27,6 +28,7 @@ struct SettingsSyncTab: View {
                                 .font(Tokens.meta)
                                 .foregroundStyle(Tokens.textSecondary)
                             Button("Change…") { pickVaultFolder() }
+                                .axID(.settingsObsidianVaultChangeButton)
                                 .controlSize(.small)
                         }
                     }
@@ -36,6 +38,7 @@ struct SettingsSyncTab: View {
 
             Section {
                 TextField("Webhook URL", text: $settings.webhookURL, prompt: Text("https://example.com/hook"))
+                    .axID(.settingsWebhookURLField)
                     .textFieldStyle(.roundedBorder)
                     .font(Tokens.meta)
                 SettingsFootnote("Finished meetings are also POSTed to this URL as JSON (title, notes, transcript). Leave empty to disable.")
@@ -43,6 +46,7 @@ struct SettingsSyncTab: View {
 
             Section {
                 Toggle("Back up meeting folders to another location", isOn: $settings.mirrorBackupEnabled)
+                    .axID(.settingsMirrorBackupToggle)
                     .onChange(of: settings.mirrorBackupEnabled) {
                         if settings.mirrorBackupEnabled {
                             if settings.mirrorFolderPath.isEmpty { pickMirrorFolder() }
@@ -58,6 +62,7 @@ struct SettingsSyncTab: View {
                                 .font(Tokens.meta)
                                 .foregroundStyle(Tokens.textSecondary)
                             Button("Change…") { pickMirrorFolder() }
+                                .axID(.settingsMirrorFolderChangeButton)
                                 .controlSize(.small)
                         }
                     }

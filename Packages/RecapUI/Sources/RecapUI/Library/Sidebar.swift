@@ -53,6 +53,7 @@ struct Sidebar: View {
                 }
             }
             .listStyle(.sidebar)
+            .axID(.sidebar)
             // Design global #2: sidebar selection should read as a neutral
             // translucent fill, not accent blue. `.tint()` was tried here
             // first, but on macOS `List`'s tint bridges to the *window's*
@@ -165,5 +166,6 @@ struct QueueWidget: View {
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: 9))
+        .axID(.queueWidget)
     }
 }

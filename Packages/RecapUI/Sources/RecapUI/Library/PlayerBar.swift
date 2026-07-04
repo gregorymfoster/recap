@@ -21,6 +21,7 @@ struct PlayerBar: View {
                 in: 0...max(playback.duration, 1)
             )
             .tint(Tokens.accentBlue)
+            .axID(.playerScrubber)
             Text(Self.timestamp(playback.duration))
                 .font(.system(size: 10.5).monospacedDigit())
                 .foregroundStyle(Tokens.textSecondary)
@@ -31,6 +32,7 @@ struct PlayerBar: View {
         .frame(height: 32)
         .background(Tokens.subtleBackground.opacity(0.9))
         .overlay(alignment: .top) { Divider() }
+        .axID(.playerBar)
     }
 
     /// Round white 28pt play/pause button (mock 8d).
@@ -45,6 +47,7 @@ struct PlayerBar: View {
         }
         .buttonStyle(.plain)
         .help(playback.isPlaying ? "Pause" : "Play")
+        .axID(.playerPlayPauseButton)
     }
 
     /// Speed chip cycling 1× / 1.5× / 2×.
@@ -59,6 +62,7 @@ struct PlayerBar: View {
         }
         .buttonStyle(.plain)
         .help("Playback speed")
+        .axID(.playerRateChip)
     }
 
     static func timestamp(_ seconds: TimeInterval) -> String {

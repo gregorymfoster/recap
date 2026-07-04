@@ -87,6 +87,7 @@ private struct ToastBanner: View {
         // stays: shadow stays black in both modes
         .shadow(color: .black.opacity(isWarning ? 0.12 : 0.25), radius: 12, y: 4)
         .frame(maxWidth: 440)
+        .axID(.toastOverlay)
     }
 }
 

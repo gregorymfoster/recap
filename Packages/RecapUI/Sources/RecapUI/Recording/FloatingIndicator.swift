@@ -119,6 +119,7 @@ struct FloatingIndicatorView: View {
         .onTapGesture(perform: onActivate)
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovering)
+        .axID(.floatingIndicator)
     }
 
     private var waveform: some View {

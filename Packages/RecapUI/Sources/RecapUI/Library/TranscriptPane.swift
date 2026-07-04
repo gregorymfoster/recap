@@ -88,6 +88,7 @@ struct TranscriptPane: View {
                 CopyButton(help: "Copy transcript") {
                     TranscriptFormatter.plainText(utterances: utterances, speakerNames: speakerNames)
                 }
+                .axID(.transcriptCopyButton)
             }
         }
     }
@@ -243,6 +244,7 @@ struct TranscriptPane: View {
                         .buttonStyle(.borderedProminent)
                         .tint(Tokens.accentBlue)
                         .controlSize(.small)
+                        .axID(.transcriptDownloadModelButton)
                 }
             }
         case (true, .failed):
@@ -415,6 +417,7 @@ struct TranscriptPane: View {
             .popover(isPresented: renamingBinding(for: speakerID), arrowEdge: .bottom) {
                 renamePopover(for: speakerID)
             }
+            .axID(.transcriptSpeakerLabel(speakerID))
     }
 
     /// Dashed-underline mask (design handoff v2 §8e: `1px dashed rgba(255,255,255,.3)`).
@@ -456,6 +459,7 @@ struct TranscriptPane: View {
                 .textFieldStyle(.roundedBorder)
                 .focused($renameFieldFocused)
                 .onSubmit { commitRename(speakerID) }
+                .axID(.transcriptSpeakerRenameField)
 
             if !suggestionChips.isEmpty {
                 HStack(spacing: 5) {
@@ -485,6 +489,7 @@ struct TranscriptPane: View {
                     .tint(Tokens.accentBlue)
                     .controlSize(.small)
                     .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .axID(.transcriptSpeakerRenameConfirm)
             }
         }
         .padding(13)

@@ -64,6 +64,7 @@ struct MeetingStatusView: View {
                         .buttonStyle(.plain)
                         .font(Tokens.caption.weight(.semibold))
                         .foregroundStyle(Tokens.accentBlue)
+                        .axID(.libraryRowRetranscribe)
                 }
             }
             .help(message)
@@ -87,6 +88,7 @@ struct MeetingStatusView: View {
             Button(action: onInstallModel) { label }
                 .buttonStyle(.plain)
                 .help("No speech model is installed yet. Click to open Models and download one — this meeting transcribes automatically once it's ready.")
+                .axID(.rowInstallModelButton)
         } else {
             label
         }

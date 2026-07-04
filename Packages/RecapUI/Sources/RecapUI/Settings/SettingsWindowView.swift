@@ -16,20 +16,26 @@ public struct SettingsWindowView: View {
         TabView {
             Tab("General", systemImage: "gearshape") {
                 SettingsGeneralTab()
+                    .axID(.settingsTabGeneral)
             }
             Tab("Recording", systemImage: "mic") {
                 SettingsRecordingTab()
+                    .axID(.settingsTabRecording)
             }
             Tab("Calendar", systemImage: "calendar") {
                 SettingsCalendarTab()
+                    .axID(.settingsTabCalendar)
             }
             Tab("Sync", systemImage: "arrow.triangle.2.circlepath") {
                 SettingsSyncTab()
+                    .axID(.settingsTabSync)
             }
             Tab("Privacy", systemImage: "hand.raised") {
                 SettingsPrivacyTab()
+                    .axID(.settingsTabPrivacy)
             }
         }
+        .axID(.settingsWindow)
         .frame(width: 620)
         .formStyle(.grouped)
     }

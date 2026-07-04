@@ -17,6 +17,7 @@ struct SettingsGeneralTab: View {
                         set: { launchAtLogin.setEnabled($0) }
                     )
                 )
+                .axID(.settingsLaunchAtLoginToggle)
                 if let footnote = launchAtLogin.status.footnote {
                     SettingsFootnote(footnote)
                 } else if let error = launchAtLogin.lastErrorMessage {
@@ -33,6 +34,7 @@ struct SettingsGeneralTab: View {
                     Text("Minimal").tag(FloatingCapsuleStyle.minimal)
                     Text("Full").tag(FloatingCapsuleStyle.full)
                 }
+                .axID(.settingsFloatingCapsulePicker)
                 SettingsFootnote("Shows a small always-on-top status while recording in the background. \"Minimal\" is just the dot and timer; \"Full\" adds a waveform. Click it anytime to bring Recap forward.")
             }
         }

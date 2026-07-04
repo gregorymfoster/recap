@@ -142,6 +142,7 @@ struct OnboardingView: View {
             .buttonStyle(.borderedProminent)
             .tint(Tokens.accentBlue)
             .controlSize(.small)
+            .axID(.onboardingDownloadRecommendedModelButton)
         case .downloading:
             ProgressView()
                 .controlSize(.small)
@@ -170,6 +171,7 @@ struct OnboardingView: View {
                     models.download(tiny)
                 }
                 .controlSize(.small)
+                .axID(.onboardingChooseSecondaryModelButton)
             case .downloading:
                 ProgressView().controlSize(.small)
             case .installed:
@@ -208,11 +210,13 @@ struct OnboardingView: View {
                                 PrivacyPane.open(PrivacyPane.microphone)
                             }
                             .controlSize(.small)
+                            .axID(.onboardingPermissionMicButton)
                         } else {
                             Button("Allow") {
                                 Task { micGranted = await MeetingRecorder.requestMicPermission() }
                             }
                             .controlSize(.small)
+                            .axID(.onboardingPermissionMicButton)
                         }
                     }
                 )
@@ -231,6 +235,7 @@ struct OnboardingView: View {
                                 settings.lastSystemAudioTapFailed = (result != .captured)
                             }
                             .tint(Tokens.accentBlue)
+                            .axID(.onboardingPermissionSystemAudioButton)
                         }
                     }
                 )
@@ -273,6 +278,7 @@ struct OnboardingView: View {
             if step > 0 {
                 Button("Back") { step -= 1 }
                     .buttonStyle(.borderless)
+                    .axID(.onboardingBackButton)
             }
             Spacer()
             HStack(spacing: 6) {
@@ -289,12 +295,14 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Tokens.textPrimary)
+                .axID(.onboardingContinueButton)
             } else {
                 Button("Start using Recap") {
                     settings.hasOnboarded = true
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Tokens.textPrimary)
+                .axID(.onboardingFinishButton)
             }
         }
     }

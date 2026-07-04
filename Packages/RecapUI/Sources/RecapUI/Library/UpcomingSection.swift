@@ -209,6 +209,7 @@ private struct UpcomingRow: View {
                 .background(Tokens.recordRed, in: Capsule())
             }
             .buttonStyle(.plain)
+            .axID(.upcomingRecordButton(event.id))
         } else {
             Button(action: onRecord) {
                 Text("Record")
@@ -219,6 +220,7 @@ private struct UpcomingRow: View {
                     .background(hovering ? Tokens.recordRed : Color.clear, in: Capsule())
             }
             .buttonStyle(.plain)
+            .axID(.upcomingRecordButton(event.id))
         }
     }
 }

@@ -54,6 +54,7 @@ struct CopyButton: View {
         .buttonStyle(.plain)
         .help(help)
         .onDisappear { revertTask?.cancel() }
+        .axID(.copyButton)
     }
 }
 

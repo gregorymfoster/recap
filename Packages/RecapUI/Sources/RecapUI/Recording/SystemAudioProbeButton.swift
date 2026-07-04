@@ -36,6 +36,7 @@ struct SystemAudioProbeButton: View {
                 }
             }
             .controlSize(.small)
+            .axID(.systemAudioProbeButton)
         case .checking:
             ProgressView()
                 .controlSize(.small)

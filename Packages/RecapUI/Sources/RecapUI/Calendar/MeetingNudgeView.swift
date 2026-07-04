@@ -55,6 +55,7 @@ public struct MeetingNudgeView: View {
             RoundedRectangle(cornerRadius: Tokens.radiusCard)
                 .stroke(Tokens.darkSurfaceStroke, lineWidth: 1)
         )
+        .axID(.nudgePanel)
     }
 
     private var header: some View {
@@ -94,6 +95,7 @@ public struct MeetingNudgeView: View {
                     .buttonStyle(.plain)
                     .font(.system(size: 10.5))
                     .foregroundStyle(Tokens.textTertiary)
+                    .axID(.nudgeDontAskButton)
                 }
             }
         case .recordingStarted:
@@ -104,6 +106,7 @@ public struct MeetingNudgeView: View {
                 }
                 .buttonStyle(.bordered)
                 .font(.system(size: 12, weight: .semibold))
+                .axID(.nudgeStopButton)
             }
         }
     }
@@ -125,6 +128,7 @@ public struct MeetingNudgeView: View {
             .background(Tokens.recordRed, in: Capsule())
         }
         .buttonStyle(.plain)
+        .axID(.nudgeRecordButton)
     }
 
     private var notNowButton: some View {
@@ -139,5 +143,6 @@ public struct MeetingNudgeView: View {
                 .background(Tokens.chipBackground, in: Capsule())
         }
         .buttonStyle(.plain)
+        .axID(.nudgeDismissButton)
     }
 }
