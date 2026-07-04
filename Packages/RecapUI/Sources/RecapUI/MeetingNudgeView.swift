@@ -87,7 +87,8 @@ public struct MeetingNudgeView: View {
                 notNowButton
                 Spacer(minLength: 0)
                 if let appID, let onDontAsk {
-                    Button("Don\u{2019}t ask for \(appName ?? appID)") {
+                    let shortName = CallAppCatalog.apps.first { $0.id == appID }?.shortName
+                    Button("Don\u{2019}t ask for \(shortName ?? appName ?? appID)") {
                         onDontAsk()
                     }
                     .buttonStyle(.plain)

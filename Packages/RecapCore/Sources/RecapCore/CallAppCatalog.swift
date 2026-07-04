@@ -8,13 +8,17 @@ public struct CallApp: Identifiable, Hashable, Sendable {
     /// `SettingsStore.disabledCallAppIDs` stores.
     public var id: String
     public var name: String
+    /// Short display name for tight UI ("Don't ask for Teams" fits where
+    /// "…for Microsoft Teams" truncates). Defaults to `name`.
+    public var shortName: String
     /// Every bundle identifier this app ships under (e.g. Teams classic +
     /// new Teams), all mapping back to the one catalog entry.
     public var bundleIDs: [String]
 
-    public init(id: String, name: String, bundleIDs: [String]) {
+    public init(id: String, name: String, shortName: String? = nil, bundleIDs: [String]) {
         self.id = id
         self.name = name
+        self.shortName = shortName ?? name
         self.bundleIDs = bundleIDs
     }
 }
@@ -26,7 +30,7 @@ public enum CallAppCatalog {
     public static let apps: [CallApp] = [
         CallApp(id: "us.zoom.xos", name: "Zoom", bundleIDs: ["us.zoom.xos"]),
         CallApp(
-            id: "com.microsoft.teams2", name: "Microsoft Teams",
+            id: "com.microsoft.teams2", name: "Microsoft Teams", shortName: "Teams",
             bundleIDs: ["com.microsoft.teams2", "com.microsoft.teams"]
         ),
         CallApp(id: "Cisco-Systems.Spark", name: "Webex", bundleIDs: ["Cisco-Systems.Spark"]),
