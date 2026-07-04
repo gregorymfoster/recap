@@ -22,9 +22,23 @@ RecapCore, RecapAudio, RecapTranscription, and RecapEnhancement. Keep logic in s
 `swift test --package-path Packages/RecapUI` (largest suite, 26 files). No `--filter` needed
 usually; use one for iterating on a single store, e.g. `--filter LibraryStore`.
 
+## Folder map
+
+`Sources/RecapUI/` and `Tests/RecapUITests/` are organized into matching feature folders
+(SwiftPM globs `Sources/**`, so this is a pure layout convention, not a module boundary):
+
+- `App/` — app-lifetime store graph, root view, onboarding, update/completion notifications.
+- `Library/` — meeting list, meeting detail, transcript pane, notes, search, playback.
+- `Queue/` — processing queue UI and processor settings snapshot.
+- `Recording/` — active recording session, pill, floating capsule, preflight checks.
+- `Calendar/` — calendar watching, upcoming meetings, meeting-start nudge.
+- `Import/` — audio file import.
+- `MenuBar/` — menu bar extra popover content.
+- `Settings/` — settings store, all Settings tabs, permissions, model manager, onboarding helpers.
+- `Fixtures/` — synthetic audio for `-fixtures` mode.
+- `Shared/` — design tokens, toasts, global hotkey, small reusable views.
+
 ## Gotchas
-- Flat 56-file `Sources/RecapUI/` directory — a folder reorg is planned but hasn't happened;
-  don't assume subfolders exist.
 - Dynamic `NSColor.resolve(in:)` (used under `Tokens`' dynamic colors) deadlocks off-main —
   any test touching it must be `@MainActor` (see `RecapUITests.swift`, `PermissionsModelTests.swift`).
 - Fixture data lives in `LibraryStore`'s fixture section plus `FixtureAudio.swift` — new UI
