@@ -100,10 +100,32 @@ public final class AppStores {
     @ObservationIgnored private var changeBusConsumerTask: Task<Void, Never>?
     @ObservationIgnored private let exportDebounce: Duration
 
-    /// Disk-backed graph used by the app. `-fixtures` swaps in sample data
-    /// for UI work and screenshots (no queue — fixtures never process).
-    public init() {
-        if ProcessInfo.processInfo.arguments.contains("-fixtures") {
+    // MARK: Inert launch-argument carriers (parsed, not yet consumed)
+
+    /// The fixture scenario from `-fixtures <name>` ("default" when bare).
+    /// Only "default" behavior exists today — carried for the
+    /// fixture-scenarios work. `nil` outside the fixtures graph.
+    public let fixtureScenario: String?
+    /// The route from `-open <route>`, not yet applied anywhere — carried
+    /// for the launch-routing work.
+    public let launchRoute: Route?
+    /// The directory from `-seed-dir <path>`, not yet consumed — carried
+    /// for the seeded-state work.
+    public let launchSeedDir: URL?
+
+    /// The launch graph used by the app, selected by the parsed launch
+    /// configuration: `.normal` is disk-backed; `.fixtures` swaps in sample
+    /// data for UI work and screenshots (no queue — fixtures never process);
+    /// `.soak` is the synthetic-audio soak harness.
+    public init(configuration: LaunchConfiguration) {
+        launchRoute = configuration.route
+        launchSeedDir = configuration.seedDir
+        if case .fixtures(let scenario) = configuration.mode {
+            fixtureScenario = scenario
+        } else {
+            fixtureScenario = nil
+        }
+        if case .fixtures = configuration.mode {
             settings = .ephemeralOnboarded()
             library = .fixture()
             models = WhisperModelManager()
@@ -116,7 +138,7 @@ public final class AppStores {
             makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
             makeCallAudioMonitor = { nil }
             todayEventsProvider = { _ in [] }
-        } else if ProcessInfo.processInfo.arguments.contains("-soak") {
+        } else if configuration.mode == .soak {
             // Soak-test graph: real recording pipeline (mixer, writer, clock,
             // menu bar) driven by synthetic zero-hardware audio sources, no
             // transcription engine, no queue. Disk-backed under a throwaway
@@ -226,6 +248,9 @@ public final class AppStores {
 
     /// Preview graph around the given library.
     init(library: LibraryStore) {
+        fixtureScenario = nil
+        launchRoute = nil
+        launchSeedDir = nil
         settings = .ephemeralOnboarded()
         self.library = library
         models = WhisperModelManager()
@@ -262,6 +287,9 @@ public final class AppStores {
         makeCallAudioMonitor: @escaping () -> CallAudioMonitoring? = { nil },
         todayEventsProvider: @escaping @MainActor (Date) -> [CalendarEventSnapshot] = { _ in [] }
     ) {
+        fixtureScenario = nil
+        launchRoute = nil
+        launchSeedDir = nil
         self.settings = settings
         self.storage = storage
         self.library = library

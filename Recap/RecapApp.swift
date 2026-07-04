@@ -27,8 +27,12 @@ struct RecapApp: App {
     /// `SMAppService` wrapper with no shared state).
     private let launchAtLogin = LaunchAtLoginController()
 
+    /// The launch arguments, parsed exactly once (pure `LaunchConfiguration`
+    /// in RecapUI — the shell never inspects `CommandLine` beyond this).
+    private let launch = LaunchConfiguration(arguments: Array(CommandLine.arguments.dropFirst()))
+
     init() {
-        let stores = AppStores()
+        let stores = AppStores(configuration: launch)
         _stores = State(initialValue: stores)
         updater = AppIdentity.isDevBuild ? nil : UpdaterModel(status: stores.updateStatus)
         floatingIndicator = FloatingIndicatorController(stores: stores)
@@ -42,10 +46,15 @@ struct RecapApp: App {
         WindowGroup(id: "main") {
             RootView(stores: stores)
                 .frame(minWidth: 800, minHeight: 500)
-                .modifier(MenuBarContentDebugOpener())
+                .modifier(DebugWindowOpener(configuration: launch))
         }
         .defaultSize(width: 1060, height: 660)
         .windowResizability(.contentMinSize)
+        // Fixtures/soak launches must boot into a deterministic single
+        // window — never restore stale multi-window state from a previous
+        // launch. (`LaunchConfiguration.restoresWindowState` is the tested
+        // decision.)
+        .restorationBehavior(launch.restoresWindowState ? .automatic : .disabled)
         .commands {
             CommandGroup(after: .appInfo) {
                 if let updater {
@@ -91,114 +100,31 @@ struct RecapApp: App {
         // render the header block, progress rows, or quick actions.
         .menuBarExtraStyle(.window)
 
-        // Debug hook (like `-fixtures`/`-soak`): the menu bar extra's popover
-        // normally lives in the status-item overflow, which screen capture
-        // and UI-automation tooling can't reach headlessly. This auxiliary,
-        // non-resizable window hosts the same `MenuBarContent` view so its
-        // idle/recording states can be screenshotted like any other window.
+        // Debug hooks (like `-fixtures`/`-soak`), content hosted in RecapUI
+        // (`DebugWindows.swift`): the menu bar extra's popover and the real
+        // nudge `NSPanel` live where headless screenshot tooling can't
+        // reach, so these auxiliary windows host the same content.
         // `SceneBuilder` doesn't support an `if` here (control flow inside a
         // scene builder isn't just unsupported, it currently ICEs the
-        // compiler — confirmed by isolated repro), so the scene is always
-        // declared but launch-suppressed; `MenuBarContentDebugOpener` below
-        // opens it explicitly only when `-show-menubar-content` is passed
-        // (documented in CLAUDE.md's "Run the app with fixture data" section).
-        Window("Menu Bar Content", id: "menubar-content-debug") {
+        // compiler — confirmed by isolated repro), so the scenes are always
+        // declared but launch-suppressed; `DebugWindowOpener` (on the main
+        // window above) opens them only when this launch actually passed
+        // `-show-menubar-content` / `-fixtures -show-nudge`. Restoration is
+        // disabled outright: a debug window must never reappear on a later
+        // launch via scene restoration when its flag isn't present.
+        Window("Menu Bar Content", id: DebugWindowID.menuBarContent) {
             MenuBarContentDebugView(stores: stores)
         }
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
 
-        // Debug hook for the "Meeting started?" nudge (design mock 9b),
-        // opened the same way as `-show-menubar-content` above: the real
-        // panel is a borderless, non-activating, all-spaces `NSPanel` that
-        // headless screenshot tooling can't reliably find, so this stacks
-        // all three content variants in an ordinary window instead. Pure
-        // view hosting — no `MeetingNudgePanelController`, no
-        // `MeetingNudgeCenter` — so nothing here can misfire a real nudge.
-        Window("Nudge Preview", id: "nudge-preview-debug") {
+        Window("Nudge Preview", id: DebugWindowID.nudgePreview) {
             NudgePreviewDebugView()
         }
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(.suppressed)
-    }
-}
-
-/// Content view for the `-show-menubar-content` debug window.
-private struct MenuBarContentDebugView: View {
-    let stores: AppStores
-
-    var body: some View {
-        MenuBarContent(stores: stores)
-            .background(Tokens.surface)
-    }
-}
-
-/// Opens the (launch-suppressed) menu-bar-content debug window at launch when
-/// `-show-menubar-content` is passed. Lives on `RootView`'s window rather
-/// than the debug window's own body, since `openWindow` needs a scene that's
-/// actually created to call from — the suppressed window's own content view
-/// never runs its body until something opens it.
-struct MenuBarContentDebugOpener: ViewModifier {
-    @Environment(\.openWindow) private var openWindow
-
-    func body(content: Content) -> some View {
-        content.task {
-            if ProcessInfo.processInfo.arguments.contains("-show-menubar-content") {
-                openWindow(id: "menubar-content-debug")
-            }
-            if ProcessInfo.processInfo.arguments.contains("-fixtures"),
-                ProcessInfo.processInfo.arguments.contains("-show-nudge")
-            {
-                openWindow(id: "nudge-preview-debug")
-            }
-        }
-    }
-}
-
-/// Content view for the `-fixtures -show-nudge` debug window: stacks all
-/// three `MeetingNudgeView` variants (ask with a calendar match, ask
-/// app-only, and the auto-record confirmation) so the fixture app can
-/// screenshot every state of design mock 9b in one shot.
-private struct NudgePreviewDebugView: View {
-    private static let now = Date.now
-
-    private static let matchedEvent = CalendarEventSnapshot(
-        id: "nudge-preview-match",
-        title: "Design crit — mobile",
-        start: now.addingTimeInterval(-30),
-        end: now.addingTimeInterval(30 * 60),
-        otherAttendees: ["Maya Chen", "Priya Patel"],
-        hasConferenceURL: true,
-        conferenceProvider: "Zoom"
-    )
-
-    private static let recordingEvent = CalendarEventSnapshot(
-        id: "nudge-preview-recording",
-        title: "Roadmap review",
-        start: now.addingTimeInterval(-40),
-        end: now.addingTimeInterval(20 * 60),
-        otherAttendees: ["Jordan Lee"],
-        hasConferenceURL: true,
-        conferenceProvider: "Zoom"
-    )
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            MeetingNudgeView(
-                nudge: .ask(appID: "us.zoom.xos", appName: "Zoom", match: Self.matchedEvent),
-                onRecord: {}, onNotNow: {}, onDontAsk: {}
-            )
-            MeetingNudgeView(
-                nudge: .ask(appID: "com.microsoft.teams2", appName: "Microsoft Teams", match: nil),
-                onRecord: {}, onNotNow: {}, onDontAsk: {}
-            )
-            MeetingNudgeView(
-                nudge: .recordingStarted(event: Self.recordingEvent, missedSeconds: 40),
-                onRecord: {}, onNotNow: {}, onStop: {}
-            )
-        }
-        .padding(24)
-        .background(Tokens.surface)
+        .restorationBehavior(.disabled)
     }
 }
 
