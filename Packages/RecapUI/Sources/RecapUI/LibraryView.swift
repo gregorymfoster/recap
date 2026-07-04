@@ -23,6 +23,11 @@ struct LibraryView: View {
 
     @State private var dropTargeted = false
     @State private var renameTarget: MeetingRecord?
+    /// Drives the Upcoming section's countdown/pruning without a `.timer`
+    /// Text or periodic `TimelineView` (both peg the CPU inside long-lived
+    /// SwiftUI hierarchies — see `MenuBarLabel`). A plain 30s sleep loop,
+    /// cancelled on disappear, calls `refresh()` directly instead.
+    @State private var upcomingRefreshTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView {
@@ -52,6 +57,28 @@ struct LibraryView: View {
         .toolbar { toolbarContent }
         .renameSheet(target: $renameTarget) { record, newTitle in
             library.rename(record, to: newTitle)
+        }
+        .onAppear {
+            stores?.upcoming.refresh()
+            startUpcomingRefreshLoop()
+        }
+        .onDisappear {
+            upcomingRefreshTask?.cancel()
+            upcomingRefreshTask = nil
+        }
+    }
+
+    /// Re-queries the calendar every 30s while the Library is visible, so the
+    /// countdown and today-remaining pruning stay fresh without a per-frame
+    /// timer.
+    private func startUpcomingRefreshLoop() {
+        guard upcomingRefreshTask == nil else { return }
+        upcomingRefreshTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard !Task.isCancelled else { return }
+                stores?.upcoming.refresh()
+            }
         }
     }
 
@@ -217,6 +244,16 @@ struct LibraryView: View {
         } else {
             let sections = MeetingGrouping.sections(library.displayMeetings, now: .now, calendar: .current)
             LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
+                if showUpcomingSection, let stores {
+                    UpcomingSection(
+                        events: stores.upcoming.events,
+                        isRecording: session.isRecording,
+                        now: .now,
+                        onRecord: { event in
+                            stores.startRecording(title: event.title, attendees: event.otherAttendees)
+                        }
+                    )
+                }
                 ForEach(sections, id: \.id) { section in
                     VStack(alignment: .leading, spacing: 7) {
                         sectionHeader(section.title)
@@ -225,6 +262,17 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+
+    /// Upcoming is hidden entirely (design mock 9a) when calendar access
+    /// isn't available, there are no events left today, or a library filter
+    /// is narrowing the list — a filtered view shouldn't also show
+    /// unfiltered calendar events above it. `library.sort == .longest`
+    /// doesn't render sections at all, so it's excluded by the caller above.
+    private var showUpcomingSection: Bool {
+        guard let stores else { return false }
+        guard stores.upcoming.isAvailable, !stores.upcoming.events.isEmpty else { return false }
+        return !library.filter.isActive
     }
 
     /// One rounded, hairline-bordered container per date group (design mock
