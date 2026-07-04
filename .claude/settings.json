@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./Scripts/*)",
+      "Bash(swift test*)",
+      "Bash(swift build*)",
+      "Bash(swift run*)",
+      "Bash(swift package*)",
+      "Bash(xcodegen*)",
+      "Bash(xcodebuild build*)",
+      "Bash(xcodebuild -list*)",
+      "Bash(log show*)",
+      "Bash(log stream*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git push*)",
+      "Bash(git mv*)",
+      "Bash(open *Recap*.app*)",
+      "Bash(tccutil reset * com.gregfoster.recap.dev)",
+      "Bash(jq*)"
+    ]
+  }
+}

@@ -9,6 +9,8 @@ if ! command -v xcodegen >/dev/null; then
   exit 1
 fi
 
+git config core.hooksPath .githooks
+
 xcodegen
 echo "Generated Recap.xcodeproj"
 

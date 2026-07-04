@@ -20,16 +20,23 @@ Packages are pure SPM. The app shell is XcodeGen-generated — `Recap.xcodeproj`
 
 ## Build & test
 
-- All packages: `./Scripts/test.sh` (~30s total; extra args pass through, e.g. `./Scripts/test.sh --filter LibraryStorage`).
+- `./Scripts/check.sh` is the single verification gate. Fast tier (default) runs
+  lint + all package tests (~40s) and emits one JSON object as the last stdout
+  line, same contract as the probes; `./Scripts/check.sh --full` adds the
+  xcodegen + app build and is REQUIRED before claiming app-shell (`Recap/`) work
+  done. `Scripts/lint.sh` mechanically enforces the Conventions section below
+  (Swift Testing only, commented concurrency escape hatches, no
+  `ProcessInfo.environment` in app code, file-size advisories). A versioned
+  `.githooks/pre-push` hook runs the gate automatically — fast tier, escalating
+  to `--full` when `Recap/`, `project.yml`, or `Scripts/` changed;
+  `RECAP_SKIP_CHECK=1 git push` bypasses it.
+- Just package tests, no lint/gate: `./Scripts/test.sh` (extra args pass
+  through, e.g. `./Scripts/test.sh --filter LibraryStorage`).
 - One package: `swift test --package-path Packages/RecapCore`.
-- App build: `xcodegen && xcodebuild build -project Recap.xcodeproj -scheme Recap -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO`.
 - SPM quirk: after ADDING a new source file to a shared package, sibling packages'
   incremental builds can fail with "cannot find type '<NewType>' in scope" (the owning
   package stays green — that's the signature). Fix the build, not the code:
   `swift package --package-path Packages/<failing-pkg> clean` and re-run.
-- Package tests never compile `Recap/` (app shell). Any change there is unverified
-  until the xcodegen + xcodebuild app build runs — don't report app-shell work done
-  without it.
 
 ## Parallel feature work (multi-agent)
 
@@ -85,30 +92,35 @@ Reset permissions for a clean slate — only touches the dev app, prod is untouc
 Real hardware/models — the manual-verification layer for capture/transcription/enhancement
 changes. Not run in CI.
 
-- `swift run --package-path Packages/RecapAudio capture-probe 5` — records mic + system audio for N seconds. Needs mic permission. Flags: `--list-devices`, `--device <uid>`, `--pause-test`.
+- `swift run --package-path Packages/RecapAudio capture-probe 5 [--json]` — records mic + system audio for N seconds. Needs mic permission. Flags: `--list-devices`, `--device <uid>`, `--pause-test`.
+- `swift run --package-path Packages/RecapAudio call-audio-probe <seconds> [--json]` — observes call-audio process events (CoreAudio process metadata only, no capture, no TCC prompt).
 - `swift run --package-path Packages/RecapTranscription transcribe-probe Fixtures/meeting-fixture.m4a tiny [--stream] [--language <code>] [--json]` — downloads the model on first run.
 - `swift run --package-path Packages/RecapTranscription diarize-probe Fixtures/two-speaker-fixture.m4a [--json]`
-- `swift run --package-path Packages/RecapEnhancement enhance-probe <transcript.json> [notes.md]` — needs Apple Intelligence; exits 2 when unavailable.
+- `swift run --package-path Packages/RecapEnhancement enhance-probe <transcript.json> [notes.md] [--json]` — needs Apple Intelligence; exits 2 when unavailable.
 - `swift run --package-path Packages/RecapEnhancement enhance-eval [--runs N] [--json]` — scores `Fixtures/enhance/` cases; run before/after any enhancement prompt change.
 - `swift run --package-path Packages/RecapTranscription transcribe-eval [--json] Fixtures/transcribe` — scores `Fixtures/transcribe/` cases by word error rate; run before/after any model default or decoding-option change. Not run in normal CI — runs nightly + on `workflow_dispatch` (see `transcription-eval` job in `.github/workflows/ci.yml`).
 - `./Scripts/soak-test.sh` — launches the real app in `-soak` mode (synthetic audio, no hardware, no transcription) and samples CPU/memory for ~30s, failing on a runaway main-thread loop (e.g. the MenuBarExtra re-render freeze). Not run per-PR — runs nightly + on `workflow_dispatch` (see `soak-test` job in `.github/workflows/ci.yml`).
 
 See `Fixtures/README.md` for fixture details and expected output.
 
-### `--json` output (transcribe-probe, diarize-probe, enhance-eval, transcribe-eval)
+### `--json` output (all probes and evals)
 
-Human-readable output is unchanged by default. With `--json`, each probe additionally prints
+Human-readable output is unchanged by default. With `--json`, every probe/eval additionally prints
 exactly one JSON object as the **last line** of stdout, so agents can parse a result without
 scraping prose:
 
+- `capture-probe`: `{"ok":true,"seconds":2,"micFrames":36010,"systemFrames":36010,"chunks":22,"peakAmplitude":0.0228,"fileSeconds":2.25,"systemAudioActive":false,"pauseTest":null}` (`--list-devices --json` instead emits a JSON device array)
+- `call-audio-probe`: `{"ok":true,"events":0,"started":0,"stopped":0,"watched":[...]}`
 - `transcribe-probe`: `{"ok":true,"mode":"file","utterances":12,"duration":31.2,"text":"…first 200 chars…"}`
 - `diarize-probe`: `{"ok":true,"speakers":2,"turns":9}`
+- `enhance-probe`: `{"ok":true,"outputChars":1042,"hasSubtitle":true,"seconds":12.1}` (exit 2 still means Apple Intelligence unavailable; JSON is then `{"ok":false,"error":"apple-intelligence-unavailable"}`)
 - `enhance-eval`: `{"ok":false,"cases":[{"name":"budget-sync","structure":true,"recall":true,"meta":true,"numbers":false,"subtitle":true}]}`
 - `transcribe-eval`: `{"ok":true,"cases":[{"name":"meeting-fixture","wer":0.024,"maxWER":0.25,"passed":true}]}`
 
 Exit codes are unchanged by `--json`: `0` success, `1` failure, `64` usage error (`diarize-probe`
-also uses `66` for a missing file, `enhance-eval` uses `66`/`69` for a missing fixtures dir /
-unavailable Apple Intelligence, `transcribe-eval` uses `66` for a missing fixtures dir).
+also uses `66` for a missing file, `enhance-probe` uses `2` for Apple Intelligence unavailable,
+`enhance-eval` uses `66`/`69` for a missing fixtures dir / unavailable Apple Intelligence,
+`transcribe-eval` uses `66` for a missing fixtures dir).
 
 ## Observability: unified logging
 

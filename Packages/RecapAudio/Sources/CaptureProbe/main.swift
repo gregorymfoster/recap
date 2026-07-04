@@ -15,8 +15,52 @@ import RecapAudio
 //                          assert the m4a duration AND stop()'s elapsed are
 //                          both ≈4s (±0.5) — proof paused audio isn't written.
 //   <seconds>              Positional; how long to record (default 5).
+//   --json                 In addition to the normal human-readable output,
+//                          print exactly one JSON object as the LAST line of
+//                          stdout, e.g.:
+//                            {"ok":true,"seconds":5,"micFrames":80000,
+//                             "systemFrames":80000,"chunks":5,
+//                             "peakAmplitude":0.1234,"fileSeconds":5.0,
+//                             "systemAudioActive":true,"pauseTest":null}
+//                          With --list-devices, prints the device list as a
+//                          JSON array instead: [{"id":1,"name":"…","uid":"…"}]
+//                          Exit codes are unchanged: 0 success, 1 failure.
+
+/// Last-line machine-readable summary for `--json` (capture-run mode).
+/// `micFrames`/`systemFrames` are both approximated by the mixed 16 kHz
+/// `sampleCount` the probe already measures (the pipeline mixes mic +
+/// system audio into a single chunk stream, so they are not observed
+/// separately here). `pauseTest` is the pass/fail of `--pause-test`
+/// tolerance checks, or omitted when `--pause-test` was not passed.
+struct ProbeResult: Codable {
+    var ok: Bool
+    var seconds: Double
+    var micFrames: Int
+    var systemFrames: Int
+    var chunks: Int
+    var peakAmplitude: Float
+    var fileSeconds: Double
+    var systemAudioActive: Bool
+    var pauseTest: Bool?
+}
+
+/// Machine-readable device entry for `--list-devices --json`.
+struct DeviceEntry: Codable {
+    var id: UInt32
+    var name: String
+    var uid: String
+}
+
+func printJSON(_ value: some Encodable) {
+    let encoder = JSONEncoder()
+    guard let data = try? encoder.encode(value), let line = String(data: data, encoding: .utf8) else { return }
+    print(line)
+}
 
 var arguments = Array(CommandLine.arguments.dropFirst())
+
+let jsonOutput = arguments.contains("--json")
+arguments.removeAll { $0 == "--json" }
 
 var pauseTest = false
 if let flagIndex = arguments.firstIndex(of: "--pause-test") {
@@ -26,8 +70,13 @@ if let flagIndex = arguments.firstIndex(of: "--pause-test") {
 
 if let listIndex = arguments.firstIndex(of: "--list-devices") {
     arguments.remove(at: listIndex)
-    for device in AudioInputDevices.inputDevices() {
-        print("\(device.id)\t\(device.name)\t\(device.uid)")
+    let devices = AudioInputDevices.inputDevices()
+    if jsonOutput {
+        printJSON(devices.map { DeviceEntry(id: $0.id, name: $0.name, uid: $0.uid) })
+    } else {
+        for device in devices {
+            print("\(device.id)\t\(device.name)\t\(device.uid)")
+        }
     }
     exit(0)
 }
@@ -52,15 +101,25 @@ func run() async {
         .appendingPathComponent("capture-probe.m4a")
     try? FileManager.default.removeItem(at: url)
 
-    guard await MeetingRecorder.requestMicPermission() else {
-        print("FAIL: microphone permission denied")
+    func failEarly(_ message: String) -> Never {
+        print(message)
+        if jsonOutput {
+            printJSON(ProbeResult(
+                ok: false, seconds: seconds, micFrames: 0, systemFrames: 0,
+                chunks: 0, peakAmplitude: 0, fileSeconds: 0,
+                systemAudioActive: false, pauseTest: nil
+            ))
+        }
         exit(1)
+    }
+
+    guard await MeetingRecorder.requestMicPermission() else {
+        failEarly("FAIL: microphone permission denied")
     }
 
     if let deviceUID {
         guard let device = AudioInputDevices.device(forUID: deviceUID) else {
-            print("FAIL: no attached input device with uid \(deviceUID) (see --list-devices)")
-            exit(1)
+            failEarly("FAIL: no attached input device with uid \(deviceUID) (see --list-devices)")
         }
         print("binding explicitly to \(device.name) (\(device.uid))")
     }
@@ -70,8 +129,7 @@ func run() async {
     do {
         output = try await recorder.start(writingTo: url, preferredInputUID: deviceUID)
     } catch {
-        print("FAIL: recorder start: \(error)")
-        exit(1)
+        failEarly("FAIL: recorder start: \(error)")
     }
     print("recording \(seconds)s — system audio active: \(recorder.systemAudioActive)")
     print("bound input device: \(recorder.activeInputDeviceName ?? "unknown")")
@@ -107,12 +165,12 @@ func run() async {
     print("16k chunks: \(chunkCount), samples: \(sampleCount) (≈\(sampleCount / 16_000)s)")
     print(String(format: "peak amplitude: %.4f", peak))
     guard let audioFile = try? AVAudioFile(forReading: url) else {
-        print("FAIL: output file unreadable")
-        exit(1)
+        failEarly("FAIL: output file unreadable")
     }
     let fileSeconds = Double(audioFile.length) / audioFile.fileFormat.sampleRate
     print(String(format: "file: %@ (%.1fs @ %.0f Hz)", url.lastPathComponent, fileSeconds, audioFile.fileFormat.sampleRate))
 
+    var pauseTestPassed: Bool?
     if pauseTest {
         // ~6s of wall time passed but only ~4s were active; both the file on
         // disk and stop()'s returned elapsed must reflect active time only.
@@ -121,13 +179,23 @@ func run() async {
         print(String(format: "pause test: file %.2fs (want 4±0.5) %@, stop() %.2fs (want 4±0.5) %@",
                      fileSeconds, fileOK ? "OK" : "FAIL",
                      duration, elapsedOK ? "OK" : "FAIL"))
-        guard fileOK, elapsedOK else {
+        pauseTestPassed = fileOK && elapsedOK
+        if pauseTestPassed == true {
+            print("PASS: paused audio was not written")
+        } else {
             print("FAIL: pause test out of tolerance")
-            exit(1)
         }
-        print("PASS: paused audio was not written")
     }
-    exit(sampleCount > 0 ? 0 : 1)
+
+    let ok = sampleCount > 0 && (pauseTestPassed ?? true)
+    if jsonOutput {
+        printJSON(ProbeResult(
+            ok: ok, seconds: seconds, micFrames: sampleCount, systemFrames: sampleCount,
+            chunks: chunkCount, peakAmplitude: peak, fileSeconds: fileSeconds,
+            systemAudioActive: recorder.systemAudioActive, pauseTest: pauseTestPassed
+        ))
+    }
+    exit(ok ? 0 : 1)
 }
 
 Task { await run() }

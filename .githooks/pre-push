@@ -1,0 +1,78 @@
+#!/bin/bash
+# Versioned pre-push hook — runs the agent verification gate before pushing.
+# Enable with: git config core.hooksPath .githooks (done by Scripts/bootstrap.sh).
+#
+# Skip with: RECAP_SKIP_CHECK=1 git push
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if [[ "${RECAP_SKIP_CHECK:-0}" == "1" ]]; then
+  echo "pre-push: RECAP_SKIP_CHECK=1 set — skipping Scripts/check.sh"
+  exit 0
+fi
+
+zero_sha="0000000000000000000000000000000000000000"
+changed_files=""
+run_full=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [[ -z "$local_ref" ]] && continue
+
+  # Deletion — nothing to check.
+  if [[ "$local_sha" == "$zero_sha" ]]; then
+    continue
+  fi
+
+  range_files=""
+  if [[ "$remote_sha" != "$zero_sha" ]]; then
+    range_files="$(git diff --name-only "$remote_sha..$local_sha" 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$range_files" ]]; then
+    # New branch/ref with no known remote tip: diff against origin/main,
+    # falling back defensively to the last 20 commits.
+    if git rev-parse --verify origin/main >/dev/null 2>&1; then
+      range_files="$(git diff --name-only "origin/main..$local_sha" 2>/dev/null || true)"
+    fi
+  fi
+
+  if [[ -z "$range_files" ]]; then
+    range_files="$(git diff --name-only "$local_sha~20..$local_sha" 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$range_files" ]]; then
+    range_files="$(git diff --name-only "$local_sha" 2>/dev/null || true)"
+  fi
+
+  changed_files+="$range_files"$'\n'
+done
+
+if [[ -z "$(echo "$changed_files" | tr -d '[:space:]')" ]]; then
+  echo "pre-push: could not determine changed files — running fast check as a safe default"
+else
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    if [[ "$f" == Recap/* || "$f" == "project.yml" || "$f" == Scripts/* ]]; then
+      run_full=1
+      break
+    fi
+  done <<< "$changed_files"
+fi
+
+if [[ "$run_full" -eq 1 ]]; then
+  echo "pre-push: app-shell/project/Scripts files changed — running Scripts/check.sh --full"
+  ./Scripts/check.sh --full
+else
+  echo "pre-push: running Scripts/check.sh (fast)"
+  ./Scripts/check.sh
+fi
+status=$?
+
+if [[ "$status" -ne 0 ]]; then
+  echo ""
+  echo "pre-push: Scripts/check.sh failed (exit $status) — push aborted."
+  echo "Fix the failure, or bypass once with: RECAP_SKIP_CHECK=1 git push"
+  exit "$status"
+fi
+
+exit 0

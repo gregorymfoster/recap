@@ -67,6 +67,8 @@ import Testing
             Issue.record("could not allocate output buffer")
             return []
         }
+        // The converter's @Sendable input block runs synchronously inside
+        // convert(to:) on this thread; the buffer never actually crosses.
         nonisolated(unsafe) var fed = false
         nonisolated(unsafe) let input = readBuffer
         var conversionError: NSError?

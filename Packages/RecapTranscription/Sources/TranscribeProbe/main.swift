@@ -72,6 +72,8 @@ func runStreamProbe(engine: WhisperKitEngine, url: URL) async {
     while let _ = try? file.read(into: readBuffer), readBuffer.frameLength > 0 {
         let capacity = AVAudioFrameCount(Double(readBuffer.frameLength) * 16_000 / file.processingFormat.sampleRate) + 16
         guard let out = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: capacity) else { break }
+        // The converter's @Sendable input block runs synchronously inside
+        // convert(to:) on this thread; the buffer never actually crosses.
         nonisolated(unsafe) var fed = false
         nonisolated(unsafe) let input: AVAudioPCMBuffer = readBuffer
         var conversionError: NSError?

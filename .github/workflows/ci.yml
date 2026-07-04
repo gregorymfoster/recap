@@ -80,6 +80,39 @@ jobs:
       - name: Run transcribe-eval
         run: swift run --package-path Packages/RecapTranscription transcribe-eval Fixtures/transcribe
 
+  lint:
+    name: Lint
+    # lint.sh must remain POSIX-portable (runs on ubuntu, not macOS) —
+    # avoid GNU-only grep flags (e.g. -P) and BSD-only tools (e.g. `stat -f`).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run lint.sh
+        run: ./Scripts/lint.sh
+
+  enhancement-eval:
+    name: Enhancement eval (nightly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 26
+        run: sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+      - name: Cache SPM build
+        uses: actions/cache@v4
+        with:
+          path: |
+            Packages/RecapEnhancement/.build
+          key: spm-RecapEnhancement-${{ hashFiles('Packages/RecapEnhancement/Package.swift') }}
+      - name: Run enhance-eval
+        run: |
+          swift run --package-path Packages/RecapEnhancement enhance-eval --json Fixtures/enhance && status=0 || status=$?
+          if [ "$status" -eq 69 ]; then
+            echo "Apple Intelligence unavailable on this runner — skipping enhancement eval."
+            exit 0
+          fi
+          exit "$status"
+
   soak-test:
     name: Soak test (nightly)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

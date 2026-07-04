@@ -12,6 +12,9 @@
 # script immediately with the original exit code.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source Scripts/lib.sh
+
+acquire_build_lock
 
 # Detects the stale-dependency signature in a captured `swift test` log for
 # $1 (the package currently under test). Echoes the name of the OTHER

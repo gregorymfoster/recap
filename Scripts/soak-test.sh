@@ -5,6 +5,7 @@
 # — see the `soak-test` CI job (nightly + workflow_dispatch).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source Scripts/lib.sh
 
 CPU_MAX=70
 MEM_GROWTH_MAX_MB=600
@@ -12,10 +13,12 @@ WARMUP_SECONDS=8
 SAMPLE_INTERVAL=2
 SAMPLE_COUNT=12
 
+acquire_build_lock
 xcodegen
 xcodebuild build -project Recap.xcodeproj -scheme Recap -configuration Debug \
   -destination 'platform=macOS' -derivedDataPath build/soak \
   CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" | tail -3
+release_build_lock
 
 APP="build/soak/Build/Products/Debug/Recap Dev.app"
 EXE=$(defaults read "$PWD/$APP/Contents/Info" CFBundleExecutable)
