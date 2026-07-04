@@ -75,11 +75,9 @@ public final class AppStores {
     @ObservationIgnored private var nudgeCenter: MeetingNudgeCenter?
     @ObservationIgnored private var nudgePanel: MeetingNudgePanelController?
     @ObservationIgnored private var callAudioMonitor: CallAudioMonitoring?
-    /// Factory for the call-audio monitor seam. Defaults to `{ nil }`
-    /// everywhere — including the production `init()` — so the graph no-ops
-    /// gracefully until the integrator flips this to
-    /// `{ ProcessAudioMonitor() }` at merge (another agent owns that type;
-    /// it doesn't exist on this branch yet).
+    /// Factory for the call-audio monitor seam: `ProcessAudioMonitor` in the
+    /// production graph, `{ nil }` in fixtures/soak/preview and the test
+    /// init's default — the wiring no-ops gracefully on nil.
     @ObservationIgnored private let makeCallAudioMonitor: () -> CallAudioMonitoring?
     /// Injectable source of "today's remaining calendar events", used by the
     /// nudge center to find a calendar match for a call-audio trigger.
@@ -166,11 +164,7 @@ public final class AppStores {
             upcoming = .live()
             exportDebounce = .seconds(5)
             makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
-            // TODO(merge): the integrator flips this to
-            // `{ ProcessAudioMonitor() }` once that type lands from the
-            // parallel RecapAudio branch. Until then the call-audio trigger
-            // stays inert everywhere, including production.
-            makeCallAudioMonitor = { nil }
+            makeCallAudioMonitor = { ProcessAudioMonitor() }
             let calendarQuery = CalendarWatcher(onMeetingStarting: { _ in })
             todayEventsProvider = { calendarQuery.todayEvents(now: $0) }
             let toasts = toasts

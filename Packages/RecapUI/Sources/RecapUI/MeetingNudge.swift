@@ -34,11 +34,11 @@ public enum MeetingNudgeCopy {
         case .ask(let appID, let appName, let match):
             switch (appID != nil ? appName : nil, match) {
             case (let appName?, let match?):
-                return "\(appName ?? "") is playing audio \u{2014} looks like \u{201C}\(match.title)\u{201D} just began."
+                return "\(appName) is playing audio \u{2014} looks like \u{201C}\(match.title)\u{201D} just began."
             case (nil, let match?):
                 return "\u{201C}\(match.title)\u{201D} is on your calendar and starting now."
             case (let appName?, nil):
-                return "\(appName ?? "") is playing call audio."
+                return "\(appName) is playing call audio."
             case (nil, nil):
                 return ""
             }

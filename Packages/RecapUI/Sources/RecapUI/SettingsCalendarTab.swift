@@ -30,7 +30,7 @@ struct SettingsCalendarTab: View {
                 }
             }
 
-            Section {
+            Section("Detect calls from") {
                 ForEach(CallAppCatalog.apps) { app in
                     Toggle(
                         app.name,
