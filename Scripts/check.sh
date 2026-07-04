@@ -7,16 +7,17 @@
 # Usage:
 #   ./Scripts/check.sh            # fast tier: lint + package tests
 #   ./Scripts/check.sh --full     # fast tier + xcodegen/xcodebuild app build
-#   ./Scripts/check.sh --ui       # no-op placeholder for a future ui-smoke tier
+#   ./Scripts/check.sh --ui       # also runs Scripts/ui-smoke.sh (opt-in; builds + launches the app)
 set -uo pipefail
 cd "$(dirname "$0")/.."
 source Scripts/lib.sh
 
 full=0
+ui=0
 for arg in "$@"; do
   case "$arg" in
     --full) full=1 ;;
-    --ui) ;; # placeholder, no-op for now
+    --ui) ui=1 ;;
     *)
       echo "unknown argument: $arg" >&2
       echo "usage: $0 [--full] [--ui]" >&2
@@ -67,6 +68,16 @@ if [[ "$full" -eq 1 ]]; then
   fi
 fi
 
+ui_ok=null
+if [[ "$ui" -eq 1 ]]; then
+  echo "── ui smoke (--ui) ──"
+  if Scripts/ui-smoke.sh; then
+    ui_ok=true
+  else
+    ui_ok=false
+  fi
+fi
+
 end_time=$(date +%s)
 seconds=$((end_time - start_time))
 
@@ -83,9 +94,12 @@ if [[ "$lint_ok" == "true" && "$packages_ok" == "true" ]]; then
     ok=true
   fi
 fi
+if [[ "$ui_ok" == "false" ]]; then
+  ok=false
+fi
 
-printf '{"ok":%s,"tier":"%s","lint":%s,"packages":%s,"appBuild":%s,"seconds":%s}\n' \
-  "$ok" "$tier" "$lint_ok" "$packages_ok" "$app_build_ok" "$seconds"
+printf '{"ok":%s,"tier":"%s","lint":%s,"packages":%s,"appBuild":%s,"ui":%s,"seconds":%s}\n' \
+  "$ok" "$tier" "$lint_ok" "$packages_ok" "$app_build_ok" "$ui_ok" "$seconds"
 
 if [[ "$ok" == "true" ]]; then
   exit 0

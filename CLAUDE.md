@@ -100,6 +100,8 @@ changes. Not run in CI.
 - `swift run --package-path Packages/RecapEnhancement enhance-eval [--runs N] [--json]` — scores `Fixtures/enhance/` cases; run before/after any enhancement prompt change.
 - `swift run --package-path Packages/RecapTranscription transcribe-eval [--json] Fixtures/transcribe` — scores `Fixtures/transcribe/` cases by word error rate; run before/after any model default or decoding-option change. Not run in normal CI — runs nightly + on `workflow_dispatch` (see `transcription-eval` job in `.github/workflows/ci.yml`).
 - `./Scripts/soak-test.sh` — launches the real app in `-soak` mode (synthetic audio, no hardware, no transcription) and samples CPU/memory for ~30s, failing on a runaway main-thread loop (e.g. the MenuBarExtra re-render freeze). Not run per-PR — runs nightly + on `workflow_dispatch` (see `soak-test` job in `.github/workflows/ci.yml`).
+- `swift run --package-path Tools/AXProbe ax-probe <tree|find|click|type|windows|screenshot> --app com.gregfoster.recap.dev [--pid N] [--json]` — drives/inspects a running app instance by accessibility identifier; AXIDs live in `Packages/RecapUI/Sources/RecapUI/*/AXID*.swift`. Prefer `--pid <pid>` over `--app <bundle-id>` when more than one instance of the app may be running (`--app` resolves to an arbitrary matching instance).
+- `./Scripts/ui-smoke.sh` — agent-runnable UI smoke test: launches the app with `-fixtures -show-menubar-content`, asserts a fixed list of core AXIDs resolve, screenshots the main window to `build/ui-smoke/main-window.png`, then kills the app. Wired into `./Scripts/check.sh --ui` (opt-in).
 
 See `Fixtures/README.md` for fixture details and expected output.
 

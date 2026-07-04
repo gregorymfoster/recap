@@ -4,9 +4,10 @@ import CoreGraphics
 import Foundation
 
 // ax-probe — UI-automation driver for any macOS app via the public Accessibility API.
-// Deliberately outside the app's package DAG; it drives a *running* app by bundle id.
+// Deliberately outside the app's package DAG; it drives a *running* app by bundle id
+// or, with --pid, an exact process instance.
 //
-// Usage: ax-probe <subcommand> --app <bundle-id> [--json]
+// Usage: ax-probe <subcommand> (--app <bundle-id> | --pid <pid>) [--json]
 //   tree [--depth N]                                dump the AX hierarchy (default depth 15)
 //   find <axid>                                     locate element by AXIdentifier
 //   click <axid>                                    AXPress; CGEvent click fallback
@@ -14,19 +15,27 @@ import Foundation
 //   windows                                         list the app's windows
 //   screenshot <path> [--window <index-or-title>]   screencapture -l of an app window
 //
+// --pid targets an exact process instance instead of resolving a bundle id via
+// NSRunningApplication, which returns an arbitrary matching instance when more
+// than one is running (e.g. an installed /Applications/Recap Dev.app left running
+// alongside a freshly-built Recap Dev.app under test). Prefer --pid whenever the
+// caller already knows the exact process it launched.
+//
 // --json: human-readable output is unchanged; additionally prints exactly one JSON
 // object as the LAST line of stdout.
 // Exit codes: 0 ok, 1 failure, 3 identifier/window not found, 5 Accessibility
 // permission missing, 64 usage error.
 
 let usageText = """
-usage: ax-probe <subcommand> --app <bundle-id> [--json]
+usage: ax-probe <subcommand> (--app <bundle-id> | --pid <pid>) [--json]
   tree [--depth N]                                dump AX hierarchy as indented text / JSON (default depth 15)
   find <axid>                                     locate element whose AXIdentifier == axid
   click <axid>                                    press element (AXPress, CGEvent click fallback)
   type <axid> <text>                              focus element, set value or post key events
   windows                                         list the app's windows (title, frame, main/focused)
   screenshot <path> [--window <index-or-title>]   capture an app window via screencapture -l
+--app resolves via NSRunningApplication (arbitrary instance if more than one is running);
+--pid targets an exact process instance instead. Exactly one of --app/--pid is required.
 exit codes: 0 ok, 1 failure, 3 not found, 5 accessibility permission missing, 64 usage
 """
 
@@ -155,6 +164,14 @@ func describe(_ element: AXUIElement) -> String {
 func runningApp(bundleID: String) -> NSRunningApplication {
     guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else {
         fail(1, "no running app with bundle id \(bundleID)")
+    }
+    return app
+}
+
+@MainActor
+func runningApp(pid: pid_t) -> NSRunningApplication {
+    guard let app = NSRunningApplication(processIdentifier: pid) else {
+        fail(1, "no running app with pid \(pid)")
     }
     return app
 }
@@ -403,6 +420,7 @@ func takeOption(_ name: String) -> String? {
 }
 
 let bundleID = takeOption("--app")
+let pidOption = takeOption("--pid")
 let depthOption = takeOption("--depth")
 let windowOption = takeOption("--window")
 
@@ -411,8 +429,11 @@ guard let subcommand = argumentList.first else {
 }
 argumentList.removeFirst()
 
-guard let bundleID else {
-    usage("--app <bundle-id> is required")
+guard bundleID != nil || pidOption != nil else {
+    usage("one of --app <bundle-id> or --pid <pid> is required")
+}
+guard bundleID == nil || pidOption == nil else {
+    usage("--app and --pid are mutually exclusive")
 }
 
 let maxDepth: Int
@@ -425,7 +446,15 @@ if let depthOption {
     maxDepth = 15
 }
 
-let app = runningApp(bundleID: bundleID)
+let app: NSRunningApplication
+if let pidOption {
+    guard let pidValue = pid_t(pidOption) else {
+        usage("--pid must be an integer")
+    }
+    app = runningApp(pid: pidValue)
+} else {
+    app = runningApp(bundleID: bundleID!)
+}
 
 switch subcommand {
 case "tree":

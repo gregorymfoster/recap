@@ -5,7 +5,7 @@
     {
       "id": 1,
       "prompt": "take screenshots of all the core flows of the app and put them in a folder in my downloads so i can drop them into claude design as a state-of-the-app dump",
-      "expected_output": "~/Downloads/Recap-flows-<date>/ containing 01-library.png through 10-floating-capsule.png (08 optional) plus README.md manifest with version, commit, and per-file descriptions. Every PNG shows the state named in references/flows.md; no blank or wrong-state frames.",
+      "expected_output": "~/Downloads/Recap-flows-<date>/ containing 01-library.png through 11-floating-capsule.png plus README.md manifest with version, commit, and per-file descriptions. Every PNG shows the state named in references/flows.md; no blank or wrong-state frames.",
       "files": []
     },
     {

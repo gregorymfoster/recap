@@ -1,6 +1,6 @@
 ---
 name: app-flow-screenshots
-description: Capture a complete "state of the app" screenshot dump of Recap — builds the dev app, launches it with fixture data, drives every core flow (library, meeting detail, search, models, settings, recording pill, floating capsule, menu bar), and saves clean per-window PNGs plus a README manifest to a timestamped folder in ~/Downloads, ready to drop into Claude Design or any design tool. Use whenever the user asks for app screenshots, a screenshot dump, "state of the app", captures of the core flows, design-reference images, or wants to show the current UI to a design tool — even if they only say "grab the screens", "export the UI", or "screenshot the app".
+description: Capture a complete "state of the app" screenshot dump of Recap — builds the dev app, launches it with fixture data, drives every core flow (library, meeting detail, search, models, settings, recording pill, floating capsule, menu bar) via accessibility identifiers, and saves clean per-window PNGs plus a README manifest to a timestamped folder in ~/Downloads, ready to drop into Claude Design or any design tool. Use whenever the user asks for app screenshots, a screenshot dump, "state of the app", captures of the core flows, design-reference images, or wants to show the current UI to a design tool — even if they only say "grab the screens", "export the UI", or "screenshot the app".
 ---
 
 # App flow screenshots
@@ -23,8 +23,8 @@ app" dump the user can hand to Claude Design or any design tool.
 
 You are the manager. Build and launch inline (cheap shell work), delegate the
 GUI-driving to **cheap subagents (`model: "sonnet"`), run strictly one at a time** —
-they share the one physical desktop, keyboard, and app instance, so parallel agents
-would fight over focus and corrupt each other's shots. Include "You ARE the worker — do
+they share the one physical desktop and app instance, so parallel agents would fight
+over the same process and corrupt each other's shots. Include "You ARE the worker — do
 not spawn further agents" in every brief, or they'll inherit the delegate-by-default
 preference and cascade.
 
@@ -39,10 +39,11 @@ swift -e 'import ApplicationServices; print("AX_TRUSTED:", AXIsProcessTrusted())
 swift -e 'import CoreGraphics; print("SCREEN_RECORDING:", CGPreflightScreenCaptureAccess())' # Screen Recording
 ```
 
-Accessibility powers the CGEvent input helper (`scripts/input.swift`); Screen Recording
-powers `screencapture -l`. Do NOT drive input through `osascript`/System Events — that
-needs the separate Apple Events "Automation" grant, which this host typically lacks
-(error -1743); the CGEvent helper deliberately avoids it.
+Accessibility powers `ax-probe` (click/type by identifier) and the keyboard-shortcut
+fallback (`scripts/input.swift`); Screen Recording powers `shot.sh`'s
+`screencapture -l`. Do NOT drive input through `osascript`/System Events — that needs
+the separate Apple Events "Automation" grant, which this host typically lacks
+(error -1743).
 
 ### 2. Build once, then launch per phase
 
@@ -52,30 +53,58 @@ needs the separate Apple Events "Automation" grant, which this host typically la
 
 builds Debug (`xcodegen` + `xcodebuild`, derived data in `build/screenshots/` so it
 never collides with soak or dev-install builds), launches the raw binary, waits until
-the main window is on screen, and prints `APP=` and `PID=`. Keep the PID; you kill it
-between phases. `-fixtures` is disk-free and idempotent — safe to relaunch endlessly.
-For the second phase relaunch with `-soak --skip-build` (same binary, no rebuild).
+the main window is on screen, and prints `APP=` and `PID=`. Keep the PID — it's how you
+target the right instance. `-fixtures` is disk-free and idempotent — safe to relaunch
+endlessly. For the second phase relaunch with `-soak --skip-build` (same binary, no
+rebuild).
 
-`scripts/shot.sh` is the capture tool — window-targeted `screencapture`, no desktop
-background in the shots. `shot.sh list <pid>` shows on-screen windows
-(id / size / position); `window` captures the largest, `id` a specific one, `region` a
-screen rect (for the menu-bar dropdown).
+### 3. Drive the app with ax-probe, by accessibility identifier
 
-**Coexistence hazard**: the user's installed `/Applications/Recap Dev.app` may be
-running at the same time, with identical window names. Never kill or quit that instance
-— it isn't yours. Always target windows and activation by the PID launch.sh printed
-(`shot.sh list $PID`, `input activate $PID`), never by app name or bundle id.
+All navigation goes through `Tools/AXProbe` (`ax-probe`), a standalone driver built
+against the public Accessibility API — no coordinate math, no screen-scaling, no
+Retina-scale guessing. ~90 stable identifiers are already tagged across the app (grep
+`Packages/RecapUI/Sources/RecapUI/**/AXID+*.swift` for the authoritative, current list —
+it changes as UI ships, don't trust a stale copy in this doc). Full per-flow recipes,
+including the exact identifiers and known gotchas, live in
+[references/flows.md](references/flows.md); have each subagent read that file.
 
-### 3. Fan out (sequentially)
+```bash
+swift build --package-path Tools/AXProbe   # once, fast — cache it like input.swift used to be
+Tools/AXProbe/.build/debug/ax-probe tree   --pid "$PID"                       # dump the AX hierarchy to find identifiers
+Tools/AXProbe/.build/debug/ax-probe click  --pid "$PID" meeting-row-<id>      # AXPress, CGEvent fallback
+Tools/AXProbe/.build/debug/ax-probe type   --pid "$PID" search-field "sam"    # focus + set value, else key events
+Tools/AXProbe/.build/debug/ax-probe windows --pid "$PID" --json               # window titles/frames for shot.sh
+```
 
-Two subagent phases; the full flow list, per-shot navigation steps, expected content,
-and the input-driving recipes (keystrokes, coordinate clicks, retina scaling) live in
-[references/flows.md](references/flows.md). Have each subagent read that file — its
-brief then only needs: the output dir, the app PID/window owner ("Recap Dev"), which
-flows it owns, and the worker/no-delegation rule.
+(`swift run --package-path Tools/AXProbe ax-probe ...` also works and rebuilds only on
+change, at the cost of a slower first invocation per phase.)
 
-- **Phase A — fixtures instance**: library, meeting detail (staged notes), search
-  overlay, models, settings (two scroll positions), menu-bar dropdown.
+**Always pass `--pid`, never `--app <bundle-id>`.** `--app` resolves via
+`NSRunningApplication.runningApplications(withBundleIdentifier:)`, which returns an
+*arbitrary* matching instance when more than one `com.gregfoster.recap.dev` process is
+running — and that happens routinely: the user's installed `/Applications/Recap
+Dev.app`, another concurrent Claude session's own screenshot/smoke build, a soak run
+left over from earlier. `--pid` targets the exact process `launch.sh` printed, with no
+ambiguity. Verified live during this rewrite: with two `com.gregfoster.recap.dev`
+processes running simultaneously, `--app` silently drove the *other* session's
+instance while `--pid` correctly isolated to the one this session launched.
+
+A very small number of actions have no reasonable AX path — currently just the ⌘,
+Settings shortcut (opening Settings via a real menu click is more brittle than the
+shortcut). For those, `scripts/input.swift` still exists but is slimmed to exactly two
+subcommands: `activate` (bring the target PID frontmost) and `key` (post a keycode
+chord). It no longer supports click/doubleclick/type/scroll — that's ax-probe's job now.
+
+### 4. Fan out (sequentially)
+
+Two subagent phases; the full flow list, per-shot ax-probe invocations, and expected
+content live in [references/flows.md](references/flows.md). Have each subagent read
+that file — its brief then only needs: the output dir, the app PID, which flows it
+owns, and the worker/no-delegation rule.
+
+- **Phase A — fixtures instance**: library, meeting detail (notes + transcript), search
+  overlay, models, settings (two scroll positions), menu-bar dropdown (via
+  `-show-menubar-content`), nudge panel (via `-show-nudge`).
 - **Phase B — soak instance** (kill the fixtures process first, relaunch with
   `-soak --skip-build`): recording pill in the main window, then deactivate the app
   (activate Finder) and capture the floating capsule.
@@ -83,17 +112,19 @@ flows it owns, and the worker/no-delegation rule.
 The one non-negotiable in every brief: **verify every shot by Reading the PNG** before
 moving on — confirm the intended state is actually visible (overlay open, right sidebar
 section selected, pill present) and retake if not. A dump with a wrong or stale frame is
-worse than a missing one, because nobody re-checks it downstream.
+worse than a missing one, because nobody re-checks it downstream. Also verify each
+`ax-probe click`/`type` actually landed by re-querying (`ax-probe find <axid>`) or
+checking the window title/AX tree changed — a `click` that fell back to a CGEvent
+center-click can silently miss if the element's frame was stale.
 
-### 4. Verify, write the manifest, clean up
+### 5. Verify, write the manifest, clean up
 
 Subagent reports are claims, not evidence: personally Read every PNG against the
 expected-content column in flows.md before writing the manifest. Then write `README.md`
 (version from `project.yml`'s `MARKETING_VERSION`, commit from `git rev-parse --short
 HEAD`), kill any remaining app PID, and `open` the folder.
 
-Known fixture limitations to state in the manifest, not apologize for: fixture meetings
-have no transcript/enhanced-notes content (detail-view notes are staged by typing), and
-the soak instance produces no live-transcript text (no engine attached). Onboarding is
+Known fixture limitations to state in the manifest, not apologize for: the soak
+instance produces no live-transcript text (no engine attached). Onboarding is
 unreachable in both modes (`hasOnboarded` is forced true) — it is deliberately not part
 of the dump.
