@@ -10,6 +10,11 @@ import SwiftUI
 @Observable
 public final class AppRouter {
     public var section: SidebarItem? = .library
+    /// Preselects a Settings tab the next time the Settings window opens —
+    /// set by `-open settings/<tab>` (`LaunchRouteApplier`) and read once by
+    /// `SettingsWindowView`'s `.task`, which clears it back to `nil` so a
+    /// later manual ⌘, doesn't keep reapplying a stale launch route.
+    public var pendingSettingsTab: SettingsTab?
 
     public init() {}
 }
@@ -19,6 +24,12 @@ public final class AppRouter {
 public struct RootView: View {
     private let stores: AppStores
     @State private var showSearch = false
+    /// Prefill for the search overlay when opened via `-open search:<query>`.
+    @State private var searchQuery = ""
+    /// Applies `stores.launchRoute` exactly once. `@State` so it survives
+    /// re-invocations of `body` (a plain local `var` wouldn't); seeded from
+    /// `stores.launchRoute` in both initializers below.
+    @State private var routeApplier: LaunchRouteApplier
 
     private var library: LibraryStore { stores.library }
     private var session: MeetingSessionStore { stores.session }
@@ -29,11 +40,14 @@ public struct RootView: View {
 
     public init(stores: AppStores) {
         self.stores = stores
+        _routeApplier = State(initialValue: LaunchRouteApplier(route: stores.launchRoute))
     }
 
     /// Injectable root, for previews.
     init(library: LibraryStore) {
-        stores = AppStores(library: library)
+        let stores = AppStores(library: library)
+        self.stores = stores
+        _routeApplier = State(initialValue: LaunchRouteApplier(route: stores.launchRoute))
     }
 
     public var body: some View {
@@ -62,7 +76,7 @@ public struct RootView: View {
                     Tokens.scrim
                         .ignoresSafeArea()
                         .onTapGesture { showSearch = false }
-                    SearchOverlay(isPresented: $showSearch)
+                    SearchOverlay(isPresented: $showSearch, initialQuery: searchQuery)
                         .padding(.top, 90)
                 }
             }
@@ -88,6 +102,14 @@ public struct RootView: View {
         .onChange(of: models.activeModelID) { _, active in
             if active != nil { queue?.retryMeetingsAwaitingModel(in: library) }
         }
+        // Applies `-open <route>` exactly once (`LaunchRouteApplier` guards
+        // repeat `.task` runs), after the store graph above already exists
+        // and the main window is up. Must not fight scene restoration —
+        // restoration is disabled outright in fixtures/soak
+        // (`LaunchConfiguration.restoresWindowState`), and in normal mode a
+        // route is only ever present when `-open` was actually passed, so
+        // there's nothing here to race against a restored window.
+        .task { applyLaunchRouteIfNeeded() }
         .environment(stores)
         .environment(library)
         .environment(session)
@@ -95,6 +117,36 @@ public struct RootView: View {
         .environment(settings)
         .environment(queue)
         .environment(router)
+    }
+
+    /// Runs whatever `LaunchRouteAction`s `routeApplier` hands back for
+    /// `stores.launchRoute` — a no-op after the first successful call.
+    /// `settings/<tab>` is staged on `router.pendingSettingsTab` and the
+    /// Settings window opened via `SettingsOpener` (no `AppStores` write:
+    /// `launchRoute` is read-only for this work); `SettingsWindowView`
+    /// consumes and clears the staged tab itself.
+    private func applyLaunchRouteIfNeeded() {
+        let meetingIDs = library.meetings.map { $0.meeting.id.uuidString }
+        let actions = routeApplier.applyOnce { rawID in
+            LaunchRouteMeetingResolver.resolve(rawID, meetingIDs: meetingIDs)
+        }
+        for action in actions {
+            switch action {
+            case .showLibrary:
+                router.section = .library
+                library.selectedMeetingID = nil
+            case .selectMeeting(let id):
+                guard let uuid = UUID(uuidString: id) else { continue }
+                router.section = .library
+                library.selectedMeetingID = uuid
+            case .openSettings(let tab):
+                router.pendingSettingsTab = tab
+                SettingsOpener.open()
+            case .openSearch(let query):
+                searchQuery = query
+                showSearch = true
+            }
+        }
     }
 
     @ViewBuilder

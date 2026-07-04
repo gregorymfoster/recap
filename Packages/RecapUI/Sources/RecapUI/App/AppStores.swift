@@ -126,14 +126,15 @@ public final class AppStores {
             fixtureScenario = nil
         }
         if case .fixtures = configuration.mode {
+            let scenario = FixtureScenario(rawScenario: fixtureScenario ?? "default")
             settings = .ephemeralOnboarded()
-            library = .fixture()
+            library = scenario.library
             models = WhisperModelManager()
             session = MeetingSessionStore()
             queue = nil
             storage = nil
             changeBus = LibraryChangeBus()
-            upcoming = .fixture()
+            upcoming = scenario.upcoming
             exportDebounce = .seconds(5)
             makeCalendarWatcher = { CalendarWatcher(onMeetingStarting: $0) }
             makeCallAudioMonitor = { nil }

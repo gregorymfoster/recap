@@ -5,6 +5,10 @@ import SwiftUI
 struct SearchOverlay: View {
     @Environment(LibraryStore.self) private var library
     @Binding var isPresented: Bool
+    /// Prefills the field when the overlay first appears — set by
+    /// `-open search:<query>` (`LaunchRouteApplier`/`RootView`). Only applied
+    /// once, in `onAppear`; typing afterwards is untouched by this value.
+    var initialQuery: String = ""
     @State private var query = ""
     @State private var hits: [SearchHit] = []
     @State private var highlighted = 0
@@ -102,7 +106,12 @@ struct SearchOverlay: View {
             hits = library.search(query)
             highlighted = 0
         }
-        .onAppear { fieldFocused = true }
+        .onAppear {
+            fieldFocused = true
+            if !initialQuery.isEmpty, query.isEmpty {
+                query = initialQuery
+            }
+        }
         .onExitCommand { isPresented = false }
         .onKeyPress(.downArrow) {
             highlighted = min(highlighted + 1, max(0, hits.count - 1))

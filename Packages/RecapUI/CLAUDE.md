@@ -46,3 +46,8 @@ usually; use one for iterating on a single store, e.g. `--filter LibraryStore`.
 - `-fixtures` launch arg swaps in sample meetings + ephemeral settings, no disk writes, no
   processing queue; `-show-menubar-content` (with `-fixtures`) exposes `MenuBarView`'s popover
   content in a screenshot-able window.
+- `-fixtures <scenario>` selects a named graph from `Fixtures/FixtureScenarios.swift`
+  (`default`/`empty`/`busy`/`processing`/`error`; unknown names log a warning and fall back to
+  `default`) — `LibraryStore.fixture()` is just `FixtureScenario.default.library` kept as the
+  legacy no-arg entry point every preview/test already calls. See `Fixtures/README.md` for the
+  scenario list.

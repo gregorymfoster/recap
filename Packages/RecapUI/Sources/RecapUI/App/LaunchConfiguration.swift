@@ -15,8 +15,9 @@ import Foundation
 ///   (soak is driven by `Scripts/soak-test.sh` and must never silently run
 ///   the fixtures graph instead — a soak sample of fixture data would be
 ///   meaningless).
-/// - `-open <route>` — parsed into `route` but not yet applied anywhere
-///   (launch-routing sibling work consumes it).
+/// - `-open <route>` — parsed into `route` and applied once at launch by
+///   `RootView`/`LaunchRouteApplier` after the store graph and main window
+///   exist.
 /// - `-seed-dir <path>` — parsed into `seedDir` but not yet consumed
 ///   (seeded-state sibling work consumes it).
 /// - `-show-menubar-content` — open the menu-bar-content debug window.
@@ -112,10 +113,14 @@ public struct LaunchConfiguration: Equatable, Sendable {
     public var restoresWindowState: Bool { mode == .normal }
 }
 
-/// A launch route parsed from `-open <route>`. Inert for now — carried on
-/// `AppStores.launchRoute` for the launch-routing work to consume.
+/// A launch route parsed from `-open <route>`, carried on
+/// `AppStores.launchRoute` and applied once by `RootView` via
+/// `LaunchRouteApplier`/`LaunchRouteAction`.
 ///
-/// Forms: `library`, `library/<meeting-id>`, `settings`, `settings/<tab>`,
+/// Forms: `library`, `library/<meeting-id>` (fixture meeting ids are random
+/// per launch — `library/first` is a stable alias for the first meeting in
+/// `-fixtures` mode), `settings`, `settings/<tab>` (tab names match
+/// `SettingsTab`'s raw values: general/recording/calendar/sync/privacy),
 /// `search:<query>`. Anything else (including empty path/query components)
 /// fails the parse.
 public enum Route: Equatable, Sendable {

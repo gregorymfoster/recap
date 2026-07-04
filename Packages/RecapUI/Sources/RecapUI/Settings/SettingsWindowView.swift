@@ -10,27 +10,30 @@ import SwiftUI
 /// value the tabs read: `AppStores`, `SettingsStore`, `QueueStore`,
 /// `WhisperModelManager`, and a `LaunchAtLoginController`.
 public struct SettingsWindowView: View {
+    @Environment(AppRouter.self) private var router
+    @State private var selectedTab: SettingsTab = .general
+
     public init() {}
 
     public var body: some View {
-        TabView {
-            Tab("General", systemImage: "gearshape") {
+        TabView(selection: $selectedTab) {
+            Tab("General", systemImage: "gearshape", value: SettingsTab.general) {
                 SettingsGeneralTab()
                     .axID(.settingsTabGeneral)
             }
-            Tab("Recording", systemImage: "mic") {
+            Tab("Recording", systemImage: "mic", value: SettingsTab.recording) {
                 SettingsRecordingTab()
                     .axID(.settingsTabRecording)
             }
-            Tab("Calendar", systemImage: "calendar") {
+            Tab("Calendar", systemImage: "calendar", value: SettingsTab.calendar) {
                 SettingsCalendarTab()
                     .axID(.settingsTabCalendar)
             }
-            Tab("Sync", systemImage: "arrow.triangle.2.circlepath") {
+            Tab("Sync", systemImage: "arrow.triangle.2.circlepath", value: SettingsTab.sync) {
                 SettingsSyncTab()
                     .axID(.settingsTabSync)
             }
-            Tab("Privacy", systemImage: "hand.raised") {
+            Tab("Privacy", systemImage: "hand.raised", value: SettingsTab.privacy) {
                 SettingsPrivacyTab()
                     .axID(.settingsTabPrivacy)
             }
@@ -38,6 +41,16 @@ public struct SettingsWindowView: View {
         .axID(.settingsWindow)
         .frame(width: 620)
         .formStyle(.grouped)
+        // `-open settings/<tab>` (`LaunchRouteApplier`) stages the requested
+        // tab on the shared `AppRouter` and opens this window; consuming it
+        // here (once, then clearing it) means a later manual ⌘, doesn't keep
+        // reapplying a stale launch route.
+        .task {
+            if let pending = router.pendingSettingsTab {
+                selectedTab = pending
+                router.pendingSettingsTab = nil
+            }
+        }
     }
 }
 

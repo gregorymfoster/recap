@@ -356,82 +356,12 @@ public final class LibraryStore {
 // MARK: - Fixtures
 
 extension LibraryStore {
-    /// Sample library matching the states in design mock 1c.
+    /// Sample library matching the states in design mock 1c. Equivalent to
+    /// `FixtureScenario.default.library` — kept as a standalone entry point
+    /// since it's the one every preview/test in this package already calls.
+    /// See `FixtureScenarios.swift` for this and every other named
+    /// `-fixtures <scenario>` graph.
     public static func fixture() -> LibraryStore {
-        let now = Date.now
-        func record(_ title: String, hoursAgo: Double, duration: TimeInterval, attendees: [String], status: MeetingStatus, subtitle: String? = nil) -> MeetingRecord {
-            MeetingRecord(
-                meeting: Meeting(
-                    title: title, date: now.addingTimeInterval(-hoursAgo * 3600),
-                    duration: duration, attendees: attendees, status: status,
-                    subtitle: subtitle
-                ),
-                folderURL: URL(filePath: "/dev/null")
-            )
-        }
-        var standup = record(
-            "Weekly standup", hoursAgo: 6, duration: 900, attendees: ["Maya", "Sam"], status: .ready,
-            subtitle: "Q3 draft shipped, onboarding usability pass assigned"
-        )
-        // Real playable audio (design handoff v2 §8d): every other fixture
-        // record points at `/dev/null`, which `MeetingDetailView.hasPlayableAudio`
-        // correctly treats as "no audio" — that's right for the rest of the
-        // library, but it means the player bar never docks anywhere in
-        // `-fixtures` mode. Point just this one ready meeting's folder at a
-        // throwaway temp folder holding a short silent `.m4a` so screenshot
-        // QA can see the docked player, scrubber, and click-to-seek against
-        // this meeting's transcript (utterances span 0–38s below).
-        if let audioFolder = FixtureAudio.makeSilentMeetingFolder(duration: 40) {
-            standup.folderURL = audioFolder
-        }
-        // Canned transcript for the first ready meeting, so fixture runs can
-        // exercise the transcript pane (avatars, speaker rename, seek UI).
-        let standupTranscript = Transcript(
-            utterances: [
-                Utterance(speakerID: "S1", start: 0, end: 6, text: "Morning everyone — quick roundtable, then the roadmap check-in."),
-                Utterance(speakerID: "S2", start: 6, end: 14, text: "I shipped the Q3 draft yesterday. Feedback is due Friday, so please get comments in early."),
-                Utterance(speakerID: "S1", start: 14, end: 21, text: "Will do. One flag: the onboarding revision still needs a second usability pass."),
-                Utterance(speakerID: "S3", start: 21, end: 30, text: "I can take that — I have two sessions booked this week and can fold it in."),
-                Utterance(speakerID: "S2", start: 30, end: 38, text: "Great. Last thing: performance regressions on older laptops. Sam follows up with numbers next week."),
-            ],
-            engine: "fixture", model: "fixture", language: "en"
-        )
-        // Canned raw + enhanced notes for the same meeting, so fixture runs
-        // can exercise the ✨ Enhanced / My notes segmented control, the
-        // enhanced-caption + Undo affordance, and EnhancedNotesView's
-        // supported Markdown subset (design handoff v2 §8c).
-        let standupNotes = """
-        - Roundtable: Q3 draft, onboarding revision, perf regressions
-        - Feedback due Friday
-        """
-        let standupEnhancedNotes = """
-        ## Updates
-        - Maya shipped the Q3 roadmap draft — feedback due **Friday**.
-        - The onboarding revision still needs a second usability pass; Priya has two sessions booked this week.
-        - Performance regressions on older laptops — Sam follows up with numbers next week.
-
-        ## Action items
-        - [ ] Sam shares performance regression numbers next week
-        """
-        return LibraryStore(
-            fixtures: [
-                record("Design sync — Q3 roadmap", hoursAgo: 0.5, duration: 1_453, attendees: ["Maya", "Sam", "Priya"], status: .transcribing(progress: 0.42)),
-                record("Customer call — Meridian", hoursAgo: 3, duration: 1_800, attendees: ["Alex"], status: .queued),
-                record("Budget review", hoursAgo: 4, duration: 1_320, attendees: ["Priya"], status: .needsModel),
-                standup,
-                record(
-                    "1:1 with Sam", hoursAgo: 26, duration: 1_680, attendees: ["Sam"], status: .ready,
-                    subtitle: "Promotion timeline agreed, mentorship pairing starts next sprint"
-                ),
-                record(
-                    "Pricing brainstorm", hoursAgo: 30, duration: 2_400, attendees: ["Maya", "Alex", "Priya"], status: .ready,
-                    subtitle: "Usage-based tier wins, enterprise floor set at 20 seats"
-                ),
-            ],
-            queueSummary: QueueSummary(jobCount: 2, progress: 0.42),
-            transcripts: [standup.meeting.id: standupTranscript],
-            notes: [standup.meeting.id: standupNotes],
-            enhancedNotes: [standup.meeting.id: standupEnhancedNotes]
-        )
+        FixtureScenarios.defaultLibrary()
     }
 }

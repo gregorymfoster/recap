@@ -1,5 +1,29 @@
 # Test fixtures
 
+## Scenarios (`-fixtures <scenario>`)
+
+The app's `-fixtures` launch argument takes an optional scenario name, resolved by
+`FixtureScenario` in `Packages/RecapUI/Sources/RecapUI/Fixtures/FixtureScenarios.swift`. All
+scenarios share the same zero-disk-write, no-processing-queue contract as plain `-fixtures`.
+An unknown scenario name logs a warning and falls back to `default`.
+
+```sh
+open <path>/Recap.app --args -fixtures busy
+```
+
+- `default` (bare `-fixtures`) — today's small sample library: a handful of meetings spanning
+  every status, one ready meeting with playable audio, a canned transcript, and notes.
+- `empty` — first-run/empty library: no meetings, no queue activity, no upcoming events.
+- `busy` — 20+ meetings spread across many weeks with every status represented, several with
+  canned transcripts/notes — exercises list grouping and scroll performance.
+- `processing` — several meetings actively transcribing/queued/enhancing, so the sidebar queue
+  widget renders real in-flight work.
+- `error` — failed and recoverable job states: meetings with `.error` statuses, one
+  `.needsModel`, and a paused queue summary with a pause reason.
+
+Unit tests for each scenario's invariants live in
+`Packages/RecapUI/Tests/RecapUITests/Fixtures/FixtureScenariosTests.swift`.
+
 - `meeting-fixture.m4a` — 31s synthetic meeting speech (macOS `say`), used for
   repeatable manual verification of transcription without a real meeting:
 
