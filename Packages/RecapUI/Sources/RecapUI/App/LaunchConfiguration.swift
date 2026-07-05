@@ -34,13 +34,35 @@ public struct LaunchConfiguration: Equatable, Sendable {
     }
 
     public var mode: Mode
-    /// Parsed from `-open <route>`. Inert for now — not yet applied anywhere.
+    /// Parsed from `-open <route>`, applied once at launch by
+    /// `RootView`/`LaunchRouteApplier`.
     public var route: Route?
     /// Parsed from `-seed-dir <path>`. See the grammar note above — consumed
     /// by `AppStores` in normal mode only.
     public var seedDir: URL?
     public var showMenuBarContent: Bool
     public var showNudge: Bool
+
+    /// Defaults the app shell must `register(defaults:)` on
+    /// `UserDefaults.standard` in `RecapApp.init`, BEFORE AppKit processes
+    /// launch arguments (i.e. before `NSApplicationMain` runs).
+    ///
+    /// Why: AppKit pairs each `-key value` launch argument into the
+    /// `NSArgumentDomain`, pairing a flag with the *immediately following*
+    /// argument even when that argument is itself a flag. Any argument left
+    /// over after that pairing (e.g. the route in `-fixtures -open
+    /// settings/general`: AppKit pairs `-fixtures` with `-open`, leaving
+    /// `settings/general` unclaimed) is — under AppKit's default
+    /// `NSTreatUnknownArgumentsAsOpen == YES` — treated as a *document to
+    /// open at launch*. A launch-time open event makes SwiftUI suppress the
+    /// default `WindowGroup` window: the app boots into an event loop with
+    /// zero windows and no way to ever get one (the historical `-open …`
+    /// hang). Registering `NO` disables only the command-line-argument open
+    /// path; real Finder "Open With" events arrive as Apple Events and are
+    /// unaffected.
+    public static let requiredDefaultsRegistrations: [String: String] = [
+        "NSTreatUnknownArgumentsAsOpen": "NO"
+    ]
 
     /// Parses launch arguments (without the executable path, i.e.
     /// `CommandLine.arguments.dropFirst()` — a leading executable path is

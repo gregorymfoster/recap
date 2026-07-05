@@ -94,9 +94,34 @@ if [[ ! -x "$BIN" ]]; then
   exit 1
 fi
 
-echo "── launching $BIN -fixtures -show-menubar-content ──"
-"$BIN" -fixtures -show-menubar-content >/dev/null 2>&1 &
-PID=$!
+# Launch via `open -n` rather than exec-ing the raw Mach-O: in some host
+# sessions a raw-exec'd app never registers with the window server (no
+# windows ever appear), while LaunchServices launches work reliably.
+# `open -n` detaches, so discover the new PID by diffing the executable's
+# PID set from before the launch.
+echo "── launching $APP_PATH -fixtures -show-menubar-content (via open -n) ──"
+before_pids="$(pgrep -x "$EXE" 2>/dev/null || true)"
+if ! open -n "$PWD/$APP_PATH" --args -fixtures -show-menubar-content; then
+  echo "FAIL: open -n could not launch $APP_PATH"
+  exit 1
+fi
+
+PID=""
+for _ in $(seq 1 30); do
+  for candidate in $(pgrep -x "$EXE" 2>/dev/null || true); do
+    if ! grep -qx "$candidate" <<<"$before_pids"; then
+      PID="$candidate"
+      break
+    fi
+  done
+  [[ -n "$PID" ]] && break
+  sleep 1
+done
+
+if [[ -z "$PID" ]]; then
+  echo "FAIL: no new $EXE process appeared after 30s"
+  exit 1
+fi
 
 cleanup() {
   kill "$PID" 2>/dev/null || true

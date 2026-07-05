@@ -30,6 +30,11 @@ public struct RootView: View {
     /// re-invocations of `body` (a plain local `var` wouldn't); seeded from
     /// `stores.launchRoute` in both initializers below.
     @State private var routeApplier: LaunchRouteApplier
+    /// Native Settings-window opener (macOS 14+). The legacy
+    /// `SettingsOpener.open()` selector hack silently no-ops when invoked
+    /// from launch-time `.task` context (no key window / responder chain
+    /// yet), so `-open settings[/<tab>]` must use the real action.
+    @Environment(\.openSettings) private var openSettings
 
     private var library: LibraryStore { stores.library }
     private var session: MeetingSessionStore { stores.session }
@@ -122,9 +127,9 @@ public struct RootView: View {
     /// Runs whatever `LaunchRouteAction`s `routeApplier` hands back for
     /// `stores.launchRoute` — a no-op after the first successful call.
     /// `settings/<tab>` is staged on `router.pendingSettingsTab` and the
-    /// Settings window opened via `SettingsOpener` (no `AppStores` write:
-    /// `launchRoute` is read-only for this work); `SettingsWindowView`
-    /// consumes and clears the staged tab itself.
+    /// Settings window opened via the `openSettings` environment action (no
+    /// `AppStores` write: `launchRoute` is read-only for this work);
+    /// `SettingsWindowView` consumes and clears the staged tab itself.
     private func applyLaunchRouteIfNeeded() {
         let meetingIDs = library.meetings.map { $0.meeting.id.uuidString }
         let actions = routeApplier.applyOnce { rawID in
@@ -141,7 +146,8 @@ public struct RootView: View {
                 library.selectedMeetingID = uuid
             case .openSettings(let tab):
                 router.pendingSettingsTab = tab
-                SettingsOpener.open()
+                NSApp.activate(ignoringOtherApps: true)
+                openSettings()
             case .openSearch(let query):
                 searchQuery = query
                 showSearch = true

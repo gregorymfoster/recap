@@ -32,6 +32,12 @@ struct RecapApp: App {
     private let launch = LaunchConfiguration(arguments: Array(CommandLine.arguments.dropFirst()))
 
     init() {
+        // MUST run before NSApplicationMain: stops AppKit from treating a
+        // leftover bare launch argument (e.g. the route in `-fixtures -open
+        // settings/general`) as a document to open, which suppresses the
+        // main WindowGroup window entirely — the app would boot windowless
+        // and hang. See `LaunchConfiguration.requiredDefaultsRegistrations`.
+        UserDefaults.standard.register(defaults: LaunchConfiguration.requiredDefaultsRegistrations)
         let stores = AppStores(configuration: launch)
         _stores = State(initialValue: stores)
         updater = AppIdentity.isDevBuild ? nil : UpdaterModel(status: stores.updateStatus)

@@ -154,6 +154,22 @@ struct LaunchConfigurationTests {
         #expect(LaunchConfiguration(arguments: ["-seed-dir", "-fixtures"]).seedDir == nil)
     }
 
+    // MARK: Required defaults registrations
+
+    @Test func registersNSTreatUnknownArgumentsAsOpenNo() {
+        // Regression guard for the `-open <route>` windowless-launch hang:
+        // AppKit pairs `-key value` launch arguments greedily (`-fixtures`
+        // pairs with `-open`, orphaning `settings/general`) and, with
+        // NSTreatUnknownArgumentsAsOpen at its default of YES, treats the
+        // leftover bare argument as a document to open — which makes SwiftUI
+        // suppress the main WindowGroup window, so the app boots with zero
+        // windows and hangs. The shell registers these defaults before
+        // NSApplicationMain (see `RecapApp.init`); this pins the contract.
+        #expect(
+            LaunchConfiguration.requiredDefaultsRegistrations["NSTreatUnknownArgumentsAsOpen"] == "NO"
+        )
+    }
+
     // MARK: Combinations
 
     @Test func everythingAtOnce() {

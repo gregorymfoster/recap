@@ -4,9 +4,11 @@ SwiftUI views, design tokens, and `@Observable` stores — the only package depe
 RecapCore, RecapAudio, RecapTranscription, and RecapEnhancement. Keep logic in stores, views thin.
 
 ## Key files
-- `AppStores.swift` (663 lines, largest) — app-lifetime store graph, constructed once by the
-  App struct; wires real services together (e.g. `MeetingEventWatching` seam over
-  `CalendarWatcher` for testable calendar injection).
+- `AppStores.swift` — composition root: app-lifetime store graph, constructed once by the App
+  struct; wires per-subsystem coordinators (`RecordingController`, `ImportCoordinator`,
+  `AutoRecordCoordinator` — home of the `MeetingEventWatching` seam over `CalendarWatcher` —
+  `ObsidianExportCoordinator`/`BackupMirrorCoordinator`, `ChangeBusConsumer`) and keeps thin
+  forwarders for their pre-decomposition entry points (`startRecording()` etc.).
 - `LibraryStore.swift` — meeting list state; owns fixture data for `-fixtures` mode
   (`fixtureTranscripts`/`fixtureNotes`/`fixtureEnhancedNotes` dictionaries, no disk writes).
 - `TranscriptPane.swift`, `LibraryView.swift`, `MeetingDetailView.swift` — largest views (each
