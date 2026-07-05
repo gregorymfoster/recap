@@ -109,8 +109,11 @@ public final class AppStores {
     /// The route from `-open <route>`, not yet applied anywhere — carried
     /// for the launch-routing work.
     public let launchRoute: Route?
-    /// The directory from `-seed-dir <path>`, not yet consumed — carried
-    /// for the seeded-state work.
+    /// The directory from `-seed-dir <path>`. Normal-mode only: at init, its
+    /// contents are copied into a throwaway temp dir and the real storage
+    /// stack (`LibraryStorage`, `SearchIndex`) is rooted there instead of the
+    /// user's real library — see the `-seed-dir` handling in `init(configuration:)`.
+    /// Ignored in `-fixtures`/`-soak` graphs, which never touch this field.
     public let launchSeedDir: URL?
 
     /// The launch graph used by the app, selected by the parsed launch
@@ -173,8 +176,18 @@ public final class AppStores {
             }
         } else {
             let settings = SettingsStore()
-            let storage = LibraryStorage(rootURL: settings.saveRootURL)
-            let index = (try? SearchIndex(databaseURL: SearchIndex.defaultDatabaseURL)) ?? (try! SearchIndex())
+            // `-seed-dir <path>`: copy the given library folder into a
+            // throwaway temp dir and root the real storage stack there
+            // instead of the user's real library, so a problem library can
+            // be reproduced deterministically without ever writing to the
+            // source. Falls back to normal storage (real root, real index)
+            // when the source is missing/unreadable or the copy fails —
+            // `SeedLibrary.prepare` already logs the reason.
+            let seededRoot = configuration.seedDir.flatMap { SeedLibrary.prepare(source: $0) }
+            let storageRoot = seededRoot ?? settings.saveRootURL
+            let storage = LibraryStorage(rootURL: storageRoot)
+            let indexDatabaseURL = seededRoot?.appendingPathComponent("index.db") ?? SearchIndex.defaultDatabaseURL
+            let index = (try? SearchIndex(databaseURL: indexDatabaseURL)) ?? (try! SearchIndex())
             let changeBus = LibraryChangeBus()
             let library = LibraryStore(storage: storage, index: index, changeBus: changeBus)
             let models = WhisperModelManager()

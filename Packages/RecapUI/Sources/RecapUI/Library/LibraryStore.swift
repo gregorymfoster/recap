@@ -64,21 +64,21 @@ public final class LibraryStore {
     }
     public var filter = LibraryFilter()
 
-    private let storage: LibraryStorage?
-    private let index: SearchIndex?
-    private let autosaver: NotesAutosaver?
-    private let changeBus: LibraryChangeBus?
+    let storage: LibraryStorage?
+    let index: SearchIndex?
+    let autosaver: NotesAutosaver?
+    let changeBus: LibraryChangeBus?
     private let defaults: UserDefaults?
     /// Canned transcripts for fixture records (no disk in fixture mode), so
     /// -fixtures runs and screenshot dumps can show the transcript pane —
     /// avatars, rename affordance, playback follow. Empty in disk-backed mode.
-    private var fixtureTranscripts: [UUID: Transcript] = [:]
+    var fixtureTranscripts: [UUID: Transcript] = [:]
     /// Canned raw notes for fixture records, mirroring `fixtureTranscripts`.
     /// Empty in disk-backed mode.
-    private var fixtureNotes: [UUID: String] = [:]
+    var fixtureNotes: [UUID: String] = [:]
     /// Canned enhanced notes for fixture records, mirroring
     /// `fixtureTranscripts`. Empty in disk-backed mode.
-    private var fixtureEnhancedNotes: [UUID: String] = [:]
+    var fixtureEnhancedNotes: [UUID: String] = [:]
 
     private static let sortKey = "librarySort"
 
@@ -275,43 +275,6 @@ public final class LibraryStore {
         }
     }
 
-    // MARK: Notes & transcript
-
-    public func loadNotes(for record: MeetingRecord) -> String {
-        guard let storage else { return fixtureNotes[record.meeting.id] ?? "" }
-        return (try? storage.loadNotes(in: record)) ?? ""
-    }
-
-    public func loadTranscript(for record: MeetingRecord) -> Transcript? {
-        guard let storage else { return fixtureTranscripts[record.meeting.id] }
-        return try? storage.loadTranscript(in: record)
-    }
-
-    public func loadEnhancedNotes(for record: MeetingRecord) -> String? {
-        guard let storage else { return fixtureEnhancedNotes[record.meeting.id] }
-        return (try? storage.loadEnhancedNotes(in: record)) ?? nil
-    }
-
-    /// Per-meeting speaker renames (design handoff v2 §8e). Fixture mode (no
-    /// `storage`) returns an empty mapping — previews just show "Speaker N".
-    public func loadSpeakerNames(for record: MeetingRecord) -> [String: String] {
-        guard let storage else { return [:] }
-        return ((try? storage.loadSpeakerNames(in: record)) ?? SpeakerNames()).names
-    }
-
-    /// Renames one diarized speaker within a single meeting and persists it to
-    /// `speakers.json`, then posts a change-bus event so any open view (this
-    /// meeting's detail view, an export watcher) refreshes. No-ops in fixture
-    /// mode — there's no real folder to persist into for a `/dev/null` record.
-    public func renameSpeaker(_ speakerID: String, to name: String, in record: MeetingRecord) {
-        guard let storage else { return }
-        var speakerNames = (try? storage.loadSpeakerNames(in: record)) ?? SpeakerNames()
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        speakerNames[speakerID] = trimmed.isEmpty ? nil : trimmed
-        guard (try? storage.saveSpeakerNames(speakerNames, in: record)) != nil else { return }
-        changeBus?.post(.meetingChanged(record.meeting.id))
-    }
-
     /// "~/Recap"-style label for the status bar.
     public var saveLocationLabel: String {
         guard let storage else { return "~/Recap" }
@@ -320,48 +283,7 @@ public final class LibraryStore {
         return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 
-    /// Called on every keystroke; the autosaver debounces the disk write.
-    public func notesChanged(_ notes: String, in record: MeetingRecord) {
-        guard let autosaver else { return }
-        Task { await autosaver.noteDidChange(notes, in: record) }
-    }
-
-    /// Writes pending notes and refreshes the search index (call on blur/quit).
-    public func flushNotes(for record: MeetingRecord) {
-        guard let autosaver, let storage, let index else { return }
-        let changeBus = changeBus
-        Task {
-            await autosaver.flush()
-            try? index.update(record, from: storage)
-            changeBus?.post(.meetingChanged(record.meeting.id))
-        }
-    }
-
     public var readyCount: Int {
         meetings.filter { $0.meeting.status == .ready }.count
-    }
-
-    /// Full-text search over titles, notes, enhanced notes, and transcripts.
-    public func search(_ query: String) -> [SearchHit] {
-        guard let index else {
-            // Fixture mode: filter titles so the overlay is previewable.
-            return meetings
-                .filter { $0.meeting.title.localizedCaseInsensitiveContains(query) }
-                .map { SearchHit(meetingID: $0.meeting.id, title: $0.meeting.title, snippet: "") }
-        }
-        return (try? index.search(query)) ?? []
-    }
-}
-
-// MARK: - Fixtures
-
-extension LibraryStore {
-    /// Sample library matching the states in design mock 1c. Equivalent to
-    /// `FixtureScenario.default.library` — kept as a standalone entry point
-    /// since it's the one every preview/test in this package already calls.
-    /// See `FixtureScenarios.swift` for this and every other named
-    /// `-fixtures <scenario>` graph.
-    public static func fixture() -> LibraryStore {
-        FixtureScenarios.defaultLibrary()
     }
 }

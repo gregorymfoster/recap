@@ -18,8 +18,11 @@ import Foundation
 /// - `-open <route>` — parsed into `route` and applied once at launch by
 ///   `RootView`/`LaunchRouteApplier` after the store graph and main window
 ///   exist.
-/// - `-seed-dir <path>` — parsed into `seedDir` but not yet consumed
-///   (seeded-state sibling work consumes it).
+/// - `-seed-dir <path>` — parsed into `seedDir`. Normal-mode only: `AppStores`
+///   copies the directory into a throwaway temp dir and roots the real
+///   storage stack there instead of the user's real library, for
+///   deterministic reproduction of real-library bugs. Ignored in
+///   `-fixtures`/`-soak` modes.
 /// - `-show-menubar-content` — open the menu-bar-content debug window.
 /// - `-show-nudge` — open the nudge-preview debug window (fixtures only; see
 ///   `opensNudgePreviewWindow`).
@@ -33,7 +36,8 @@ public struct LaunchConfiguration: Equatable, Sendable {
     public var mode: Mode
     /// Parsed from `-open <route>`. Inert for now — not yet applied anywhere.
     public var route: Route?
-    /// Parsed from `-seed-dir <path>`. Inert for now — not yet consumed.
+    /// Parsed from `-seed-dir <path>`. See the grammar note above — consumed
+    /// by `AppStores` in normal mode only.
     public var seedDir: URL?
     public var showMenuBarContent: Bool
     public var showNudge: Bool

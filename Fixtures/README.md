@@ -1,5 +1,22 @@
 # Test fixtures
 
+## Real-storage state injection (`-seed-dir <path>`)
+
+`-seed-dir <path>` is a normal-mode (not `-fixtures`/`-soak`) launch argument for reproducing a
+real-library bug deterministically. `<path>` must be a library folder in `LibraryStorage`'s on-disk
+layout (one subfolder per meeting, e.g. `2026-01-01 Standup/meeting.json`, `notes.md`, ...). At
+launch, the app copies that folder into a throwaway temp directory and runs the real storage stack
+(`LibraryStorage`, search index, processing queue — nothing simulated) rooted at the copy. The
+source directory is never modified, so the same seed dir can be reused for as many launches as
+needed and always starts from the same state:
+
+```sh
+open <path>/Recap.app --args -seed-dir /path/to/problem-library
+```
+
+If the source is missing or unreadable, the app logs an error (`SeedLibrary` category) and falls
+back to normal storage rather than failing to launch.
+
 ## Scenarios (`-fixtures <scenario>`)
 
 The app's `-fixtures` launch argument takes an optional scenario name, resolved by

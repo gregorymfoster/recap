@@ -67,6 +67,14 @@ with no processing queue. Driven by `Scripts/soak-test.sh`; not for interactive 
 the menu bar extra's popover content (`MenuBarContent`) so it can be screenshotted — the real
 status-item popover lives in menu-bar overflow that headless tooling can't reach.
 
+`-seed-dir <path>` is deterministic real-storage state injection, normal-mode only (ignored under
+`-fixtures`/`-soak`): at launch, `<path>` (a library folder in the on-disk `LibraryStorage` layout —
+one subfolder per meeting) is copied into a throwaway temp directory, and the real storage stack
+(`LibraryStorage`, search index, processing queue) is rooted there instead of `~/Recap*`. The source
+directory is never written to. Use it to reproduce a real-library bug deterministically: copy the
+problem library once, then every `-seed-dir` launch starts from an identical snapshot. Falls back to
+normal storage (logging an error) if the source is missing or unreadable.
+
 ## Dev build vs prod
 
 Debug builds produce a fully independent **Recap Dev.app** (`com.gregfoster.recap.dev`) so a prod
