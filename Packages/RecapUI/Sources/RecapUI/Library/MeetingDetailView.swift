@@ -22,6 +22,9 @@ struct MeetingDetailView: View {
     @State private var inputDevices: [AudioInputDevice] = []
     @State private var deviceListListener: AudioObjectPropertyListenerBlock?
     @State private var playback = PlaybackStore()
+    @State private var isEditingTitle = false
+    @State private var editedTitle = ""
+    @FocusState private var titleFieldFocused: Bool
 
     private var isLiveMeeting: Bool {
         session.activeRecord?.meeting.id == record.meeting.id
@@ -284,13 +287,59 @@ struct MeetingDetailView: View {
         }
     }
 
+    /// Click-to-edit title (Granola-like): a double-click on the read-only
+    /// title reveals a real `TextField` seeded with the current title, styled
+    /// identically so the swap doesn't jump. Commits on Return/focus loss via
+    /// `commitTitleEdit()`; Escape cancels without renaming. Reuses
+    /// `RenameSheetModifier`'s trim/empty semantics and `library.rename`'s
+    /// existing persistence (disk + fixture branches, search index, change bus).
+    @ViewBuilder
     private var titleText: some View {
-        Text(record.meeting.title)
-            .font(.system(size: 22, weight: .bold))
-            .kerning(-0.3)
-            .foregroundStyle(Tokens.textPrimary)
-            .lineLimit(2)
-            .truncationMode(.tail)
+        if isEditingTitle {
+            TextField("Title", text: $editedTitle)
+                .textFieldStyle(.plain)
+                .font(.system(size: 22, weight: .bold))
+                .kerning(-0.3)
+                .foregroundStyle(Tokens.textPrimary)
+                .lineLimit(1)
+                .focused($titleFieldFocused)
+                .onSubmit { commitTitleEdit() }
+                .onExitCommand { cancelTitleEdit() }
+                .onChange(of: titleFieldFocused) { _, focused in
+                    if !focused { commitTitleEdit() }
+                }
+                .axID(.detailTitleField)
+        } else {
+            Text(record.meeting.title)
+                .font(.system(size: 22, weight: .bold))
+                .kerning(-0.3)
+                .foregroundStyle(Tokens.textPrimary)
+                .lineLimit(2)
+                .truncationMode(.tail)
+                .help("Double-click to rename")
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { beginTitleEdit() }
+                .axID(.detailTitleText)
+        }
+    }
+
+    private func beginTitleEdit() {
+        editedTitle = record.meeting.title
+        isEditingTitle = true
+        titleFieldFocused = true
+    }
+
+    private func commitTitleEdit() {
+        guard isEditingTitle else { return }
+        isEditingTitle = false
+        let trimmed = editedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty, trimmed != record.meeting.title {
+            library.rename(record, to: trimmed)
+        }
+    }
+
+    private func cancelTitleEdit() {
+        isEditingTitle = false
     }
 
     /// Switches the active notes view and persists the choice per meeting

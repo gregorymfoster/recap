@@ -76,6 +76,14 @@ extension AXID {
     /// Live-meeting input-device picker (`MeetingDetailView.liveInputRow`).
     public static let liveInputDevicePicker = AXID("library-live-input-device-picker")
 
+    /// The read-only detail-view title text (`MeetingDetailView.titleText`).
+    /// Double-click reveals `.detailTitleField` for inline rename.
+    public static let detailTitleText = AXID("library-detail-title-text")
+
+    /// The detail-view title's inline rename `TextField`, shown in place of
+    /// `.detailTitleText` while editing (`MeetingDetailView.titleText`).
+    public static let detailTitleField = AXID("library-detail-title-field")
+
     // MARK: Player bar
 
     /// The player bar container docked at the bottom of the detail view

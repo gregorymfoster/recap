@@ -306,6 +306,52 @@ private actor ChangeCollector {
         #expect(store.loadSpeakerNames(for: record).isEmpty)
     }
 
+    // MARK: rename
+
+    @Test func renamePersistsNewTitleAndPostsChange() async throws {
+        let (store, storage, changeBus) = makeStore()
+        let record = try #require(store.startNewMeeting(title: "Original title"))
+        let collector = ChangeCollector.make(changeBus)
+
+        store.rename(record, to: "New title")
+
+        #expect(store.record(for: record.meeting.id)?.meeting.title == "New title")
+        let onDisk = try #require(try storage.loadAll().first { $0.meeting.id == record.meeting.id })
+        #expect(onDisk.meeting.title == "New title")
+
+        let changes = await collector.waitForCount(1)
+        #expect(changes == [.meetingChanged(record.meeting.id)])
+    }
+
+    @Test func renameWithUntrimmedTitlePersistsExactlyAsGiven() throws {
+        // LibraryStore.rename itself does no trimming — trimming is the
+        // caller's responsibility (RenameSheetModifier / the detail-view
+        // title field both trim before calling in). Confirm the store is a
+        // faithful passthrough rather than silently re-trimming.
+        let (store, storage, _) = makeStore()
+        let record = try #require(store.startNewMeeting(title: "Original title"))
+
+        store.rename(record, to: "  Padded title  ")
+
+        #expect(store.record(for: record.meeting.id)?.meeting.title == "  Padded title  ")
+        let onDisk = try #require(try storage.loadAll().first { $0.meeting.id == record.meeting.id })
+        #expect(onDisk.meeting.title == "  Padded title  ")
+    }
+
+    @Test func renameOnFixtureStoreUpdatesInMemoryOnly() {
+        // Fixture stores have no `storage`/`index`/`changeBus` — rename must
+        // fall back to the in-memory-only branch rather than crashing.
+        let record = MeetingRecord(
+            meeting: Meeting(title: "Fixture meeting", date: .now),
+            folderURL: URL(filePath: "/dev/null")
+        )
+        let store = LibraryStore(fixtures: [record])
+
+        store.rename(record, to: "Renamed fixture meeting")
+
+        #expect(store.record(for: record.meeting.id)?.meeting.title == "Renamed fixture meeting")
+    }
+
     // MARK: insertImported
 
     @Test func insertImportedAddsRecordAtSortedPositionAndPostsChange() async throws {
