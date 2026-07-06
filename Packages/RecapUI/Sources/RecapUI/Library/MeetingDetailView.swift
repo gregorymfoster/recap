@@ -71,14 +71,6 @@ struct MeetingDetailView: View {
         }
         .navigationTitle(record.meeting.title)
         .environment(playback)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                copyNotesButton
-            }
-            ToolbarItem(placement: .primaryAction) {
-                transcriptToggle
-            }
-        }
         .task(id: record.meeting.id) {
             notes = library.loadNotes(for: record)
             savedTranscript = library.loadTranscript(for: record)
@@ -139,9 +131,36 @@ struct MeetingDetailView: View {
 
     private var editor: some View {
         VStack(alignment: .leading, spacing: 0) {
+            detailControls
+            detailPaneContent
+        }
+        .background(Tokens.surface)
+    }
+
+    /// Copy + transcript-toggle chips on their own top row, right-aligned so
+    /// they never compete for width with the date/badge row (which matters when
+    /// the transcript pane is open and this editor pane is narrow). Kept OUTSIDE
+    /// `detailPaneContent`'s `.axID(.detailPane)` subtree so each chip retains
+    /// its own AXID (`detail-copy-notes-button` / `transcript-toggle-button`)
+    /// instead of being absorbed into `library-detail-pane`. They used to sit in
+    /// the window `.toolbar`, but macOS 26 wraps toolbar items in a shared Liquid
+    /// Glass capsule — the outer "bubble" the design doesn't want behind these
+    /// already-styled chips.
+    private var detailControls: some View {
+        HStack(spacing: 8) {
+            Spacer(minLength: 0)
+            copyNotesButton
+            transcriptToggle
+        }
+        .padding(.horizontal, 40)
+        .padding(.top, 18)
+    }
+
+    private var detailPaneContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
             header
                 .padding(.horizontal, 40)
-                .padding(.top, 26)
+                .padding(.top, 10)
             if case .enhancing = record.meeting.status {
                 enhancingBanner
                     .padding(.horizontal, 40)
@@ -172,7 +191,6 @@ struct MeetingDetailView: View {
                     .axID(.notesEditor)
             }
         }
-        .background(Tokens.surface)
         .axID(.detailPane)
     }
 
