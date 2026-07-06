@@ -42,8 +42,15 @@ public enum QuitGuard {
 /// Authorization is requested lazily, on the first completion this process
 /// observes — never at launch — and a denial degrades silently (no retry
 /// nagging, no crash).
+///
+/// Does not itself hold `UNUserNotificationCenter.current().delegate` — that
+/// single slot belongs to `NotificationRouter`, installed once in
+/// `AppStores`. This registers a handler for its own category instead, so it
+/// can share the process with `CallStartNotifier` (or any future notifier)
+/// without clobbering anyone else's delegate.
 @MainActor
-public final class CompletionNotifier: NSObject, UNUserNotificationCenterDelegate {
+public final class CompletionNotifier {
+    static let category = "com.gregfoster.recap.completion"
     /// Meeting IDs already notified this run. In-memory only — a fresh
     /// launch's crash-recovery requeue finishing counts as a new completion,
     /// which is fine (the meeting genuinely just became ready again from the
@@ -63,13 +70,19 @@ public final class CompletionNotifier: NSObject, UNUserNotificationCenterDelegat
     private var pendingMeetingIDs: [String: UUID] = [:]
 
     public init(
+        router: NotificationRouter,
         onOpenMeeting: @escaping @MainActor (UUID) -> Void,
         isMeetingCurrentlyVisible: @escaping @MainActor (UUID) -> Bool
     ) {
         self.onOpenMeeting = onOpenMeeting
         self.isMeetingCurrentlyVisible = isMeetingCurrentlyVisible
-        super.init()
-        UNUserNotificationCenter.current().delegate = self
+        router.register(
+            category: Self.category,
+            handler: NotificationRouter.Handler(
+                didReceive: { [weak self] response in self?.handle(response) },
+                willPresent: { [.banner, .sound] }
+            )
+        )
     }
 
     /// Call from the status-reporting path whenever a meeting's status
@@ -106,6 +119,7 @@ public final class CompletionNotifier: NSObject, UNUserNotificationCenterDelegat
             content.title = "\(title) is ready"
             content.body = CompletionNotifier.body(duration: duration, hasEnhancedNotes: hasEnhancedNotes)
             content.sound = .default
+            content.categoryIdentifier = Self.category
             let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
             try? await center.add(request)
         }
@@ -125,24 +139,9 @@ public final class CompletionNotifier: NSObject, UNUserNotificationCenterDelegat
         return Duration.seconds(seconds).formatted(.units(allowed: [.hours, .minutes], width: .narrow))
     }
 
-    nonisolated public func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse
-    ) async {
-        let identifier = response.notification.request.identifier
-        await MainActor.run {
-            guard let meetingID = pendingMeetingIDs.removeValue(forKey: identifier) else { return }
-            onOpenMeeting(meetingID)
-        }
-    }
-
-    /// Show banners even while Recap is frontmost (a different meeting may be
-    /// open, or the user backgrounded then foregrounded — still worth
-    /// surfacing).
-    nonisolated public func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+    /// The router's `didReceive` handler for `Self.category`.
+    private func handle(_ response: NotificationRouter.Response) {
+        guard let meetingID = pendingMeetingIDs.removeValue(forKey: response.notificationIdentifier) else { return }
+        onOpenMeeting(meetingID)
     }
 }

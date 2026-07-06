@@ -31,6 +31,11 @@ public final class AppStores {
     public let upcoming: UpcomingStore
     public let router = AppRouter()
     public let toasts = ToastCenter()
+    /// The process's sole `UNUserNotificationCenterDelegate`, installed once
+    /// here. `CompletionNotifier` and `AutoRecordCoordinator`'s
+    /// `CallStartNotifier` both register category handlers with it instead
+    /// of touching the delegate slot themselves — see `NotificationRouter`.
+    @ObservationIgnored private let notificationRouter = NotificationRouter()
     /// Posts "‹meeting› is ready" notifications (design spec 8f). `nil` in
     /// fixtures/soak graphs — nothing there ever reaches a real `.ready`
     /// transition through a real queue, so there's nothing to notify about.
@@ -96,6 +101,10 @@ public final class AppStores {
         }
         let makeCallAudioMonitor: () -> CallAudioMonitoring?
         let todayEventsProvider: @MainActor (Date) -> [CalendarEventSnapshot]
+        let makeCallStartNotifier: (
+            _ recordTapped: @escaping @MainActor (MeetingNudge) -> Void,
+            _ onDismissed: @escaping @MainActor () -> Void
+        ) -> CallStartNotifying?
         if case .fixtures = configuration.mode {
             let scenario = FixtureScenario(rawScenario: fixtureScenario ?? "default")
             settings = .ephemeralOnboarded()
@@ -108,6 +117,7 @@ public final class AppStores {
             upcoming = scenario.upcoming
             makeCallAudioMonitor = { nil }
             todayEventsProvider = { _ in [] }
+            makeCallStartNotifier = { _, _ in nil }
         } else if configuration.mode == .soak {
             // Soak-test graph: real recording pipeline (mixer, writer, clock,
             // menu bar) driven by synthetic zero-hardware audio sources, no
@@ -132,6 +142,7 @@ public final class AppStores {
             upcoming = .live()
             makeCallAudioMonitor = { nil }
             todayEventsProvider = { _ in [] }
+            makeCallStartNotifier = { _, _ in nil }
             let session = self.session
             Task { @MainActor in
                 guard let record = library.startNewMeeting(title: "Soak recording") else { return }
@@ -166,7 +177,9 @@ public final class AppStores {
             todayEventsProvider = { calendarQuery.todayEvents(now: $0) }
             let toasts = toasts
             let router = router
+            notificationRouter.install()
             let notifier = CompletionNotifier(
+                router: notificationRouter,
                 onOpenMeeting: { [weak library] id in
                     // Mirrors `AppStores.showMeeting(_:)`, inlined: `self`
                     // isn't fully initialized yet at this point in `init`.
@@ -179,6 +192,10 @@ public final class AppStores {
                 }
             )
             completionNotifier = notifier
+            let notificationRouter = notificationRouter
+            makeCallStartNotifier = { recordTapped, onDismissed in
+                CallStartNotifier(router: notificationRouter, recordTapped: recordTapped, onDismissed: onDismissed)
+            }
             queue = QueueStore(
                 library: library, storage: storage, models: models, changeBus: changeBus,
                 settings: settings,
@@ -202,7 +219,8 @@ public final class AppStores {
             session: session, queue: queue, router: router, toasts: toasts,
             makeCalendarWatcher: { CalendarWatcher(onMeetingStarting: $0) },
             makeCallAudioMonitor: makeCallAudioMonitor,
-            todayEventsProvider: todayEventsProvider
+            todayEventsProvider: todayEventsProvider,
+            makeCallStartNotifier: makeCallStartNotifier
         )
         recording = coordinators.recording
         importer = coordinators.importer
@@ -357,7 +375,11 @@ public final class AppStores {
         toasts: ToastCenter,
         makeCalendarWatcher: @escaping (@escaping @MainActor (CalendarEventSnapshot) -> Void) -> MeetingEventWatching,
         makeCallAudioMonitor: @escaping () -> CallAudioMonitoring?,
-        todayEventsProvider: @escaping @MainActor (Date) -> [CalendarEventSnapshot]
+        todayEventsProvider: @escaping @MainActor (Date) -> [CalendarEventSnapshot],
+        makeCallStartNotifier: @escaping (
+            _ recordTapped: @escaping @MainActor (MeetingNudge) -> Void,
+            _ onDismissed: @escaping @MainActor () -> Void
+        ) -> CallStartNotifying? = { _, _ in nil }
     ) -> (
         recording: RecordingController, importer: ImportCoordinator, autoRecord: AutoRecordCoordinator,
         obsidianExport: ObsidianExportCoordinator, mirrorBackup: BackupMirrorCoordinator
@@ -379,7 +401,8 @@ public final class AppStores {
             makeCallAudioMonitor: makeCallAudioMonitor,
             todayEventsProvider: todayEventsProvider,
             startRecording: { title, attendees in recording.startRecording(title: title, attendees: attendees) },
-            stopRecording: { recording.stopRecording() }
+            stopRecording: { recording.stopRecording() },
+            makeCallStartNotifier: makeCallStartNotifier
         )
         let obsidianExport = ObsidianExportCoordinator(settings: settings, library: library, storage: storage)
         let mirrorBackup = BackupMirrorCoordinator(settings: settings, library: library)

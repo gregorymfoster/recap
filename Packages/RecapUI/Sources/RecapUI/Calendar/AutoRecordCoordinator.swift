@@ -41,6 +41,18 @@ public final class AutoRecordCoordinator {
     /// to `.off`.
     @ObservationIgnored private var nudgeCenter: MeetingNudgeCenter?
     @ObservationIgnored private var nudgePanel: MeetingNudgePanelController?
+    @ObservationIgnored private var callStartNotifier: CallStartNotifying?
+    /// Factory for the call-start system-notification seam: builds a real
+    /// `CallStartNotifier` wired to the shared `NotificationRouter` in the
+    /// production graph, `nil` in fixtures/soak/preview and the test init's
+    /// default (mirrors `makeCallAudioMonitor`'s no-op-gracefully-on-nil
+    /// shape). Takes the same `recordTapped`/`onDismissed` closures
+    /// `ensureNudgeCenter()` wires the panel to, so both surfaces share one
+    /// action path.
+    @ObservationIgnored private let makeCallStartNotifier: (
+        _ recordTapped: @escaping @MainActor (MeetingNudge) -> Void,
+        _ onDismissed: @escaping @MainActor () -> Void
+    ) -> CallStartNotifying?
     @ObservationIgnored private var callAudioMonitor: CallAudioMonitoring?
     /// Factory for the call-audio monitor seam: `ProcessAudioMonitor` in the
     /// production graph, `{ nil }` in fixtures/soak/preview and the test
@@ -68,7 +80,11 @@ public final class AutoRecordCoordinator {
         makeCallAudioMonitor: @escaping () -> CallAudioMonitoring?,
         todayEventsProvider: @escaping @MainActor (Date) -> [CalendarEventSnapshot],
         startRecording: @escaping @MainActor (String, [String]) -> Void,
-        stopRecording: @escaping @MainActor () -> Void
+        stopRecording: @escaping @MainActor () -> Void,
+        makeCallStartNotifier: @escaping (
+            _ recordTapped: @escaping @MainActor (MeetingNudge) -> Void,
+            _ onDismissed: @escaping @MainActor () -> Void
+        ) -> CallStartNotifying? = { _, _ in nil }
     ) {
         self.settings = settings
         self.session = session
@@ -77,6 +93,7 @@ public final class AutoRecordCoordinator {
         self.todayEventsProvider = todayEventsProvider
         self.startRecording = startRecording
         self.stopRecording = stopRecording
+        self.makeCallStartNotifier = makeCallStartNotifier
     }
 
     /// Starts or stops the calendar watcher, the call-audio monitor, and the
@@ -91,6 +108,7 @@ public final class AutoRecordCoordinator {
             calendarAccessDenied = false
             callAudioMonitor?.stop()
             nudgePanel?.dismiss()
+            callStartNotifier?.dismissLastDelivered()
             return
         }
         if calendarWatcher == nil {
@@ -122,7 +140,10 @@ public final class AutoRecordCoordinator {
 
     /// Builds the nudge center + panel once, wiring the center's closures to
     /// live settings/session state and the panel to the center's action
-    /// entry points.
+    /// entry points. Also builds the call-start system notification (when a
+    /// factory is injected) sharing the same `recordTapped` action path, so
+    /// the panel's Record button and the notification's Record action both
+    /// end up calling `center.recordTapped(for:)`.
     private func ensureNudgeCenter() {
         guard nudgeCenter == nil else { return }
         let panel = MeetingNudgePanelController()
@@ -138,27 +159,43 @@ public final class AutoRecordCoordinator {
                 self?.startRecording(title, attendees)
             }
         )
-        panel.onRecord = { [weak center] nudge in center?.recordTapped(for: nudge) }
-        panel.onNotNow = { [weak center] nudge in center?.notNowTapped(for: nudge) }
+        panel.onRecord = { [weak self, weak center] nudge in
+            center?.recordTapped(for: nudge)
+            self?.callStartNotifier?.dismissLastDelivered()
+        }
+        panel.onNotNow = { [weak self, weak center] nudge in
+            center?.notNowTapped(for: nudge)
+            self?.callStartNotifier?.dismissLastDelivered()
+        }
         panel.onDontAsk = { [weak self, weak center] appID in
             center?.dontAskTapped(appID: appID) { appID in
                 self?.settings.disabledCallAppIDs.insert(appID)
                 self?.applyCalendarAutoRecordSetting()
             }
+            self?.callStartNotifier?.dismissLastDelivered()
         }
         panel.onStop = { [weak self] in self?.stopRecording() }
         nudgeCenter = center
         nudgePanel = panel
+        callStartNotifier = makeCallStartNotifier(
+            { [weak center] nudge in center?.recordTapped(for: nudge) },
+            { [weak panel] in panel?.dismiss() }
+        )
     }
 
     /// Presents a nudge — through the test hook when one's installed (tests
     /// must never construct a real `NSPanel`), otherwise through the real
-    /// panel controller.
+    /// panel controller. Also fans out to the call-start system notification
+    /// (when one's configured) so a single trigger yields exactly one panel
+    /// presentation and one notification — never a double in-app prompt,
+    /// since `present` only ever fires once per `MeetingNudgeCenter`
+    /// decision (dedup already happened upstream).
     private func presentNudge(_ nudge: MeetingNudge) {
         if let onNudgePresented {
             onNudgePresented(nudge)
         } else {
             nudgePanel?.present(nudge)
         }
+        callStartNotifier?.post(nudge)
     }
 }
