@@ -122,6 +122,13 @@ public enum RecapCopy {
     public static let systemAudioUnavailableMessage =
         "System audio isn't being captured — only your microphone is recording."
 
+    /// Toast fired when system audio started fine but goes silent mid-call
+    /// (`RecorderEvent.systemAudioStalled`) — distinct from
+    /// `systemAudioUnavailableMessage` because the tap looked healthy at
+    /// start; this is a mid-recording dropout, not an unavailable source.
+    public static let systemAudioStalledMessage =
+        "System audio has gone quiet — the other participant may not be recording. Your microphone is still capturing."
+
     /// Toast fired when preflight finds no usable audio source at all — no
     /// meeting record is created for this attempt.
     public static let noAudioAccessMessage =

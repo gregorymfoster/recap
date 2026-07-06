@@ -73,6 +73,18 @@ public final class RecordingController {
                 SettingsOpener.open()
             }
         }
+        // System audio started fine but went silent mid-call — recording
+        // continues (mic still captures), this is a warning, not an
+        // auto-stop, so unlike `onAutoStop` above it doesn't call
+        // `stopRecording()`.
+        session.onSystemAudioStalled = { [weak self] in
+            self?.toasts.show(
+                RecapCopy.systemAudioStalledMessage, style: .warning, actionTitle: "Open Settings"
+            ) {
+                SettingsOpener.open()
+                PrivacyPane.open(PrivacyPane.systemAudio)
+            }
+        }
     }
 
     /// The one start-recording flow, shared by the Record button, the menu

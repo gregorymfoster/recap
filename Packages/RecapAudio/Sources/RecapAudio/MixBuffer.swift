@@ -27,13 +27,24 @@ struct MixBuffer {
     private(set) var mic: [Float] = []
     private(set) var system: [Float] = []
 
+    /// Running totals of samples ever pushed on each side — monotonic for the
+    /// lifetime of a recording, independent of the pairwise-drained `mic`/
+    /// `system` buffers above. Used by `MixerEngine`'s liveness watchdog to
+    /// detect a side that has gone silent (as opposed to merely stalled a
+    /// couple seconds behind), which is a deterministic sample-count
+    /// comparison rather than a wall-clock timer.
+    private(set) var totalMicSamples = 0
+    private(set) var totalSystemSamples = 0
+
     mutating func pushMic(_ samples: [Float]) -> [Float] {
+        totalMicSamples += samples.count
         guard systemActive else { return samples }
         mic.append(contentsOf: samples)
         return drain()
     }
 
     mutating func pushSystem(_ samples: [Float]) -> [Float] {
+        totalSystemSamples += samples.count
         guard micActive else { return samples }
         system.append(contentsOf: samples)
         return drain()

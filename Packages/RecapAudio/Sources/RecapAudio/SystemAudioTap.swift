@@ -70,8 +70,10 @@ public final class SystemAudioTap {
     /// would silently reintroduce the TCC-prompt UI freeze this exists to fix.
     @concurrent
     private static func performSetup() async throws -> SetupResult {
-        // Exclude our own process so playback of past meetings is never re-captured.
-        let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+        // Exclude our own process so playback of past meetings (PlaybackStore's
+        // AVAudioPlayer, in the main window) is never re-captured into a new
+        // recording running at the same time.
+        let description = CATapDescription(stereoGlobalTapButExcludeProcesses: ownProcessObjectIDs())
         description.isPrivate = true
         description.muteBehavior = .unmuted
 
@@ -162,6 +164,33 @@ public final class SystemAudioTap {
             tapID: tapID, aggregateID: aggregateID, ioProcID: ioProcID,
             stream: stream, continuation: continuation
         )
+    }
+
+    /// Resolves this process's own Core Audio "Process object" id via
+    /// `kAudioHardwarePropertyTranslatePIDToProcessObject`, so the global tap
+    /// can exclude it (`CATapDescription`'s exclude list wants Process object
+    /// ids, not raw PIDs). Returns an empty array — same as excluding
+    /// nothing — if the translation fails; that's not expected in practice
+    /// (every running process with any Core Audio client gets a Process
+    /// object) but failing open here just means Recap's own audio isn't
+    /// excluded, not a crash.
+    private nonisolated static func ownProcessObjectIDs() -> [AudioObjectID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var pid = getpid()
+        var processID = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        let status = withUnsafeMutablePointer(to: &pid) { pidPtr -> OSStatus in
+            AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject), &address,
+                UInt32(MemoryLayout<pid_t>.size), pidPtr, &size, &processID
+            )
+        }
+        guard status == noErr, processID != kAudioObjectUnknown else { return [] }
+        return [processID]
     }
 
     /// Static teardown used when setup fails partway through, before any

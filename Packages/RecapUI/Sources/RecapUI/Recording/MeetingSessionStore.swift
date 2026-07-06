@@ -41,6 +41,13 @@ public final class MeetingSessionStore {
     /// other meeting participants aren't being captured.
     public private(set) var systemAudioUnavailable = false
 
+    /// True once the recorder's watchdog has detected that a previously
+    /// healthy system-audio tap has gone silent mid-recording (route change,
+    /// etc.) — mirrors `systemAudioUnavailable` but for a mid-call dropout
+    /// rather than a failure-to-start. Sticky for the rest of the recording
+    /// (the underlying `RecorderEvent.systemAudioStalled` only fires once).
+    public private(set) var systemAudioStalled = false
+
     /// Set when recording can't continue safely (e.g. disk full) — the
     /// session auto-stops so the audio captured so far is salvaged.
     public private(set) var recordingFailureMessage: String?
@@ -58,6 +65,11 @@ public final class MeetingSessionStore {
     /// device name (if resolved) is passed separately so the toast can name
     /// it without re-deriving it from prose.
     public var onInputRebuilt: (@MainActor (_ reason: String, _ deviceName: String?) -> Void)?
+
+    /// Fires once per recording when `RecorderEvent.systemAudioStalled`
+    /// arrives — `AppStores`/`RecordingController` wires this to a warning
+    /// toast (mirrors `onInputRebuilt`'s wiring pattern).
+    public var onSystemAudioStalled: (@MainActor () -> Void)?
 
     private static let idleLevels = [Float](repeating: 0, count: 16)
     private let recorder: MeetingRecorder
@@ -159,6 +171,7 @@ public final class MeetingSessionStore {
         micUnavailable = false
         startFailureMessage = nil
         recordingFailureMessage = nil
+        systemAudioStalled = false
         do {
             let output = try await recorder.start(
                 writingTo: record.audioURL, includeSystemAudio: includeSystemAudio,
@@ -244,6 +257,12 @@ public final class MeetingSessionStore {
             // survives, and tell the user why the recording ended.
             recordingFailureMessage = "Recording stopped — couldn't write audio (disk full?)"
             onAutoStop?()
+        case .systemAudioStalled:
+            // System audio went silent mid-call — the recording keeps
+            // running (mic still captures), this is a warning, not a
+            // failure. `onSystemAudioStalled` routes the toast.
+            systemAudioStalled = true
+            onSystemAudioStalled?()
         }
     }
 
@@ -290,6 +309,7 @@ public final class MeetingSessionStore {
         clock = nil
         levels = Self.idleLevels
         systemAudioUnavailable = false
+        systemAudioStalled = false
         micUnavailable = false
         liveTranscript = LiveTranscriptState()
         activeInputDeviceName = nil

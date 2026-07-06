@@ -302,6 +302,96 @@ private struct FakeError: Error {}
         #expect(collected.contains(.inputRebuilt(reason: "device switch")))
     }
 
+    // MARK: 7b. System audio stall detection
+
+    /// Reproduces the reported bug: system audio starts successfully
+    /// (`systemAudioActive == true`) but then goes silent mid-call (e.g. a
+    /// route change breaks the aggregate device's tap link) while the mic
+    /// keeps streaming. The watchdog in `MixerEngine` must notice — driven
+    /// purely by sample counts, so this needs no wall-clock waiting: push
+    /// enough mic-only audio past `systemAudioStallThreshold` (4s ≈ 192,000
+    /// samples at 48kHz) with zero further system samples, and the recorder
+    /// must emit `.systemAudioStalled` exactly once, while the recording
+    /// keeps running (not stopped) and `systemAudioActive` stays true
+    /// (mirroring `.writeFailed`'s auto-stop being the only case that tears
+    /// the session down).
+    @Test func systemAudioGoingSilentMidRecordingEmitsStallEvent() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("audio.m4a")
+        let mic = FakeMicSource()
+        let tap = FakeSystemAudioSource()
+        let recorder = MeetingRecorder(mic: mic, makeSystemTap: { tap })
+
+        let output = try await recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
+        #expect(recorder.systemAudioActive == true)
+        let micContinuation = try #require(mic.continuation)
+        let systemContinuation = try #require(tap.continuation)
+
+        var collected: [RecorderEvent] = []
+        let collectorTask = Task {
+            for await event in output.events {
+                collected.append(event)
+            }
+        }
+
+        // A brief moment of real two-sided audio first, so this isn't just
+        // "system audio never started" — it genuinely goes quiet mid-call.
+        systemContinuation.yield(sineBlock(seconds: 0.2))
+        await push(micContinuation, seconds: 0.2)
+
+        // Now system audio goes silent while the mic keeps streaming past
+        // the stall threshold (4s of mic samples with zero more from system).
+        await push(micContinuation, seconds: 4.5)
+
+        #expect(collected.contains(.systemAudioStalled))
+        // Exactly once — not repeated on every subsequent mic push.
+        #expect(collected.filter { $0 == .systemAudioStalled }.count == 1)
+        // The recording is NOT torn down by a stall — mirrors the fact that
+        // only `.writeFailed` triggers auto-stop; `systemAudioActive` stays
+        // true because the tap itself never reported failure, only silence.
+        #expect(recorder.systemAudioActive == true)
+
+        _ = await recorder.stop()
+        await collectorTask.value
+    }
+
+    /// Symmetric sanity check: when system audio keeps flowing normally
+    /// alongside the mic, the watchdog must never fire a false positive.
+    @Test func systemAudioStayingLiveNeverEmitsStallEvent() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("audio.m4a")
+        let mic = FakeMicSource()
+        let tap = FakeSystemAudioSource()
+        let recorder = MeetingRecorder(mic: mic, makeSystemTap: { tap })
+
+        let output = try await recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
+        let micContinuation = try #require(mic.continuation)
+        let systemContinuation = try #require(tap.continuation)
+
+        var collected: [RecorderEvent] = []
+        let collectorTask = Task {
+            for await event in output.events {
+                collected.append(event)
+            }
+        }
+
+        // Interleave mic and system pushes well past the stall threshold —
+        // system keeps making progress throughout, so the watchdog baseline
+        // keeps resetting and should never trip.
+        for _ in 0..<6 {
+            await push(micContinuation, seconds: 1.0)
+            systemContinuation.yield(sineBlock(seconds: 1.0))
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+
+        _ = await recorder.stop()
+        await collectorTask.value
+
+        #expect(!collected.contains(.systemAudioStalled))
+    }
+
     // MARK: 7. Levels stream RMS > 0
 
     @Test func levelsStreamEmitsPositiveRMSForNonSilentInput() async throws {

@@ -43,6 +43,14 @@ public enum RecorderEvent: Equatable, Sendable {
     /// Audio can no longer be written to disk (disk full, I/O error).
     /// The recording should be stopped and salvaged.
     case writeFailed
+    /// System audio started successfully but has gone silent mid-recording
+    /// (e.g. an output-device/route change breaks the aggregate device's tap
+    /// link) — the mic side is still being captured, but the other call
+    /// participant(s) are no longer being recorded. Fires at most once per
+    /// recording. The recording is NOT stopped; this is a warning, not a
+    /// failure — mirrors `.writeFailed`'s one-shot semantics without the
+    /// auto-stop behavior.
+    case systemAudioStalled
 }
 
 /// Records a meeting: microphone + (when permitted) system audio, mixed to
@@ -99,6 +107,30 @@ public final class MeetingRecorder {
     /// The mic device actually in use, for display (nil while not recording,
     /// or when it couldn't be determined).
     public var activeInputDeviceName: String? { mic.activeDeviceName }
+
+    /// Independent per-source sample totals, for diagnostics (`capture-probe`)
+    /// that need to tell "mic captured, system captured nothing" apart from
+    /// "both captured the same mixed total" — the two sides are otherwise
+    /// only ever seen already-mixed downstream.
+    public struct SampleCounts: Sendable, Equatable {
+        public let mic: Int
+        public let system: Int
+    }
+
+    /// Sample counts as of the last call — live while recording (reads the
+    /// mixer actor's running totals) and frozen at their final values after
+    /// `stop()` (the engine is gone by then, so the last snapshot is cached).
+    private var lastSampleCounts = SampleCounts(mic: 0, system: 0)
+
+    /// Current per-source sample totals. While recording this hops to the
+    /// mixer actor for a live read; after `stop()` it returns the final
+    /// snapshot captured just before the engine was torn down.
+    public func sampleCounts() async -> SampleCounts {
+        guard let engine else { return lastSampleCounts }
+        let counts = await engine.sampleCounts()
+        lastSampleCounts = counts
+        return counts
+    }
 
     /// Guards against a second concurrent `start()` call while the first is
     /// still suspended awaiting `tap.start()` (e.g. a user double-triggering
@@ -320,7 +352,10 @@ public final class MeetingRecorder {
             task.cancel()
         }
         pumpTasks = []
-        await engine?.finish()
+        if let engine {
+            lastSampleCounts = await engine.sampleCounts()
+            await engine.finish()
+        }
         engine = nil
         defer { clock = nil }
         let duration = clock?.elapsed(at: .now) ?? 0
@@ -352,9 +387,28 @@ private actor MixerEngine {
     /// keeps counting active time only, so live timestamps stay file-aligned.
     private var paused = false
 
+    /// Whether this recording started with system audio active — only then
+    /// does the liveness watchdog below make sense (a mic-only or
+    /// system-only recording has nothing to compare against).
+    private let systemActive: Bool
+    /// `buffer.totalSystemSamples` as of the last time it advanced.
+    private var systemSamplesAtLastProgress = 0
+    /// `buffer.totalMicSamples` as of the last time the system side advanced
+    /// — the baseline the watchdog measures mic progress against.
+    private var micSamplesAtLastSystemProgress = 0
+    private var reportedSystemAudioStall = false
+
     /// A handful of consecutive failures means the disk is genuinely stuck,
     /// not a transient hiccup.
     private static let failureThreshold = 5
+
+    /// ~4 s of mic-side progress at 48 kHz with zero system-side progress
+    /// before declaring system audio stalled (as opposed to merely lagging —
+    /// `MixBuffer.starvationThreshold` already tolerates ~2 s of lag before
+    /// flushing the mic side alone). Deliberately sample-count-based, not
+    /// wall-clock, so the watchdog is deterministic and testable without
+    /// real timers.
+    private static let systemAudioStallThreshold = 192_000
 
     init(
         url: URL,
@@ -366,6 +420,7 @@ private actor MixerEngine {
     ) throws {
         buffer.systemActive = systemActive
         buffer.micActive = micActive
+        self.systemActive = systemActive
         guard
             let format = AVAudioFormat(
                 commonFormat: .pcmFormatFloat32, sampleRate: AudioPipeline.mixerSampleRate,
@@ -405,14 +460,61 @@ private actor MixerEngine {
         self.events = events
     }
 
+    /// Independent mic/system sample totals seen so far — see
+    /// `MeetingRecorder.SampleCounts`.
+    func sampleCounts() -> MeetingRecorder.SampleCounts {
+        MeetingRecorder.SampleCounts(mic: buffer.totalMicSamples, system: buffer.totalSystemSamples)
+    }
+
     func pushMic(_ samples: [Float]) {
         guard !paused else { return }
         emit(buffer.pushMic(samples))
+        checkSystemAudioLiveness()
     }
 
     func pushSystem(_ samples: [Float]) {
         guard !paused else { return }
         emit(buffer.pushSystem(samples))
+        checkSystemAudioLiveness()
+    }
+
+    /// Sample-count-based watchdog: if system audio started active but has
+    /// delivered no new samples in the last `systemAudioStallThreshold` worth
+    /// of mic samples, the tap has gone silently quiet (most commonly an
+    /// output-device/route change breaking the aggregate device's tap link).
+    /// `MixBuffer` alone can't detect this — past its own, much shorter
+    /// `starvationThreshold` it just flushes the mic side alone forever,
+    /// which is exactly the silent-failure behavior this guards against.
+    private func checkSystemAudioLiveness() {
+        guard systemActive, !reportedSystemAudioStall else { return }
+        let currentSystemSamples = buffer.totalSystemSamples
+        if currentSystemSamples > systemSamplesAtLastProgress {
+            // System side made progress — reset the watchdog's baseline.
+            systemSamplesAtLastProgress = currentSystemSamples
+            micSamplesAtLastSystemProgress = buffer.totalMicSamples
+            return
+        }
+        let micSamplesSinceSystemProgress = buffer.totalMicSamples - micSamplesAtLastSystemProgress
+        guard micSamplesSinceSystemProgress > Self.systemAudioStallThreshold else { return }
+        reportedSystemAudioStall = true
+        recorderLog.error(
+            "system audio stalled: no system samples in \(micSamplesSinceSystemProgress, privacy: .public) mic samples (system total=\(currentSystemSamples, privacy: .public))"
+        )
+        events.yield(.systemAudioStalled)
+        // TODO: Auto-recovery (tear down + restart just the SystemAudioTap,
+        // re-attach its pump task) was scoped for this fix but deliberately
+        // deferred. `MixerEngine` (this actor) owns detection, but
+        // `systemTap` and its pump `Task` live on `MeetingRecorder`
+        // (`@MainActor`) — recovering here would mean this actor calling
+        // back across the actor boundary to tear down and recreate a live
+        // realtime Core Audio tap mid-recording, then re-wiring a new pump
+        // task into `pushSystem`, all without racing `stop()`/`pause()` or
+        // double-starting the tap. That's real design work on top of a
+        // realtime audio path, not a small addition — doing it hastily here
+        // risks the exact class of concurrency bug this fix is meant to
+        // close. Detection + warning alone already fixes the "silent, no
+        // error, no log" complaint; a guarded single-retry recovery is a
+        // good follow-up but should get its own focused pass.
     }
 
     /// Opens/closes the sample gate. On pausing, the unpaired mic/system tail

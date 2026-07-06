@@ -18,8 +18,8 @@ import RecapAudio
 //   --json                 In addition to the normal human-readable output,
 //                          print exactly one JSON object as the LAST line of
 //                          stdout, e.g.:
-//                            {"ok":true,"seconds":5,"micFrames":80000,
-//                             "systemFrames":80000,"chunks":5,
+//                            {"ok":true,"seconds":5,"micFrames":240000,
+//                             "systemFrames":240000,"chunks":5,
 //                             "peakAmplitude":0.1234,"fileSeconds":5.0,
 //                             "systemAudioActive":true,"pauseTest":null}
 //                          With --list-devices, prints the device list as a
@@ -27,11 +27,13 @@ import RecapAudio
 //                          Exit codes are unchanged: 0 success, 1 failure.
 
 /// Last-line machine-readable summary for `--json` (capture-run mode).
-/// `micFrames`/`systemFrames` are both approximated by the mixed 16 kHz
-/// `sampleCount` the probe already measures (the pipeline mixes mic +
-/// system audio into a single chunk stream, so they are not observed
-/// separately here). `pauseTest` is the pass/fail of `--pause-test`
-/// tolerance checks, or omitted when `--pause-test` was not passed.
+/// `micFrames`/`systemFrames` are independent per-source 48 kHz sample
+/// totals read from `MeetingRecorder.sampleCounts()` — NOT derived from the
+/// mixed 16 kHz chunk stream, so if system audio contributes nothing (tap
+/// silently stalled, permission denied) `systemFrames` reads 0 while
+/// `micFrames` stays > 0, instead of the two being forced equal. `pauseTest`
+/// is the pass/fail of `--pause-test` tolerance checks, or omitted when
+/// `--pause-test` was not passed.
 struct ProbeResult: Codable {
     var ok: Bool
     var seconds: Double
@@ -160,9 +162,11 @@ func run() async {
     }
     let duration = await recorder.stop()
     let (chunkCount, sampleCount, peak) = await statsTask.value
+    let sourceCounts = await recorder.sampleCounts()
 
     print(String(format: "duration: %.1fs", duration))
     print("16k chunks: \(chunkCount), samples: \(sampleCount) (≈\(sampleCount / 16_000)s)")
+    print("mic samples: \(sourceCounts.mic) (48kHz), system samples: \(sourceCounts.system) (48kHz)")
     print(String(format: "peak amplitude: %.4f", peak))
     guard let audioFile = try? AVAudioFile(forReading: url) else {
         failEarly("FAIL: output file unreadable")
@@ -190,7 +194,7 @@ func run() async {
     let ok = sampleCount > 0 && (pauseTestPassed ?? true)
     if jsonOutput {
         printJSON(ProbeResult(
-            ok: ok, seconds: seconds, micFrames: sampleCount, systemFrames: sampleCount,
+            ok: ok, seconds: seconds, micFrames: sourceCounts.mic, systemFrames: sourceCounts.system,
             chunks: chunkCount, peakAmplitude: peak, fileSeconds: fileSeconds,
             systemAudioActive: recorder.systemAudioActive, pauseTest: pauseTestPassed
         ))

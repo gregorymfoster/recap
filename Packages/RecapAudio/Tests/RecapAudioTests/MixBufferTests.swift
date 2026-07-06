@@ -33,6 +33,29 @@ import Testing
         #expect(buffer.mic.isEmpty)
     }
 
+    /// Symmetric to `starvedSideGetsFlushedAloneAfterThreshold`: when the
+    /// SYSTEM side is the one backed up (mic has gone quiet instead), it must
+    /// flush alone past the threshold exactly the same way. This is the
+    /// buffer-level half of the "system audio silently drops out" bug —
+    /// the mirror case wasn't previously covered.
+    @Test func starvedSystemSideGetsFlushedAloneAfterThreshold() {
+        var buffer = MixBuffer(starvationThreshold: 10)
+        #expect(buffer.pushSystem([Float](repeating: 0.5, count: 10)).isEmpty)
+        let flushed = buffer.pushSystem([0.5])
+        #expect(flushed.count == 11)
+        #expect(buffer.system.isEmpty)
+    }
+
+    @Test func totalSampleCountsTrackBothSidesIndependently() {
+        var buffer = MixBuffer()
+        _ = buffer.pushMic([0.1, 0.1, 0.1])
+        #expect(buffer.totalMicSamples == 3)
+        #expect(buffer.totalSystemSamples == 0)
+        _ = buffer.pushSystem([0.2, 0.2])
+        #expect(buffer.totalMicSamples == 3)
+        #expect(buffer.totalSystemSamples == 2)
+    }
+
     @Test func flushRemainderZeroPadsShorterSide() {
         var buffer = MixBuffer()
         _ = buffer.pushMic([0.1, 0.1, 0.1])
