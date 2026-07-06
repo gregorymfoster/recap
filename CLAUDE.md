@@ -55,9 +55,14 @@ Packages are pure SPM. The app shell is XcodeGen-generated — `Recap.xcodeproj`
 
 ## Run the app with fixture data
 
-Build, then launch with the `-fixtures` arg: `open <path>/Recap.app --args -fixtures`, or run the
+Build, then launch with the `-fixtures` arg: `open -n <path>/Recap.app --args -fixtures`, or run the
 `Recap (Fixtures)` scheme in Xcode. Swaps in sample meetings and ephemeral settings — no disk
 writes, no processing queue. Use for UI work and screenshots.
+
+Always launch via `open -n`, never the raw executable (`.app/Contents/MacOS/<exe>` directly) — on
+some hosts a raw-exec launch never registers with LaunchServices/the window server, so the process
+runs but no window ever appears (looks identical to a hang). `Scripts/ui-smoke.sh` and the
+`app-flow-screenshots` skill both launch this way; any new automation should too.
 
 `-soak` is a similar launch argument, for the soak harness only: it auto-starts a synthetic-audio
 recording (no mic/system-audio hardware, no transcription engine) against throwaway temp storage
