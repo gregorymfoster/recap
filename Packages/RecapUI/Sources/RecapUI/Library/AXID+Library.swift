@@ -84,21 +84,6 @@ extension AXID {
     /// `.detailTitleText` while editing (`MeetingDetailView.titleText`).
     public static let detailTitleField = AXID("library-detail-title-field")
 
-    // MARK: Player bar
-
-    /// The player bar container docked at the bottom of the detail view
-    /// (`PlayerBar`).
-    public static let playerBar = AXID("library-player-bar")
-
-    /// Play/pause button (`PlayerBar.playPauseButton`).
-    public static let playerPlayPauseButton = AXID("library-player-play-pause-button")
-
-    /// Scrubber slider (`PlayerBar` body).
-    public static let playerScrubber = AXID("library-player-scrubber")
-
-    /// Playback-rate cycling chip (`PlayerBar.rateChip`).
-    public static let playerRateChip = AXID("library-player-rate-chip")
-
     // MARK: Transcript pane
 
     /// "Copy transcript" button in the transcript pane header.

@@ -21,26 +21,12 @@ struct MeetingDetailView: View {
     @State private var showingOriginal = false
     @State private var inputDevices: [AudioInputDevice] = []
     @State private var deviceListListener: AudioObjectPropertyListenerBlock?
-    @State private var playback = PlaybackStore()
     @State private var isEditingTitle = false
     @State private var editedTitle = ""
     @FocusState private var titleFieldFocused: Bool
 
     private var isLiveMeeting: Bool {
         session.activeRecord?.meeting.id == record.meeting.id
-    }
-
-    /// True once this meeting is done recording and its audio file is a real,
-    /// playable file on disk (fixture records point at `/dev/null`, which
-    /// exists but isn't a regular file — treated as "no audio").
-    private var hasPlayableAudio: Bool {
-        guard !isLiveMeeting else { return false }
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: record.audioURL.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
-            return false
-        }
-        let resourceValues = try? record.audioURL.resourceValues(forKeys: [.isRegularFileKey])
-        return resourceValues?.isRegularFile ?? false
     }
 
     var body: some View {
@@ -70,7 +56,6 @@ struct MeetingDetailView: View {
             bottomBar
         }
         .navigationTitle(record.meeting.title)
-        .environment(playback)
         .task(id: record.meeting.id) {
             notes = library.loadNotes(for: record)
             savedTranscript = library.loadTranscript(for: record)
@@ -82,16 +67,6 @@ struct MeetingDetailView: View {
             // (transcript lands next to the summary without hunting for the
             // toggle). The toolbar toggle still hides it.
             showTranscript = isLiveMeeting || savedTranscript?.utterances.isEmpty == false
-
-            // Playback docking (design handoff v2 §8d): a finished meeting
-            // with real audio on disk loads into the shared PlaybackStore so
-            // the player bar can dock where the status bar sits; anything
-            // else (still recording, or no audio file) unloads it.
-            if hasPlayableAudio {
-                playback.load(url: record.audioURL)
-            } else {
-                playback.unload()
-            }
         }
         .task(id: record.meeting.status) {
             // Refresh once the pipeline lands results (status flips to ready).
@@ -104,11 +79,6 @@ struct MeetingDetailView: View {
                 }
                 if savedTranscript?.utterances.isEmpty == false {
                     showTranscript = true
-                }
-                // A meeting that finishes while open gains playable audio —
-                // dock the player without requiring a navigate-away-and-back.
-                if !playback.hasAudio, hasPlayableAudio {
-                    playback.load(url: record.audioURL)
                 }
             }
         }
@@ -456,21 +426,12 @@ struct MeetingDetailView: View {
         .padding(.top, 2)
     }
 
-    /// Docks the player bar where the status bar sits once this meeting has
-    /// playable audio (design handoff v2 §8d); otherwise the quiet status
-    /// bar. Both hide entirely while this meeting is actively recording —
-    /// the in-window recording pill overlays that area.
+    /// Shows the quiet status bar for a finished meeting; hides entirely
+    /// while this meeting is actively recording — the in-window recording
+    /// pill overlays that area.
     @ViewBuilder
     private var bottomBar: some View {
-        if isLiveMeeting {
-            EmptyView()
-        } else if playback.hasAudio {
-            PlayerBar(playback: playback)
-                .background(Tokens.subtleBackground.opacity(0.9))
-                .overlay(alignment: .top) { Divider() }
-        } else {
-            statusBar
-        }
+        if isLiveMeeting { EmptyView() } else { statusBar }
     }
 
     /// Quiet single-line status bar (global decision #5): active model name

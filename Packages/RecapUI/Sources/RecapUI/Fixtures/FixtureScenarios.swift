@@ -116,19 +116,16 @@ enum FixtureScenarios {
             "Weekly standup", now: now, hoursAgo: 6, duration: 900, attendees: ["Maya", "Sam"], status: .ready,
             subtitle: "Q3 draft shipped, onboarding usability pass assigned"
         )
-        // Real playable audio (design handoff v2 §8d): every other fixture
-        // record points at `/dev/null`, which `MeetingDetailView.hasPlayableAudio`
-        // correctly treats as "no audio" — that's right for the rest of the
-        // library, but it means the player bar never docks anywhere in
-        // `-fixtures` mode. Point just this one ready meeting's folder at a
-        // throwaway temp folder holding a short silent `.m4a` so screenshot
-        // QA can see the docked player, scrubber, and click-to-seek against
-        // this meeting's transcript (utterances span 0–38s below).
+        // Give just this one ready meeting a real audio file: every other
+        // fixture record points at `/dev/null`, so pointing one meeting's
+        // folder at a throwaway temp folder holding a short silent `.m4a`
+        // keeps a finished-meeting fixture that models real audio on disk
+        // (utterances span 0–38s below).
         if let audioFolder = FixtureAudio.makeSilentMeetingFolder(duration: 40) {
             standup.folderURL = audioFolder
         }
         // Canned transcript for the first ready meeting, so fixture runs can
-        // exercise the transcript pane (avatars, speaker rename, seek UI).
+        // exercise the transcript pane (avatars, speaker rename).
         let standupTranscript = Transcript(
             utterances: [
                 Utterance(speakerID: "S1", start: 0, end: 6, text: "Morning everyone — quick roundtable, then the roadmap check-in."),

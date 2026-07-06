@@ -4,12 +4,11 @@ import SwiftUI
 /// Left pane of the split meeting view (design mock 1b): live or saved
 /// transcript with the in-progress utterance at 40% opacity.
 ///
-/// Playback follow, click-to-seek, and speaker avatars (design handoff v2
-/// §6b/§8d) read `PlaybackStore` and `LibraryStore` from the environment
-/// rather than as init parameters — the initializer is a pinned surface
-/// another package's `MeetingDetailView` builds against, so it must not
-/// change shape. Both environment values are optional-tolerant: previews (or
-/// any future host) that don't inject them just get the pre-playback look.
+/// Speaker avatars (design handoff v2 §8e) read `LibraryStore` from the
+/// environment rather than as an init parameter — the initializer is a
+/// pinned surface another package's `MeetingDetailView` builds against, so
+/// it must not change shape. It's optional-tolerant: previews (or any future
+/// host) that don't inject it just don't show the transcribing footer.
 struct TranscriptPane: View {
     var utterances: [Utterance]
     var partial: Utterance?
@@ -30,26 +29,12 @@ struct TranscriptPane: View {
     /// transcripts, where renaming isn't offered.
     var onRenameSpeaker: ((String, String) -> Void)?
 
-    @Environment(PlaybackStore.self) private var playback: PlaybackStore?
     @Environment(LibraryStore.self) private var library: LibraryStore?
 
-    /// Row currently under the pointer — swaps its avatar for a ▶ glyph and
-    /// tints the row (§8d), only meaningful when `playback?.hasAudio` is true.
-    @State private var hoveredUtteranceID: Utterance.ID?
-    /// Debounces auto-scroll after a manual scroll so playback-follow doesn't
-    /// fight the user. Simple wall-clock check rather than a running timer —
-    /// no per-frame work, just a timestamp compared on the next position tick.
-    @State private var lastManualScrollAt: Date?
-    /// Stamped by `followPlayback` right before its own `scrollTo`, so the
-    /// offset change *we* cause isn't misread as the user scrolling away.
-    @State private var lastAutoScrollAt: Date?
     /// Speaker ID whose rename popover is currently open, if any.
     @State private var renamingSpeakerID: String?
     @State private var renameDraft = ""
     @FocusState private var renameFieldFocused: Bool
-
-    private static let manualScrollGrace: TimeInterval = 3
-    private static let autoScrollSettle: TimeInterval = 0.5
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -70,16 +55,30 @@ struct TranscriptPane: View {
         .background(Tokens.subtleBackground)
     }
 
+    /// Sheds non-essential elements as the pane narrows (design handoff v2
+    /// §6b): the live/on-device badge drops first via `ViewThatFits` so the
+    /// "TRANSCRIPT" label never wraps mid-word in a narrow pane.
     private var header: some View {
+        ViewThatFits(in: .horizontal) {
+            headerRow(showBadge: true)
+            headerRow(showBadge: false)
+        }
+    }
+
+    private func headerRow(showBadge: Bool) -> some View {
         HStack(spacing: 8) {
             Text(isLive ? "LIVE TRANSCRIPT" : "TRANSCRIPT")
                 .font(Tokens.microLabel)
                 .kerning(0.5)
                 .foregroundStyle(Tokens.textTertiary)
-            if isLive {
-                liveStatusBadge
-            } else {
-                OnDeviceBadge(label: "on-device")
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            if showBadge {
+                if isLive {
+                    liveStatusBadge
+                } else {
+                    OnDeviceBadge(label: "on-device")
+                }
             }
             Spacer()
             if !utterances.isEmpty {
@@ -99,15 +98,15 @@ struct TranscriptPane: View {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     // No standalone speaker-change label — every row carries
                     // its own avatar + name per design handoff v2 §6b.
-                    ForEach(Array(utterances.enumerated()), id: \.element.id) { index, utterance in
-                        row(utterance, isCurrent: index == currentUtteranceIndex)
+                    ForEach(utterances) { utterance in
+                        row(utterance)
                             .id(utterance.id)
                     }
                     if let partial {
                         // Left at 0.4 for both modes (see Milestone K plan §4);
                         // flagged for the visual dark-mode pass — may need a
                         // dark-only bump toward 0.5 if it reads too faint.
-                        row(partial, isCurrent: false)
+                        row(partial)
                             .opacity(0.4)
                             .id("partial")
                     }
@@ -115,56 +114,13 @@ struct TranscriptPane: View {
                 }
                 .padding(.horizontal, 22)
                 .padding(.bottom, 16)
-                .background(scrollDetector)
             }
-            .coordinateSpace(name: "transcriptScroll")
             .onChange(of: utterances.count) {
                 withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             .onChange(of: partial?.text) {
                 withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
             }
-            .onChange(of: currentUtteranceIndex) { _, newIndex in
-                followPlayback(to: newIndex, proxy: proxy)
-            }
-        }
-    }
-
-    /// Invisible probe that flips `lastManualScrollAt` when the scroll offset
-    /// moves for a reason other than our own `scrollTo` calls. SwiftUI has no
-    /// direct "user scrolled" signal on macOS `ScrollView`, so this uses a
-    /// `GeometryReader` position read — cheap (one geometry read per layout
-    /// pass, no timer) and only feeds a stored timestamp, never a loop.
-    private var scrollDetector: some View {
-        GeometryReader { proxy in
-            Color.clear
-                .onChange(of: proxy.frame(in: .named("transcriptScroll")).minY) { oldValue, newValue in
-                    guard isFollowingPlayback, abs(newValue - oldValue) > 1 else { return }
-                    // Offset moved because followPlayback just scrolled —
-                    // not the user; don't start the manual-scroll grace.
-                    if let lastAutoScrollAt, Date.now.timeIntervalSince(lastAutoScrollAt) < Self.autoScrollSettle {
-                        return
-                    }
-                    lastManualScrollAt = .now
-                }
-        }
-    }
-
-    /// True once we've established the transcript is being driven by
-    /// playback (auto-scroll only happens then, per §8d: "only auto-scroll
-    /// while playing").
-    private var isFollowingPlayback: Bool {
-        playback?.isPlaying == true
-    }
-
-    private func followPlayback(to index: Int?, proxy: ScrollViewProxy) {
-        guard isFollowingPlayback, let index, utterances.indices.contains(index) else { return }
-        if let lastManualScrollAt, Date.now.timeIntervalSince(lastManualScrollAt) < Self.manualScrollGrace {
-            return
-        }
-        lastAutoScrollAt = .now
-        withAnimation(.easeOut(duration: 0.25)) {
-            proxy.scrollTo(utterances[index].id, anchor: .center)
         }
     }
 
@@ -283,12 +239,9 @@ struct TranscriptPane: View {
         }
     }
 
-    private func row(_ utterance: Utterance, isCurrent: Bool) -> some View {
-        let isHovered = hoveredUtteranceID == utterance.id
-        let seekable = playback?.hasAudio == true
-
-        return HStack(alignment: .top, spacing: 10) {
-            avatar(for: utterance, isHovered: isHovered && seekable)
+    private func row(_ utterance: Utterance) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            avatar(for: utterance)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     if let speakerID = utterance.speakerID {
@@ -297,7 +250,7 @@ struct TranscriptPane: View {
                     Spacer()
                     Text(timestamp(utterance.start))
                         .font(.system(size: 9.5).monospacedDigit())
-                        .foregroundStyle(isCurrent ? Tokens.accentBlue : Tokens.textTertiary)
+                        .foregroundStyle(Tokens.textTertiary)
                 }
                 Text(utterance.text)
                     .font(Tokens.transcript)
@@ -308,56 +261,20 @@ struct TranscriptPane: View {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
-        .padding(.leading, isCurrent ? 6 : 8)
-        .background(rowBackground(isCurrent: isCurrent, isHovered: isHovered && seekable))
-        .overlay(alignment: .leading) {
-            if isCurrent {
-                Rectangle()
-                    .fill(Tokens.accentBlue)
-                    .frame(width: 2)
-            }
-        }
+        .padding(.leading, 8)
         .clipShape(RoundedRectangle(cornerRadius: Tokens.radiusRow))
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            guard seekable else { return }
-            hoveredUtteranceID = hovering ? utterance.id : nil
-        }
-        .onTapGesture {
-            guard seekable else { return }
-            playback?.seek(to: utterance.start)
-        }
-    }
-
-    @ViewBuilder
-    private func rowBackground(isCurrent: Bool, isHovered: Bool) -> some View {
-        if isCurrent {
-            Tokens.accentBlue.opacity(0.1)
-        } else if isHovered {
-            Tokens.chipBackground.opacity(0.6)
-        } else {
-            Color.clear
-        }
     }
 
     /// 22pt round avatar with speaker initials, colored from
-    /// `Tokens.speakerPalette`. Swaps to a ▶ glyph on hover when the row is
-    /// seekable (§8d).
-    @ViewBuilder
-    private func avatar(for utterance: Utterance, isHovered: Bool) -> some View {
+    /// `Tokens.speakerPalette`.
+    private func avatar(for utterance: Utterance) -> some View {
         let tint = utterance.speakerID.map(color(for:)) ?? Tokens.textTertiary
-        ZStack {
+        return ZStack {
             Circle()
                 .fill(tint.opacity(0.18))
-            if isHovered {
-                Image(systemName: "play.fill")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(tint)
-            } else {
-                Text(initials(for: utterance.speakerID))
-                    .font(.system(size: 9.5, weight: .semibold))
-                    .foregroundStyle(tint)
-            }
+            Text(initials(for: utterance.speakerID))
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(tint)
         }
         .frame(width: 22, height: 22)
     }
@@ -555,13 +472,6 @@ struct TranscriptPane: View {
         return progress
     }
 
-    /// Index of the utterance currently under the playhead, or nil when
-    /// there's no audio loaded or position precedes the first utterance.
-    private var currentUtteranceIndex: Int? {
-        guard let playback, playback.hasAudio else { return nil }
-        return TranscriptPlaybackIndex.currentIndex(for: playback.position, in: utterances)
-    }
-
     // Naming/timestamp conventions live in TranscriptFormatter (RecapCore) so
     // the on-screen transcript and clipboard copies never drift apart.
 
@@ -592,14 +502,12 @@ struct TranscriptPane: View {
         isLive: true,
         liveState: .live
     )
-    .environment(PlaybackStore())
     .environment(LibraryStore.fixture())
     .frame(width: 420, height: 500)
 }
 
-#Preview("Saved with playback") {
-    let playback = PlaybackStore()
-    return TranscriptPane(
+#Preview("Saved") {
+    TranscriptPane(
         utterances: [
             Utterance(speakerID: "S1", start: 0, end: 4, text: "Hello everyone, thanks for joining."),
             Utterance(speakerID: "S1", start: 4, end: 9, text: "Today we're walking through the Q3 roadmap and the onboarding revamp."),
@@ -609,28 +517,43 @@ struct TranscriptPane: View {
         isLive: false,
         liveState: nil
     )
-    .environment(playback)
     .environment(LibraryStore.fixture())
     .frame(width: 420, height: 500)
 }
 
 #Preview("No model installed") {
     TranscriptPane(utterances: [], partial: nil, isLive: true, liveState: .noModelInstalled, onDownloadStreamingModel: {})
-        .environment(PlaybackStore())
         .environment(LibraryStore.fixture())
         .frame(width: 420, height: 500)
 }
 
 #Preview("Loading") {
     TranscriptPane(utterances: [], partial: nil, isLive: true, liveState: .loadingModel)
-        .environment(PlaybackStore())
         .environment(LibraryStore.fixture())
         .frame(width: 420, height: 500)
 }
 
 #Preview("Failed") {
     TranscriptPane(utterances: [], partial: nil, isLive: true, liveState: .failed(reason: "load error"))
-        .environment(PlaybackStore())
         .environment(LibraryStore.fixture())
         .frame(width: 420, height: 500)
+}
+
+#Preview("Narrow pane (260pt)") {
+    // Regression coverage for the header-overflow fix: at the transcript
+    // pane's minimum width (260pt, see MeetingDetailView's `.frame(minWidth:
+    // 260)`), the badge should drop via `ViewThatFits` before "TRANSCRIPT"
+    // ever wraps mid-word.
+    TranscriptPane(
+        utterances: [
+            Utterance(speakerID: "S1", start: 0, end: 4, text: "Hello everyone, thanks for joining."),
+            Utterance(speakerID: "S1", start: 4, end: 9, text: "Today we're walking through the Q3 roadmap and the onboarding revamp."),
+            Utterance(speakerID: "S2", start: 9, end: 14, text: "Sounds good — I have the metrics from last week ready to share."),
+        ],
+        partial: nil,
+        isLive: false,
+        liveState: nil
+    )
+    .environment(LibraryStore.fixture())
+    .frame(width: 260, height: 400)
 }
