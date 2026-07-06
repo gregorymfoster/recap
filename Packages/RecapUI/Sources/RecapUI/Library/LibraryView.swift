@@ -16,6 +16,10 @@ struct LibraryView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(QueueStore.self) private var queue: QueueStore?
     @Environment(AppRouter.self) private var router
+    /// Native Settings-window opener, used by the Upcoming agenda's
+    /// "Connect your calendar" affordance to deep-link to Settings →
+    /// Privacy (mirrors `RootView`'s `-open settings/<tab>` handling).
+    @Environment(\.openSettings) private var openSettings
 
     /// Owned by `RootView`; the toolbar's search field opens the same ⌘K
     /// overlay the global shortcut does.
@@ -32,18 +36,23 @@ struct LibraryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                if let agendaState {
+                    agendaView(for: agendaState)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 16)
+                }
                 if library.meetings.isEmpty {
                     emptyState
                         .padding(.horizontal, 24)
-                        .padding(.top, 16)
+                        .padding(.top, agendaState == nil ? 16 : 18)
                 } else if library.displayMeetings.isEmpty {
                     filteredEmptyState
                         .padding(.horizontal, 24)
-                        .padding(.top, 16)
+                        .padding(.top, agendaState == nil ? 16 : 18)
                 } else {
                     content
                         .padding(.horizontal, 24)
-                        .padding(.top, 16)
+                        .padding(.top, agendaState == nil ? 16 : 18)
                 }
                 Color.clear.frame(height: 24)
             }
@@ -237,27 +246,59 @@ struct LibraryView: View {
         .allowsHitTesting(false)
     }
 
+    // MARK: Upcoming agenda
+
+    /// The agenda is lifted above `content`/`emptyState`/`filteredEmptyState`
+    /// so it renders on a brand-new, zero-meeting library too (bug fix: it
+    /// used to live only inside `content`, which never mounts while
+    /// `library.meetings.isEmpty` — a new user who'd connected their
+    /// calendar saw nothing). `nil` while a filter/search is narrowing the
+    /// list or the sort is `.longest` (matches the old `showUpcomingSection`
+    /// behavior); otherwise always one of the three `UpcomingAgendaState`
+    /// cases, never silently absent.
+    private var agendaState: UpcomingAgendaState? {
+        guard let stores else { return nil }
+        return UpcomingAgendaState.resolve(
+            isAvailable: stores.upcoming.isAvailable,
+            events: stores.upcoming.events,
+            isFilterActive: library.filter.isActive,
+            isLongestSort: library.sort == .longest
+        )
+    }
+
+    @ViewBuilder
+    private func agendaView(for state: UpcomingAgendaState) -> some View {
+        switch state {
+        case .hasEvents(let events):
+            UpcomingSection(
+                events: events,
+                isRecording: session.isRecording,
+                now: .now,
+                onRecord: { event in
+                    stores?.startRecording(title: event.title, attendees: event.otherAttendees)
+                }
+            )
+        case .authorizedEmpty:
+            UpcomingEmptyTodayView()
+        case .unauthorized:
+            UpcomingConnectCalendarView {
+                router.pendingSettingsTab = .privacy
+                openSettings()
+            }
+        }
+    }
+
     // MARK: List content
 
     /// Grouped-with-headers for date sorts, a flat list (single container)
     /// for `.longest` (a duration ranking reads oddly split into date
-    /// buckets).
+    /// buckets). The Upcoming agenda itself now lives in `body`, not here.
     @ViewBuilder private var content: some View {
         if library.sort == .longest {
             groupCard(for: library.displayMeetings)
         } else {
             let sections = MeetingGrouping.sections(library.displayMeetings, now: .now, calendar: .current)
             LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
-                if showUpcomingSection, let stores {
-                    UpcomingSection(
-                        events: stores.upcoming.events,
-                        isRecording: session.isRecording,
-                        now: .now,
-                        onRecord: { event in
-                            stores.startRecording(title: event.title, attendees: event.otherAttendees)
-                        }
-                    )
-                }
                 ForEach(sections, id: \.id) { section in
                     VStack(alignment: .leading, spacing: 7) {
                         sectionHeader(section.title)
@@ -266,17 +307,6 @@ struct LibraryView: View {
                 }
             }
         }
-    }
-
-    /// Upcoming is hidden entirely (design mock 9a) when calendar access
-    /// isn't available, there are no events left today, or a library filter
-    /// is narrowing the list — a filtered view shouldn't also show
-    /// unfiltered calendar events above it. `library.sort == .longest`
-    /// doesn't render sections at all, so it's excluded by the caller above.
-    private var showUpcomingSection: Bool {
-        guard let stores else { return false }
-        guard stores.upcoming.isAvailable, !stores.upcoming.events.isEmpty else { return false }
-        return !library.filter.isActive
     }
 
     /// One rounded, hairline-bordered container per date group (design mock

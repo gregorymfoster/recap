@@ -1,6 +1,41 @@
 import RecapCore
 import SwiftUI
 
+/// The Library's Upcoming agenda has three distinguishable states (bug fix:
+/// "connected but shows nothing" was previously indistinguishable from
+/// "not connected") — this is a pure function of `UpcomingStore` state plus
+/// whether a library filter/search is active, so it's unit-testable without
+/// a View. `LibraryView` renders each case, and renders the agenda above
+/// every list branch (empty library included) rather than only when
+/// meetings already exist.
+public enum UpcomingAgendaState: Equatable {
+    /// Calendar access granted and at least one meeting-shaped event remains
+    /// today — render `UpcomingSection` with these events.
+    case hasEvents([CalendarEventSnapshot])
+    /// Calendar access granted, but nothing meeting-shaped remains today —
+    /// an explicit quiet empty state, never conflated with "not connected".
+    case authorizedEmpty
+    /// Calendar access not granted — a subtle "Connect your calendar"
+    /// affordance instead of just omitting the section.
+    case unauthorized
+
+    /// - Parameters:
+    ///   - isAvailable: `UpcomingStore.isAvailable` (calendar access granted).
+    ///   - events: `UpcomingStore.events` (already filtered to today-remaining).
+    ///   - isFilterActive: `LibraryStore.filter.isActive` — a narrowed list
+    ///     view shouldn't also surface unfiltered calendar events above it,
+    ///     so the agenda hides entirely (nil) while a filter is active.
+    ///   - isLongestSort: `.longest` doesn't render date sections at all; a
+    ///     duration ranking reads oddly with an agenda pinned above it.
+    public static func resolve(
+        isAvailable: Bool, events: [CalendarEventSnapshot], isFilterActive: Bool, isLongestSort: Bool
+    ) -> UpcomingAgendaState? {
+        guard !isFilterActive, !isLongestSort else { return nil }
+        guard isAvailable else { return .unauthorized }
+        return events.isEmpty ? .authorizedEmpty : .hasEvents(events)
+    }
+}
+
 /// Pure display helpers for the Library's "Upcoming" section (design mock
 /// 9a). Extracted so meta-line assembly and the date-tile strings are
 /// testable without going through the view.
@@ -57,16 +92,7 @@ struct UpcomingSection: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 5) {
-            Text("UPCOMING")
-                .font(.system(size: 10.5, weight: .semibold))
-                .kerning(0.5)
-                .foregroundStyle(Tokens.textTertiary)
-            Text("from Calendar")
-                .font(.system(size: 10.5, weight: .regular))
-                .foregroundStyle(Tokens.textTertiary.opacity(0.8))
-        }
-        .padding(.horizontal, 4)
+        UpcomingSectionHeader()
     }
 
     /// Mirrors `LibraryView.groupCard`: rounded hairline-bordered container,
@@ -96,6 +122,91 @@ struct UpcomingSection: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Tokens.cardStroke, lineWidth: 1)
         )
+    }
+}
+
+/// Shared "UPCOMING from Calendar" section label — same header for all three
+/// `UpcomingAgendaState` renderings so the quiet empty/unauthorized states
+/// read as siblings of the populated agenda, not a different feature.
+private struct UpcomingSectionHeader: View {
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text("UPCOMING")
+                .font(.system(size: 10.5, weight: .semibold))
+                .kerning(0.5)
+                .foregroundStyle(Tokens.textTertiary)
+            Text("from Calendar")
+                .font(.system(size: 10.5, weight: .regular))
+                .foregroundStyle(Tokens.textTertiary.opacity(0.8))
+        }
+        .padding(.horizontal, 4)
+    }
+}
+
+/// Explicit "connected but nothing left today" state (`UpcomingAgendaState
+/// .authorizedEmpty`) — quiet prose in the same card treatment as the
+/// populated agenda, so a genuinely empty calendar reads as "working, just
+/// empty" rather than looking identical to "not connected".
+struct UpcomingEmptyTodayView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            UpcomingSectionHeader()
+            HStack {
+                Text("No meetings on your calendar today")
+                    .font(Tokens.meta)
+                    .foregroundStyle(Tokens.textSecondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Tokens.subtleBackground.opacity(0.6))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Tokens.cardStroke, lineWidth: 1)
+            )
+        }
+        .axID(.upcomingEmptyToday)
+    }
+}
+
+/// Subtle "not connected" affordance (`UpcomingAgendaState.unauthorized`) —
+/// deep-links to Settings → Privacy so a user who hasn't granted calendar
+/// access yet (or a brand-new user who never went looking) can fix it from
+/// right where they'd expect an agenda to be.
+struct UpcomingConnectCalendarView: View {
+    var onConnect: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            UpcomingSectionHeader()
+            Button(action: onConnect) {
+                HStack {
+                    Label("Connect your calendar to see today's meetings here", systemImage: "calendar.badge.plus")
+                        .font(Tokens.meta)
+                        .foregroundStyle(Tokens.textSecondary)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Tokens.textTertiary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Tokens.subtleBackground.opacity(0.6))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Tokens.cardStroke, lineWidth: 1)
+            )
+        }
+        .axID(.upcomingConnectCalendar)
     }
 }
 

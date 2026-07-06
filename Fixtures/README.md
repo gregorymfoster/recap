@@ -30,7 +30,14 @@ open <path>/Recap.app --args -fixtures busy
 
 - `default` (bare `-fixtures`) — today's small sample library: a handful of meetings spanning
   every status, one ready meeting with playable audio, a canned transcript, and notes.
-- `empty` — first-run/empty library: no meetings, no queue activity, no upcoming events.
+- `empty` — first-run/empty library: no meetings, no queue activity, calendar not connected
+  (the Library's Upcoming agenda renders its "Connect your calendar" affordance).
+- `firstRunWithAgenda` — first-run/empty library, but calendar access IS granted with events
+  today: the Upcoming agenda renders above the otherwise-empty library, proving the
+  Granola-style always-available agenda isn't gated on having recorded a meeting yet.
+- `noMeetingsToday` — the `default` library, but calendar access is granted with zero events
+  today: the agenda's explicit "No meetings on your calendar today" quiet state, distinct from
+  `empty`'s unauthorized affordance.
 - `busy` — 20+ meetings spread across many weeks with every status represented, several with
   canned transcripts/notes — exercises list grouping and scroll performance.
 - `processing` — several meetings actively transcribing/queued/enhancing, so the sidebar queue

@@ -76,6 +76,11 @@ struct SettingsPrivacyTab: View {
                             _ = try? await store.requestFullAccessToEvents()
                             calendarRequestStore = nil
                             refreshPermissionStatuses()
+                            // Granting here never otherwise reaches the
+                            // Library's Upcoming agenda — without this the
+                            // agenda stays stuck on "Connect your calendar"
+                            // until the next 30s poll or app foreground.
+                            stores?.upcoming.refresh()
                         }
                     case .openSystemSettings:
                         PrivacyPane.open(PrivacyPane.calendars)

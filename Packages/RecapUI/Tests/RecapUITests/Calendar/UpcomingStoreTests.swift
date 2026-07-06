@@ -97,6 +97,70 @@ import Testing
     }
 }
 
+// MARK: - UpcomingAgendaState
+
+/// Covers the pure gating behind the Library's three agenda states (bug fix:
+/// "connected but empty" used to render identically to "not connected" —
+/// both were just an absent section). Extracted out of `LibraryView` so the
+/// state-selection rule is testable without a View.
+@Suite struct UpcomingAgendaStateTests {
+    private func event(id: String = "e1") -> CalendarEventSnapshot {
+        CalendarEventSnapshot(
+            id: id, title: "Sync", start: .now.addingTimeInterval(900),
+            end: .now.addingTimeInterval(2700), otherAttendees: ["Maya"]
+        )
+    }
+
+    @Test func hasEventsWhenAuthorizedWithEvents() {
+        let events = [event()]
+        let state = UpcomingAgendaState.resolve(
+            isAvailable: true, events: events, isFilterActive: false, isLongestSort: false
+        )
+        #expect(state == .hasEvents(events))
+    }
+
+    /// The exact scenario from the bug report: calendar authorized, but no
+    /// meeting-shaped events left today — must be a distinct, explicit state
+    /// from `.unauthorized`, not just "no section rendered".
+    @Test func authorizedEmptyWhenAuthorizedWithNoEvents() {
+        let state = UpcomingAgendaState.resolve(
+            isAvailable: true, events: [], isFilterActive: false, isLongestSort: false
+        )
+        #expect(state == .authorizedEmpty)
+    }
+
+    @Test func unauthorizedWhenNotAvailableEvenWithEvents() {
+        // Shouldn't happen in practice (the store clears events when
+        // unavailable) but `.resolve` should still prioritize
+        // `.unauthorized` defensively.
+        let state = UpcomingAgendaState.resolve(
+            isAvailable: false, events: [event()], isFilterActive: false, isLongestSort: false
+        )
+        #expect(state == .unauthorized)
+    }
+
+    @Test func nilWhenFilterIsActive() {
+        let state = UpcomingAgendaState.resolve(
+            isAvailable: true, events: [event()], isFilterActive: true, isLongestSort: false
+        )
+        #expect(state == nil)
+    }
+
+    @Test func nilWhenSortIsLongest() {
+        let state = UpcomingAgendaState.resolve(
+            isAvailable: true, events: [event()], isFilterActive: false, isLongestSort: true
+        )
+        #expect(state == nil)
+    }
+
+    @Test func nilWhenFilterActiveEvenIfUnauthorized() {
+        let state = UpcomingAgendaState.resolve(
+            isAvailable: false, events: [], isFilterActive: true, isLongestSort: false
+        )
+        #expect(state == nil)
+    }
+}
+
 // MARK: - UpcomingRowFormatting
 
 @Suite struct UpcomingRowFormattingTests {

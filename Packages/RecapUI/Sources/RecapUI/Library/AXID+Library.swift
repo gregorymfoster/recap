@@ -138,4 +138,13 @@ extension AXID {
     public static func upcomingRecordButton(_ id: String) -> AXID {
         AXID("library-upcoming-record-button-\(id)")
     }
+
+    /// The explicit "No meetings on your calendar today" quiet state —
+    /// calendar access granted, nothing meeting-shaped left today
+    /// (`UpcomingAgendaState.authorizedEmpty`).
+    public static let upcomingEmptyToday = AXID("library-upcoming-empty-today")
+
+    /// The "Connect your calendar" affordance shown when calendar access
+    /// isn't granted (`UpcomingAgendaState.unauthorized`).
+    public static let upcomingConnectCalendar = AXID("library-upcoming-connect-calendar")
 }

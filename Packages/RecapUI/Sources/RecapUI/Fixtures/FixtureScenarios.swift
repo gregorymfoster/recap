@@ -17,8 +17,20 @@ public enum FixtureScenario: String, CaseIterable, Sendable {
     /// status, one with playable audio + transcript + notes.
     case `default`
     /// First-run/empty library — onboarding already complete, nothing
-    /// recorded yet.
+    /// recorded yet, calendar not connected either (the agenda renders its
+    /// "Connect your calendar" affordance).
     case empty
+    /// First-run/empty library, but calendar access IS granted with events
+    /// today — the Granola-style "always-available agenda" state: the
+    /// Upcoming section renders above an otherwise-empty library, proving
+    /// the agenda isn't gated on having recorded a meeting yet.
+    case firstRunWithAgenda
+    /// Calendar access granted, but nothing meeting-shaped left today — the
+    /// explicit "No meetings on your calendar today" quiet state, distinct
+    /// from `.empty`'s unauthorized affordance. Uses the `default` library
+    /// (not empty) so this also proves the state renders above a populated
+    /// meeting list, not just a fresh one.
+    case noMeetingsToday
     /// 20+ meetings across many weeks and every status, several with
     /// transcripts + notes — exercises list grouping/perf.
     case busy
@@ -45,21 +57,28 @@ public enum FixtureScenario: String, CaseIterable, Sendable {
     @MainActor
     public var library: LibraryStore {
         switch self {
-        case .default: FixtureScenarios.defaultLibrary()
-        case .empty: FixtureScenarios.emptyLibrary()
+        case .default, .noMeetingsToday: FixtureScenarios.defaultLibrary()
+        case .empty, .firstRunWithAgenda: FixtureScenarios.emptyLibrary()
         case .busy: FixtureScenarios.busyLibrary()
         case .processing: FixtureScenarios.processingLibrary()
         case .error: FixtureScenarios.errorLibrary()
         }
     }
 
-    /// Builds this scenario's `UpcomingStore`. Only `.empty` differs (no
-    /// upcoming events, matching a bare first run) — every other scenario
-    /// reuses the standard fixture upcoming events.
+    /// Builds this scenario's `UpcomingStore`. `.empty` has no upcoming
+    /// events and no calendar access, matching a bare first run (renders the
+    /// "Connect your calendar" affordance). `.firstRunWithAgenda` swaps in
+    /// the standard fixture events on top of that same empty library, so the
+    /// always-available agenda is screenshottable without a recorded
+    /// meeting. `.noMeetingsToday` is authorized but has zero events, so the
+    /// agenda renders its explicit "No meetings on your calendar today"
+    /// state instead. Every other scenario reuses the standard fixture events.
     @MainActor
     public var upcoming: UpcomingStore {
         switch self {
-        case .empty: UpcomingStore(availability: { true }, provider: { _ in [] })
+        case .empty: UpcomingStore(availability: { false }, provider: { _ in [] })
+        case .noMeetingsToday: UpcomingStore(availability: { true }, provider: { _ in [] })
+        case .firstRunWithAgenda: .fixture()
         default: .fixture()
         }
     }

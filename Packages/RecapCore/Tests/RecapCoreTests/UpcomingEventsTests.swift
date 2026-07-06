@@ -45,14 +45,33 @@ import Testing
         #expect(UpcomingEvents.todayRemaining([e], now: now, calendar: calendar).isEmpty)
     }
 
-    @Test func excludesPastEvent() {
-        let e = event(startOffset: -60)
+    @Test func excludesEventThatAlreadyEnded() {
+        // Started 45 min ago, 30 min duration — fully over by `now`.
+        let e = event(startOffset: -2700, duration: 1800)
         #expect(UpcomingEvents.todayRemaining([e], now: now, calendar: calendar).isEmpty)
     }
 
-    @Test func excludesEventStartingExactlyNow() {
+    /// Broadened behavior: a meeting that's already started but hasn't
+    /// ended yet is still "relevant today" — so a user who opens Recap
+    /// mid-meeting sees it and can hit Record, rather than the agenda
+    /// jumping straight to whatever's next.
+    @Test func includesInProgressEvent() {
+        let e = event(startOffset: -60, duration: 1800)
+        #expect(UpcomingEvents.todayRemaining([e], now: now, calendar: calendar) == [e])
+    }
+
+    @Test func includesEventStartingExactlyNow() {
+        // `start == now`, `end` in the future — in progress by the same
+        // `end > now` rule as `includesInProgressEvent`.
         let e = event(startOffset: 0)
-        #expect(UpcomingEvents.todayRemaining([e], now: now, calendar: calendar).isEmpty)
+        #expect(UpcomingEvents.todayRemaining([e], now: now, calendar: calendar) == [e])
+    }
+
+    @Test func inProgressEventSortsBeforeNotYetStartedEvent() {
+        let inProgress = event(id: "in-progress", startOffset: -60, duration: 1800)
+        let later = event(id: "later", startOffset: 900)
+        let result = UpcomingEvents.todayRemaining([later, inProgress], now: now, calendar: calendar)
+        #expect(result.map(\.id) == ["in-progress", "later"])
     }
 
     @Test func excludesEventTomorrow() {

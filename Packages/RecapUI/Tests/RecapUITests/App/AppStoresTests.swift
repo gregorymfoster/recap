@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import RecapAudio
 import RecapCore
@@ -500,6 +501,63 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
         stores.showMeeting(id)
         #expect(stores.router.section == .library)
         #expect(stores.library.selectedMeetingID == id)
+    }
+
+    // MARK: 5b. Upcoming agenda refresh-on-foreground
+
+    /// `@MainActor` reference box counting `UpcomingStore.refresh()` calls —
+    /// lets the test assert the foreground observer actually re-queries
+    /// without touching real EventKit.
+    @MainActor
+    private final class RefreshCounter {
+        var count = 0
+    }
+
+    /// Covers the "app foreground → recalendar refresh" wiring
+    /// (`AppStores.observeAppForegroundRefresh()`): posting the real
+    /// `NSApplication.didBecomeActiveNotification` (the same notification
+    /// macOS posts when Recap regains focus) must call through to
+    /// `upcoming.refresh()`, so a user who grants calendar access in System
+    /// Settings and switches back to Recap doesn't stay stuck on a stale
+    /// "Connect your calendar" agenda until the next 30s poll.
+    @Test func appBecomingActiveRefreshesUpcoming() {
+        let counter = RefreshCounter()
+        let upcoming = UpcomingStore(availability: { true }, provider: { _ in
+            counter.count += 1
+            return []
+        })
+        let library = LibraryStore.fixture()
+        let stores = AppStores(
+            settings: makeSettings(), storage: nil, library: library,
+            models: WhisperModelManager(), session: makeAlwaysProceedsSession(), queue: nil,
+            changeBus: LibraryChangeBus(), upcoming: upcoming,
+            registersForegroundRefresh: true
+        )
+        _ = stores
+
+        let before = counter.count
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+        #expect(counter.count == before + 1)
+    }
+
+    @Test func withoutRegisteringForegroundRefreshNotificationIsIgnored() {
+        let counter = RefreshCounter()
+        let upcoming = UpcomingStore(availability: { true }, provider: { _ in
+            counter.count += 1
+            return []
+        })
+        let library = LibraryStore.fixture()
+        let stores = AppStores(
+            settings: makeSettings(), storage: nil, library: library,
+            models: WhisperModelManager(), session: makeAlwaysProceedsSession(), queue: nil,
+            changeBus: LibraryChangeBus(), upcoming: upcoming,
+            registersForegroundRefresh: false
+        )
+        _ = stores
+
+        let before = counter.count
+        NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+        #expect(counter.count == before)
     }
 
     // MARK: 6. importAudioFiles no-op in fixture graph

@@ -50,6 +50,41 @@ import Testing
         #expect(upcoming.events.isEmpty)
     }
 
+    @Test func emptyCalendarIsUnauthorized() {
+        // `.empty` matches a bare first run: no meetings AND calendar not
+        // connected — the agenda's "Connect your calendar" affordance.
+        let upcoming = FixtureScenario.empty.upcoming
+        upcoming.refresh()
+        #expect(!upcoming.isAvailable)
+    }
+
+    // MARK: firstRunWithAgenda
+
+    @Test func firstRunWithAgendaHasNoMeetingsButHasUpcomingEvents() {
+        let library = FixtureScenario.firstRunWithAgenda.library
+        #expect(library.meetings.isEmpty)
+
+        let upcoming = FixtureScenario.firstRunWithAgenda.upcoming
+        upcoming.refresh()
+        #expect(upcoming.isAvailable)
+        #expect(!upcoming.events.isEmpty)
+    }
+
+    // MARK: noMeetingsToday
+
+    @Test func noMeetingsTodayIsAuthorizedWithZeroEvents() {
+        // Authorized but empty — distinct from `.empty`'s unauthorized
+        // state. Uses the populated `default` library so the empty agenda
+        // state is also exercised above a non-trivial meeting list.
+        let library = FixtureScenario.noMeetingsToday.library
+        #expect(!library.meetings.isEmpty)
+
+        let upcoming = FixtureScenario.noMeetingsToday.upcoming
+        upcoming.refresh()
+        #expect(upcoming.isAvailable)
+        #expect(upcoming.events.isEmpty)
+    }
+
     // MARK: busy
 
     @Test func busyHasManyMeetingsAcrossStatuses() {

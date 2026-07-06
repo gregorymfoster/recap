@@ -59,6 +59,12 @@ public final class AppStores {
     /// Debounced change-bus re-export consumer; nil when there's no
     /// disk-backed storage to export from (fixtures/preview/soak).
     private let changeBusConsumer: ChangeBusConsumer?
+    /// `NSApplication.didBecomeActiveNotification` token for
+    /// `observeAppForegroundRefresh()`. Held for the process lifetime (see
+    /// `FloatingIndicatorController`'s identical no-deinit-teardown
+    /// reasoning) — `AppStores` is owned by the App struct and never
+    /// released while the process runs.
+    @ObservationIgnored private var foregroundRefreshToken: NSObjectProtocol?
 
     // MARK: Inert launch-argument carriers (parsed, not yet consumed)
 
@@ -215,6 +221,11 @@ public final class AppStores {
             recording.registerGlobalControls()
             autoRecord.applyCalendarAutoRecordSetting()
             changeBusConsumer?.start()
+            // Granting calendar access in Settings refreshes `upcoming`
+            // itself (`SettingsPrivacyTab`); this covers the other stale-agenda
+            // path — switching back to Recap after granting access in the
+            // System Settings pane directly, or just after time has passed.
+            observeAppForegroundRefresh()
         }
     }
 
@@ -263,6 +274,7 @@ public final class AppStores {
         changeBus: LibraryChangeBus,
         upcoming: UpcomingStore = .fixture(),
         registersHotKey: Bool = false,
+        registersForegroundRefresh: Bool = false,
         exportDebounce: Duration = .seconds(5),
         makeCalendarWatcher: @escaping (@escaping @MainActor (CalendarEventSnapshot) -> Void) -> MeetingEventWatching = { CalendarWatcher(onMeetingStarting: $0) },
         makeCallAudioMonitor: @escaping () -> CallAudioMonitoring? = { nil },
@@ -305,6 +317,29 @@ public final class AppStores {
             consumer.start()
         } else {
             changeBusConsumer = nil
+        }
+        if registersForegroundRefresh {
+            observeAppForegroundRefresh()
+        }
+    }
+
+    // MARK: Foreground refresh
+
+    /// Re-queries the calendar whenever Recap comes back to the foreground,
+    /// so switching back after granting calendar access in System Settings
+    /// (rather than through Recap's own Settings, which refreshes directly)
+    /// doesn't leave the Library's Upcoming agenda stuck showing
+    /// "Connect your calendar" until the next 30s poll. Same
+    /// no-deinit-teardown reasoning as `FloatingIndicatorController`:
+    /// `AppStores` is owned by the App struct for the whole process
+    /// lifetime, so there's no "controller goes away" case to clean up for.
+    private func observeAppForegroundRefresh() {
+        foregroundRefreshToken = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.upcoming.refresh()
+            }
         }
     }
 
