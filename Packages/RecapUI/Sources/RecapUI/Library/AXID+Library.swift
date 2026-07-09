@@ -142,4 +142,30 @@ extension AXID {
     /// The "Connect your calendar" affordance shown when calendar access
     /// isn't granted (`UpcomingAgendaState.unauthorized`).
     public static let upcomingConnectCalendar = AXID("library-upcoming-connect-calendar")
+
+    // MARK: Redesign (Phase 0 scaffolding)
+
+    /// The Library window's footer (backup status + related affordances).
+    public static let libraryFooter = AXID("library-footer")
+
+    /// The Library footer's backup-status summary.
+    public static let libraryBackupStatus = AXID("library-backup-status")
+
+    /// "Fix backup" link shown in the footer when backups are stuck.
+    public static let libraryFixBackupLink = AXID("library-fix-backup-link")
+
+    /// The "next meeting starting soon" banner above the Library list.
+    public static let nextMeetingBanner = AXID("library-next-meeting-banner")
+
+    /// The next-meeting banner's Record button.
+    public static let bannerRecordButton = AXID("library-banner-record-button")
+
+    /// Meeting detail's "backed up" status indicator.
+    public static let detailBackedUpStatus = AXID("library-detail-backed-up-status")
+
+    /// The collapsible summary/notes disclosure in meeting detail.
+    public static let summaryDisclosure = AXID("library-summary-disclosure")
+
+    /// The meeting detail loading skeleton, shown before content is ready.
+    public static let detailSkeleton = AXID("library-detail-skeleton")
 }

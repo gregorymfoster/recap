@@ -40,6 +40,23 @@ public enum FixtureScenario: String, CaseIterable, Sendable {
     /// Failed/retry-able job states, including a meeting with a failed
     /// transcription.
     case error
+    // TODO(phase-3x): give each of these its own dedicated fixture graph
+    // once the corresponding redesigned surface lands; for now they reuse
+    // the nearest existing scenario so the launch-arg name already resolves.
+    /// Redesigned full-window recording view. TODO(phase-3x): dedicated graph.
+    case recording
+    /// Redesigned first-run flow. TODO(phase-3x): dedicated graph.
+    case firstRun
+    /// Backup stuck/failing state. TODO(phase-3x): dedicated graph.
+    case backupStuck
+    /// A meeting recovered from a crash spool (`MeetingStatus.recovered`).
+    /// TODO(phase-3x): dedicated graph.
+    case recovered
+    /// Transcription setup (model download) in progress. TODO(phase-3x): dedicated graph.
+    case waitingForSetup
+    /// A calendar meeting starting soon, for the "next meeting" banner.
+    /// TODO(phase-3x): dedicated graph.
+    case nextMeetingSoon
 
     /// Parses a raw `-fixtures <name>` scenario string. Unknown strings fall
     /// back to `.default` with a warning — a typo'd scenario name should
@@ -57,11 +74,11 @@ public enum FixtureScenario: String, CaseIterable, Sendable {
     @MainActor
     public var library: LibraryStore {
         switch self {
-        case .default, .noMeetingsToday: FixtureScenarios.defaultLibrary()
-        case .empty, .firstRunWithAgenda: FixtureScenarios.emptyLibrary()
+        case .default, .noMeetingsToday, .recording, .recovered, .nextMeetingSoon: FixtureScenarios.defaultLibrary()
+        case .empty, .firstRunWithAgenda, .firstRun: FixtureScenarios.emptyLibrary()
         case .busy: FixtureScenarios.busyLibrary()
-        case .processing: FixtureScenarios.processingLibrary()
-        case .error: FixtureScenarios.errorLibrary()
+        case .processing, .waitingForSetup: FixtureScenarios.processingLibrary()
+        case .error, .backupStuck: FixtureScenarios.errorLibrary()
         }
     }
 

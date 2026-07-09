@@ -36,4 +36,8 @@ extension AXID {
 
     /// A single row in the "Recent" section, keyed by the meeting's id.
     public static func menuBarRecentRow(_ id: String) -> AXID { AXID("menu-bar-recent-row-\(id)") }
+
+    /// The menu bar popover's input-device menu (`InputDeviceMenu`,
+    /// Phase 0 scaffolding for the redesigned popover).
+    public static let menuBarDeviceMenu = AXID("menu-bar-device-menu")
 }

@@ -7,7 +7,7 @@ public enum MeetingStatusTransition {
     public static func accepts(_ next: MeetingStatus, after current: MeetingStatus) -> Bool {
         guard case .transcribing = next else { return true }
         switch current {
-        case .recording, .queued, .transcribing:
+        case .recording, .queued, .transcribing, .recovered:
             return true
         case .enhancing, .ready, .needsModel, .error:
             return false

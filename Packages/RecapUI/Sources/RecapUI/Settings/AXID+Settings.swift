@@ -60,4 +60,21 @@ extension AXID {
     public static func settingsModelUseButton(_ modelID: String) -> AXID { AXID("settings-models-use-button-\(modelID)") }
     public static func settingsModelDeleteButton(_ modelID: String) -> AXID { AXID("settings-models-delete-button-\(modelID)") }
     public static func settingsModelPauseButton(_ modelID: String) -> AXID { AXID("settings-models-pause-button-\(modelID)") }
+
+    // MARK: - Redesign (Phase 0 scaffolding)
+
+    /// The redesigned Settings surface's root container.
+    public static let settingsPage = AXID("settings-page")
+
+    /// The transcription-quality picker (best quality / faster).
+    public static let settingsQualityPicker = AXID("settings-quality-picker")
+
+    /// The row shown while a quality-switch model download is in progress.
+    public static let settingsDownloadingRow = AXID("settings-downloading-row")
+
+    /// The mirror-backup enable/disable toggle on the redesigned surface.
+    public static let settingsBackupToggle = AXID("settings-backup-toggle")
+
+    /// The backup-status summary row on the redesigned surface.
+    public static let settingsBackupStatusRow = AXID("settings-backup-status-row")
 }

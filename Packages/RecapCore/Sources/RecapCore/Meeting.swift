@@ -13,6 +13,11 @@ public enum MeetingStatus: Codable, Equatable, Sendable {
     /// is installed. Auto-retries once one becomes available.
     case needsModel
     case error(message: String)
+    /// Audio was salvaged from a spool after an app quit/crash mid-recording
+    /// (Phase 0 scaffolding for the recovery-flow redesign). Treated like
+    /// `.queued` everywhere: it's a waiting-to-be-processed state, not a
+    /// terminal one.
+    case recovered
 }
 
 /// Which notes view the user last chose to look at for a meeting with

@@ -174,7 +174,7 @@ public final class QueueStore {
     private func recoverUnfinishedWork(in library: LibraryStore) {
         for record in library.meetings {
             switch record.meeting.status {
-            case .queued, .transcribing, .recording:
+            case .queued, .transcribing, .recording, .recovered:
                 library.updateStatus(record.meeting.id, to: .queued)
                 enqueueTranscription(for: record.meeting.id)
             case .enhancing:

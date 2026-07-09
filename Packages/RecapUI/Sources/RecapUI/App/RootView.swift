@@ -16,6 +16,29 @@ public final class AppRouter {
     /// later manual ⌘, doesn't keep reapplying a stale launch route.
     public var pendingSettingsTab: SettingsTab?
 
+    /// Coarse-grained screen the redesigned shell is showing. Additive
+    /// alongside `section` (which keeps driving today's `NavigationSplitView`
+    /// sidebar) — later phases migrate navigation onto this instead.
+    public enum Screen: Equatable, Sendable {
+        case library
+        case detail(meetingID: UUID)
+        case recording
+    }
+
+    public var screen: Screen = .library
+
+    /// Settings tab groupings for the redesigned Settings surface. Distinct
+    /// from `SettingsTab` (today's tab enum) — later phases reconcile the two.
+    public enum SettingsSection: String, Sendable {
+        case audio
+        case transcription
+        case storage
+    }
+
+    /// Preselects a redesigned-Settings section the next time it opens,
+    /// mirroring `pendingSettingsTab`'s "set once, consume once" contract.
+    public var pendingSettingsSection: SettingsSection?
+
     public init() {}
 }
 

@@ -159,6 +159,7 @@ private extension MeetingStatus {
         case .ready: "ready"
         case .needsModel: "needsModel"
         case .error: "error"
+        case .recovered: "recovered"
         }
     }
 }

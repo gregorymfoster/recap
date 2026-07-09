@@ -38,4 +38,21 @@ extension AXID {
 
     /// System-audio permission row's "Grant" probe button.
     public static let onboardingPermissionSystemAudioButton = AXID("onboarding-permission-system-audio-button")
+
+    // MARK: Redesign (Phase 0 scaffolding) — first-run flow
+
+    /// The redesigned first-run flow's root container.
+    public static let firstRunView = AXID("first-run-view")
+
+    /// First-run's "Allow Microphone" action.
+    public static let firstRunAllowMic = AXID("first-run-allow-mic")
+
+    /// First-run's "Allow System Audio" action.
+    public static let firstRunAllowSystemAudio = AXID("first-run-allow-system-audio")
+
+    /// First-run's recommended-model card.
+    public static let firstRunModelCard = AXID("first-run-model-card")
+
+    /// First-run's final "Start" action.
+    public static let firstRunStartButton = AXID("first-run-start-button")
 }

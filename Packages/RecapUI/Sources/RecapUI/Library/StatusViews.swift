@@ -21,7 +21,7 @@ struct MeetingStatusView: View {
         case .recording:
             // stays: white text on the solid red "Recording" chip in both modes
             chip("Recording", foreground: .white, background: Tokens.recordRed)
-        case .queued:
+        case .queued, .recovered:
             Text("Queued")
                 .font(Tokens.caption)
                 .foregroundStyle(Tokens.textSecondary)

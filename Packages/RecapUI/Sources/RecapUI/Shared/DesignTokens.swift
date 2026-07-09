@@ -74,6 +74,21 @@ public enum Tokens {
         dark: NSColor(red: 0x2C / 255, green: 0x2C / 255, blue: 0x2E / 255, alpha: 1).withAlphaComponent(0.96)
     )
     public static let chipBackground = dynamic(light: NSColor.black.withAlphaComponent(0.05), dark: NSColor.white.withAlphaComponent(0.08))
+    /// Solid fill for the session capsule (Phase 1 redesign) — a dark chip in
+    /// dark mode, a light counterpart in light mode so the capsule still
+    /// reads as a distinct surface rather than pinning to one appearance.
+    public static let capsuleFill = dynamic(
+        light: NSColor(red: 0xF2 / 255, green: 0xF2 / 255, blue: 0xF4 / 255, alpha: 1),  // light counterpart
+        dark: NSColor(red: 0x2C / 255, green: 0x2C / 255, blue: 0x30 / 255, alpha: 1)  // #2c2c30
+    )
+    /// Translucent backing behind the session capsule — near-black at 96%
+    /// opacity in dark mode, near-white counterpart in light mode.
+    public static let capsuleBackgroundFill = dynamic(
+        light: NSColor(red: 0xFC / 255, green: 0xFC / 255, blue: 0xFA / 255, alpha: 1).withAlphaComponent(0.96),
+        dark: NSColor(red: 0x1C / 255, green: 0x1C / 255, blue: 0x1E / 255, alpha: 1).withAlphaComponent(0.96)  // rgba(28,28,30,.96)
+    )
+    /// 1pt stroke around the session capsule.
+    public static let capsuleStroke = dynamic(light: NSColor.black.withAlphaComponent(0.12), dark: NSColor.white.withAlphaComponent(0.12))
     /// 1pt stroke that separates a `darkSurface` element from the window
     /// behind it — invisible-enough in light (a hairline on near-black) but
     /// load-bearing in dark, where the window can be nearly the same color.
@@ -95,6 +110,21 @@ public enum Tokens {
         ),
         recordRedDark,
     ]
+    /// `LevelMeter`'s active-bar color — fixed, not dynamic (matches the
+    /// system-green audio-level convention in both appearances).
+    public static let meterActive = Color(red: 0x32 / 255, green: 0xD7 / 255, blue: 0x4B / 255)  // #32d74b
+    /// `LevelMeter`'s inactive-bar color.
+    public static let meterInactive = dynamic(light: NSColor.black.withAlphaComponent(0.18), dark: NSColor.white.withAlphaComponent(0.18))
+
+    // MARK: Shadows
+
+    /// Drop shadow used behind the session capsule. Following
+    /// `RecordingPill`'s pattern (a plain `.shadow` modifier, since the
+    /// capsule — unlike `FloatingIndicator`'s `NSPanel` — isn't clipped by a
+    /// window boundary that would cut the shadow off).
+    public static func capsuleShadow<V: View>(_ view: V) -> some View {
+        view.shadow(color: .black.opacity(0.45), radius: 32, y: 12)
+    }
 
     // MARK: Radii
     public static let radiusChip: CGFloat = 5
