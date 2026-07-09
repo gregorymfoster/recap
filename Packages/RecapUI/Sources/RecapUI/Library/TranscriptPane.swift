@@ -53,6 +53,7 @@ struct TranscriptPane: View {
             transcribingFooter
         }
         .background(Tokens.subtleBackground)
+        .accessibilityElement(children: .contain)
     }
 
     /// Sheds non-essential elements as the pane narrows (design handoff v2
@@ -158,7 +159,7 @@ struct TranscriptPane: View {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.down.circle")
                     .font(.system(size: 9, weight: .semibold))
-                Text("No transcription model installed")
+                Text("Live transcript unavailable")
                     .font(Tokens.microLabel)
             }
             .foregroundStyle(Tokens.warningAmberText)
@@ -187,10 +188,10 @@ struct TranscriptPane: View {
                 Image(systemName: "arrow.down.circle")
                     .font(.system(size: 22, weight: .light))
                     .foregroundStyle(Tokens.textTertiary)
-                Text("No transcription model installed")
+                Text("Live transcript isn't available")
                     .font(Tokens.transcript)
                     .foregroundStyle(Tokens.textSecondary)
-                Text("The full transcript will still be created after the meeting once a model is installed.")
+                Text("Recording continues normally. Install a model to create the full transcript after the meeting.")
                     .font(Tokens.caption)
                     .foregroundStyle(Tokens.textTertiary)
                     .multilineTextAlignment(.center)

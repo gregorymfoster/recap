@@ -101,6 +101,7 @@ struct SearchOverlay: View {
         .frame(width: 560)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .shadow(color: .black.opacity(0.25), radius: 24, y: 10)
+        .accessibilityElement(children: .contain)
         .axID(.searchOverlay)
         .onChange(of: query) {
             hits = library.search(query)

@@ -184,6 +184,7 @@ public final class LibraryStore {
     public func updateStatus(_ id: UUID, to status: MeetingStatus) {
         guard var record = record(for: id) else { return }
         let previous = record.meeting.status
+        guard MeetingStatusTransition.accepts(status, after: previous) else { return }
         record.meeting.status = status
         if case .transcribing = status, case .transcribing = previous {
             if let i = meetings.firstIndex(where: { $0.meeting.id == id }) {
@@ -192,6 +193,22 @@ public final class LibraryStore {
         } else {
             replace(record)
         }
+    }
+
+    /// Persists a recoverable pipeline problem without demoting a meeting that
+    /// is otherwise ready (for example, an optional export failure).
+    public func addProcessingIssue(_ issue: ProcessingIssue, for id: UUID) {
+        guard var record = record(for: id), !record.meeting.processingIssues.contains(issue) else { return }
+        record.meeting.processingIssues.append(issue)
+        replace(record)
+    }
+
+    /// Clears one successfully recovered stage while preserving any unrelated
+    /// issues (for example, a repaired backup must not hide a webhook error).
+    public func clearProcessingIssue(_ issue: ProcessingIssue, for id: UUID) {
+        guard var record = record(for: id), record.meeting.processingIssues.contains(issue) else { return }
+        record.meeting.processingIssues.removeAll { $0 == issue }
+        replace(record)
     }
 
     /// Records a successful folder-mirror backup, persisting through the

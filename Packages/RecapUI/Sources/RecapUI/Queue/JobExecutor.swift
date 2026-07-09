@@ -32,6 +32,8 @@ struct MeetingProcessor: JobExecutor {
     /// A one-line subtitle was generated for the meeting during enhancement;
     /// nil subtitles from a failed/skipped generation never call this.
     let onSubtitle: @Sendable (UUID, String) async -> Void
+    /// Persists/clears a recoverable issue without storing raw error details.
+    let onProcessingIssue: @Sendable (UUID, ProcessingIssue, Bool) async -> Void
 
     func execute(_ job: ProcessingJob, progress: @escaping @Sendable (Double) -> Void) async throws {
         guard let record = try storage.loadAll().first(where: { $0.meeting.id == job.meetingID })
@@ -39,6 +41,7 @@ struct MeetingProcessor: JobExecutor {
 
         switch job.kind {
         case .transcribe:
+            let reporter = ProcessingStatusCoordinator(meetingID: job.meetingID, deliver: onStatus)
             // A leftover CAF spool means the recording died mid-write (crash,
             // power loss, disk full): rebuild the m4a from it before
             // transcribing, so the meeting is never lost.
@@ -51,14 +54,15 @@ struct MeetingProcessor: JobExecutor {
                 }
             }
             guard FileManager.default.fileExists(atPath: record.audioURL.path) else {
-                await onStatus(job.meetingID, .error(message: "Recording file missing"))
+                await onProcessingIssue(job.meetingID, .recordingFileMissing, true)
+                await reporter.finish(.error(message: "Recording file missing"))
                 return
             }
             guard let engine = await engineProvider() else {
-                await onStatus(job.meetingID, .needsModel)
+                await reporter.finish(.needsModel)
                 return
             }
-            await onStatus(job.meetingID, .transcribing(progress: 0))
+            await reporter.publish(.transcribing(progress: 0))
             do {
                 let diarizer = await diarizerProvider()
                 // Diarization gets the tail of the progress bar when enabled.
@@ -66,34 +70,37 @@ struct MeetingProcessor: JobExecutor {
                 var transcript = try await engine.transcribe(file: record.audioURL) { fraction in
                     let overall = fraction * transcribeShare
                     progress(overall)
-                    Task { await onStatus(job.meetingID, .transcribing(progress: overall)) }
+                    Task { await reporter.publish(.transcribing(progress: overall)) }
                 }
                 if let diarizer {
                     do {
                         let turns = try await diarizer.speakerTurns(in: record.audioURL) { fraction in
                             let overall = transcribeShare + fraction * (1 - transcribeShare)
                             progress(overall)
-                            Task { await onStatus(job.meetingID, .transcribing(progress: overall)) }
+                            Task { await reporter.publish(.transcribing(progress: overall)) }
                         }
                         transcript.utterances = SpeakerAssignment.label(transcript.utterances, with: turns)
                     } catch {
                         // Best-effort: a first run without network (models not
                         // yet downloaded) must not cost the transcript.
-                        processorLog.error("Diarization skipped: \(error, privacy: .public)")
+                        processorLog.error("Diarization skipped: \(String(describing: error), privacy: .private)")
                     }
                 }
                 try storage.saveTranscript(transcript, in: record)
+                await onProcessingIssue(job.meetingID, .transcriptionFailed, false)
+                await onProcessingIssue(job.meetingID, .recordingFileMissing, false)
                 if enhancer.isAvailable {
-                    await onStatus(job.meetingID, .enhancing)
+                    await reporter.finish(.enhancing)
                     await chain(ProcessingJob(kind: .enhance, meetingID: job.meetingID))
                 } else {
                     // Apple Intelligence off → meeting completes transcript-only.
-                    await onStatus(job.meetingID, .ready)
+                    await reporter.finish(.ready)
                     await exportToConfiguredDestinations(record)
                 }
             } catch {
-                processorLog.error("Transcription failed: \(error, privacy: .public)")
-                await onStatus(job.meetingID, .error(message: "Transcription failed"))
+                processorLog.error("Transcription failed: \(String(describing: error), privacy: .private)")
+                await onProcessingIssue(job.meetingID, .transcriptionFailed, true)
+                await reporter.finish(.error(message: "Transcription failed"))
             }
 
         case .enhance:
@@ -111,6 +118,7 @@ struct MeetingProcessor: JobExecutor {
             do {
                 let result = try await enhancer.enhance(rawNotes: notes, transcript: transcript)
                 try storage.saveEnhancedNotes(result.notes, in: record)
+                await onProcessingIssue(job.meetingID, .enhancementFailed, false)
                 // Defensive: other NoteEnhancer implementations might hand
                 // back an empty string; never persist one.
                 let subtitle = result.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -119,9 +127,15 @@ struct MeetingProcessor: JobExecutor {
                 }
             } catch {
                 // Refused or failed twice — the meeting is still complete with
-                // its transcript; enhancement can be retried from the editor.
+                // its transcript; the persisted issue exposes a retry from
+                // the editor without treating the recording as lost.
+                processorLog.error("Enhancement failed: \(String(describing: error), privacy: .private)")
+                await onProcessingIssue(job.meetingID, .enhancementFailed, true)
             }
             await onStatus(job.meetingID, .ready)
+            await exportToConfiguredDestinations(record)
+
+        case .export:
             await exportToConfiguredDestinations(record)
         }
     }
@@ -142,8 +156,10 @@ struct MeetingProcessor: JobExecutor {
             let speakerNames = ((try? storage.loadSpeakerNames(in: record)) ?? SpeakerNames()).names
             do {
                 try exporter.export(record, notes: notes, enhanced: enhanced, transcript: transcript, speakerNames: speakerNames)
+                await onProcessingIssue(record.meeting.id, .obsidianExportFailed, false)
             } catch {
-                processorLog.error("Obsidian export failed: \(error, privacy: .public)")
+                processorLog.error("Obsidian export failed: \(String(describing: error), privacy: .private)")
+                await onProcessingIssue(record.meeting.id, .obsidianExportFailed, true)
             }
         }
 
@@ -152,24 +168,64 @@ struct MeetingProcessor: JobExecutor {
             do {
                 try mirror.mirror(record)
                 await onBackedUp(record.meeting.id)
+                await onProcessingIssue(record.meeting.id, .mirrorBackupFailed, false)
             } catch {
-                processorLog.error("Folder-mirror backup failed: \(error, privacy: .public)")
+                processorLog.error("Folder-mirror backup failed: \(String(describing: error), privacy: .private)")
+                await onProcessingIssue(record.meeting.id, .mirrorBackupFailed, true)
             }
         }
 
         if !s.webhookURL.isEmpty,
            let url = URL(string: s.webhookURL), url.scheme?.hasPrefix("http") == true {
             let exporter = WebhookExporter(endpoint: url)
-            let meeting = record.meeting
-            Task {
-                do {
-                    try await exporter.send(
-                        meeting, notes: notes, enhanced: enhanced, transcript: transcript
-                    )
-                } catch {
-                    processorLog.error("Webhook delivery failed: \(error, privacy: .public)")
-                }
+            do {
+                try await exporter.send(
+                    record.meeting, notes: notes, enhanced: enhanced, transcript: transcript
+                )
+                await onProcessingIssue(record.meeting.id, .webhookExportFailed, false)
+            } catch {
+                processorLog.error("Webhook delivery failed: \(String(describing: error), privacy: .private)")
+                await onProcessingIssue(record.meeting.id, .webhookExportFailed, true)
             }
+        }
+    }
+}
+
+/// Serializes UI status delivery from synchronous engine progress callbacks.
+/// The callbacks can only create unstructured tasks, so this actor closes the
+/// stream before a terminal update and appends every already-accepted update
+/// to one ordered tail. A late progress task therefore cannot regress a
+/// meeting from `.ready`/`.enhancing` back to `.transcribing`.
+private actor ProcessingStatusCoordinator {
+    private let meetingID: UUID
+    private let deliver: @Sendable (UUID, MeetingStatus) async -> Void
+    private var closed = false
+    private var tail: Task<Void, Never>?
+
+    init(meetingID: UUID, deliver: @escaping @Sendable (UUID, MeetingStatus) async -> Void) {
+        self.meetingID = meetingID
+        self.deliver = deliver
+    }
+
+    func publish(_ status: MeetingStatus) {
+        guard !closed else { return }
+        append(status)
+    }
+
+    func finish(_ status: MeetingStatus) async {
+        guard !closed else { return }
+        closed = true
+        append(status)
+        await tail?.value
+    }
+
+    private func append(_ status: MeetingStatus) {
+        let previous = tail
+        let meetingID = meetingID
+        let deliver = deliver
+        tail = Task {
+            await previous?.value
+            await deliver(meetingID, status)
         }
     }
 }

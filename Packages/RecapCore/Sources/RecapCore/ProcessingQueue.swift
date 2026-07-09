@@ -7,6 +7,7 @@ public struct ProcessingJob: Equatable, Sendable, Identifiable {
     public enum Kind: String, Sendable {
         case transcribe
         case enhance
+        case export
     }
 
     public var kind: Kind

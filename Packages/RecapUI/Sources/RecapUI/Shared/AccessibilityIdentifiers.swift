@@ -19,6 +19,16 @@ extension View {
     public func axID(_ id: AXID) -> some View {
         accessibilityIdentifier(id.raw)
     }
+
+    /// Conditional form for repeated rows where only selected items expose a
+    /// stable automation target.
+    @ViewBuilder public func axID(_ id: AXID?) -> some View {
+        if let id {
+            accessibilityIdentifier(id.raw)
+        } else {
+            self
+        }
+    }
 }
 
 // MARK: - Global anchors
@@ -35,6 +45,8 @@ extension AXID {
     /// The Library toolbar's search entry point, which opens the ⌘K search
     /// overlay (`LibraryView.searchField`).
     public static let searchField = AXID("search-field")
+    /// Sidebar's Models navigation row.
+    public static let sidebarModels = AXID("sidebar-models")
 
     /// The menu bar extra's popover content root (`MenuBarContent`).
     public static let menuBarContent = AXID("menu-bar-content")

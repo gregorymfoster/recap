@@ -13,6 +13,7 @@ struct MeetingDetailView: View {
     @Environment(MeetingSessionStore.self) private var session
     @Environment(WhisperModelManager.self) private var models
     @Environment(SettingsStore.self) private var settings
+    @Environment(QueueStore.self) private var queue: QueueStore?
     @State private var notes = ""
     @State private var showTranscript = false
     @State private var savedTranscript: Transcript?
@@ -131,6 +132,15 @@ struct MeetingDetailView: View {
             header
                 .padding(.horizontal, 40)
                 .padding(.top, 10)
+            if !record.meeting.processingIssues.isEmpty {
+                VStack(spacing: 8) {
+                    ForEach(record.meeting.processingIssues) { issue in
+                        ProcessingIssueCard(issue: issue) { retry(issue) }
+                    }
+                }
+                .padding(.horizontal, 40)
+                .padding(.top, 14)
+            }
             if case .enhancing = record.meeting.status {
                 enhancingBanner
                     .padding(.horizontal, 40)
@@ -150,6 +160,17 @@ struct MeetingDetailView: View {
                     }
             } else {
                 TextEditor(text: $notes)
+                    .accessibilityLabel("Meeting notes")
+                    .overlay(alignment: .topLeading) {
+                        if notes.isEmpty {
+                            Text("Type rough notes, decisions, or follow-ups…")
+                                .font(Tokens.body)
+                                .foregroundStyle(Tokens.textTertiary)
+                                .padding(.top, 8)
+                                .padding(.leading, 5)
+                                .allowsHitTesting(false)
+                        }
+                    }
                     .font(Tokens.body)
                     .foregroundStyle(enhancedNotes != nil ? Tokens.textSecondary : Tokens.textBody)
                     .lineSpacing(7)
@@ -161,6 +182,7 @@ struct MeetingDetailView: View {
                     .axID(.notesEditor)
             }
         }
+        .accessibilityElement(children: .contain)
         .axID(.detailPane)
     }
 
@@ -340,6 +362,17 @@ struct MeetingDetailView: View {
         library.setPreferredNotesView(preference == .original ? .original : nil, for: record.meeting.id)
     }
 
+    private func retry(_ issue: ProcessingIssue) {
+        switch issue {
+        case .recordingFileMissing, .transcriptionFailed:
+            queue?.retranscribe(record, in: library)
+        case .enhancementFailed:
+            queue?.retryEnhancement(record, in: library)
+        case .obsidianExportFailed, .mirrorBackupFailed, .webhookExportFailed:
+            queue?.retryExport(record, in: library)
+        }
+    }
+
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
@@ -400,11 +433,18 @@ struct MeetingDetailView: View {
     /// instead of being rendered here.
     private var liveInputRow: some View {
         @Bindable var settings = settings
-        return HStack(spacing: 10) {
+        return ViewThatFits(in: .horizontal) {
+            inputPickerRow(settings: $settings, showsName: true)
+            inputPickerRow(settings: $settings, showsName: false)
+        }
+    }
+
+    private func inputPickerRow(settings: Bindable<SettingsStore>, showsName: Bool) -> some View {
+        HStack(spacing: 10) {
             Image(systemName: "mic.fill")
                 .font(.system(size: 10))
                 .foregroundStyle(Tokens.textTertiary)
-            Picker("", selection: $settings.preferredInputUID) {
+            Picker("Input device", selection: settings.preferredInputUID) {
                 Text("System default").tag(String?.none)
                 ForEach(inputDevices) { device in
                     Text(device.name).tag(String?.some(device.uid))
@@ -412,15 +452,17 @@ struct MeetingDetailView: View {
             }
             .labelsHidden()
             .controlSize(.small)
-            .fixedSize()
+            .frame(maxWidth: 250)
             .axID(.liveInputDevicePicker)
-            .onChange(of: settings.preferredInputUID) {
-                session.setPreferredInputUID(settings.preferredInputUID)
+            .onChange(of: settings.wrappedValue.preferredInputUID) {
+                session.setPreferredInputUID(settings.wrappedValue.preferredInputUID)
             }
-            if let name = session.activeInputDeviceName {
+            if showsName, let name = session.activeInputDeviceName {
                 Text(name)
                     .font(Tokens.caption)
                     .foregroundStyle(Tokens.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
         }
         .padding(.top, 2)

@@ -1,4 +1,5 @@
 import Foundation
+import RecapCore
 
 /// Accessibility identifiers for the Library feature (meeting list, meeting
 /// detail, transcript pane, search). See `AXID+Library.swift`'s siblings for
@@ -83,6 +84,15 @@ extension AXID {
     /// The detail-view title's inline rename `TextField`, shown in place of
     /// `.detailTitleText` while editing (`MeetingDetailView.titleText`).
     public static let detailTitleField = AXID("library-detail-title-field")
+    /// Persistent recovery card shown for a completed meeting with one or
+    /// more recoverable pipeline/export issues.
+    public static let processingIssueCard = AXID("library-processing-issue-card")
+    public static func processingIssueRetryButton(_ issue: ProcessingIssue) -> AXID {
+        AXID("library-processing-issue-retry-\(issue.rawValue)")
+    }
+    public static func processingIssueCopyCodeButton(_ issue: ProcessingIssue) -> AXID {
+        AXID("library-processing-issue-copy-code-\(issue.rawValue)")
+    }
 
     // MARK: Transcript pane
 

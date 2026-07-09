@@ -68,39 +68,39 @@ struct FloatingIndicatorView: View {
     @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            PulsingDot(
-                color: isPaused ? Tokens.warningAmber : Tokens.recordRed,
-                pulsing: !isPaused,
-                size: 7
-            )
-            if isPaused {
-                Text("Paused")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.7))
-            }
-            if let elapsedLabel {
-                Text(elapsedLabel)
-                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(.white.opacity(isPaused ? 0.45 : 0.85))
-                    .fixedSize()
-            }
-            if isHovering {
-                // stays: white-on-darkSurface hairline divider + label in both modes
-                Rectangle()
-                    .fill(.white.opacity(0.15))
-                    .frame(width: 1, height: 12)
-                HStack(spacing: 4) {
-                    Text("Open Recap")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.8))
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.white.opacity(0.45))
+        Button(action: onActivate) {
+            HStack(spacing: 8) {
+                PulsingDot(
+                    color: isPaused ? Tokens.warningAmber : Tokens.recordRed,
+                    pulsing: !isPaused,
+                    size: 7
+                )
+                Text(isPaused ? "Paused" : "Recording")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(isPaused ? 0.7 : 0.9))
+                if let elapsedLabel {
+                    Text(elapsedLabel)
+                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.white.opacity(isPaused ? 0.45 : 0.85))
+                        .fixedSize()
                 }
-                .fixedSize()
-            } else if style == .full, !isPaused {
-                waveform
+                if isHovering {
+                    // stays: white-on-darkSurface hairline divider + label in both modes
+                    Rectangle()
+                        .fill(.white.opacity(0.15))
+                        .frame(width: 1, height: 12)
+                    HStack(spacing: 4) {
+                        Text("Open Recap")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.8))
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.white.opacity(0.45))
+                    }
+                    .fixedSize()
+                } else if style == .full, !isPaused, levels.contains(where: { $0 > 0.01 }) {
+                    waveform
+                }
             }
         }
         .padding(.horizontal, 14)
@@ -116,9 +116,12 @@ struct FloatingIndicatorView: View {
         // NSPanel draws the drop shadow (hasShadow) around the capsule
         // silhouette instead.
         .contentShape(Capsule())
-        .onTapGesture(perform: onActivate)
+        .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovering)
+        .accessibilityLabel(isPaused ? "Recording paused" : "Recording in progress")
+        .accessibilityValue(elapsedLabel ?? "")
+        .accessibilityHint("Open Recap")
         .axID(.floatingIndicator)
     }
 

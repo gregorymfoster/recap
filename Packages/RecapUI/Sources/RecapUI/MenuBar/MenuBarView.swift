@@ -126,6 +126,7 @@ public struct MenuBarContent: View {
         }
         .padding(6)
         .frame(width: 270)
+        .accessibilityElement(children: .contain)
         .axID(.menuBarContent)
         .onAppear(perform: refreshUpNext)
     }
@@ -209,6 +210,7 @@ public struct MenuBarContent: View {
                     .font(.system(size: 10.5))
                     .foregroundStyle(Tokens.textSecondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 8)
             Button("Record") {
                 stores.startRecording(title: event.title, attendees: event.otherAttendees)
@@ -217,6 +219,7 @@ public struct MenuBarContent: View {
             .buttonStyle(.plain)
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(Tokens.recordRed)
+            .fixedSize()
             .axID(.menuBarUpNextRecordButton)
         }
         .padding(.horizontal, 10)

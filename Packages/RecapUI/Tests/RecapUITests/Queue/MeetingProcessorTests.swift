@@ -75,6 +75,15 @@ private actor SubtitleCollector {
     }
 }
 
+/// Collects persisted, privacy-safe issue transitions from the processor.
+private actor IssueCollector {
+    private(set) var updates: [(UUID, ProcessingIssue, Bool)] = []
+
+    func record(_ id: UUID, _ issue: ProcessingIssue, _ isActive: Bool) {
+        updates.append((id, issue, isActive))
+    }
+}
+
 @Suite struct MeetingProcessorTests {
     private func makeStorage() -> LibraryStorage {
         let root = FileManager.default.temporaryDirectory
@@ -105,6 +114,7 @@ private actor SubtitleCollector {
         chainCollector: ChainCollector,
         backupCollector: BackupCollector? = nil,
         subtitleCollector: SubtitleCollector? = nil,
+        issueCollector: IssueCollector? = nil,
         changeBus: LibraryChangeBus = LibraryChangeBus()
     ) -> MeetingProcessor {
         MeetingProcessor(
@@ -118,7 +128,10 @@ private actor SubtitleCollector {
             onBackedUp: { @Sendable id in await backupCollector?.record(id) },
             chain: { @Sendable job in await chainCollector.record(job) },
             changeBus: changeBus,
-            onSubtitle: { @Sendable id, subtitle in await subtitleCollector?.record(id, subtitle) }
+            onSubtitle: { @Sendable id, subtitle in await subtitleCollector?.record(id, subtitle) },
+            onProcessingIssue: { @Sendable id, issue, isActive in
+                await issueCollector?.record(id, issue, isActive)
+            }
         )
     }
 
@@ -176,6 +189,32 @@ private actor SubtitleCollector {
         let jobs = await chainCollector.jobs
         #expect(jobs.isEmpty)
         #expect(try storage.loadTranscript(in: record) == transcript)
+    }
+
+    @Test func lateProgressCannotOverwriteReady() async throws {
+        let storage = makeStorage()
+        let record = try storage.create(Meeting(title: "Standup", date: .now))
+        try touchAudioFile(for: record)
+        let statusCollector = StatusCollector()
+        let chainCollector = ChainCollector()
+        let processor = makeProcessor(
+            storage: storage,
+            engine: FakeEngine(transcript: makeTranscript()),
+            enhancer: FakeEnhancer(isAvailable: false),
+            statusCollector: statusCollector,
+            chainCollector: chainCollector
+        )
+
+        try await processor.execute(
+            ProcessingJob(kind: .transcribe, meetingID: record.meeting.id), progress: { _ in }
+        )
+        // Give unstructured progress callbacks a chance to run after the
+        // terminal status was delivered; they must be discarded.
+        await Task.yield()
+
+        let statuses = await statusCollector.all
+        #expect(statuses.last == .ready)
+        #expect(!statuses.dropLast().contains(.ready))
     }
 
     // MARK: 3. No engine
@@ -342,11 +381,13 @@ private actor SubtitleCollector {
         try storage.saveTranscript(makeTranscript(), in: record)
         let statusCollector = StatusCollector()
         let chainCollector = ChainCollector()
+        let issueCollector = IssueCollector()
         let processor = makeProcessor(
             storage: storage,
             enhancer: FakeEnhancer(isAvailable: true, failure: StubError()),
             statusCollector: statusCollector,
-            chainCollector: chainCollector
+            chainCollector: chainCollector,
+            issueCollector: issueCollector
         )
 
         try await processor.execute(
@@ -356,6 +397,11 @@ private actor SubtitleCollector {
         let statuses = await statusCollector.all
         #expect(statuses.last == .ready)
         #expect(try storage.loadEnhancedNotes(in: record) == nil)
+        let issues = await issueCollector.updates
+        #expect(issues.count == 1)
+        #expect(issues.first?.0 == record.meeting.id)
+        #expect(issues.first?.1 == .enhancementFailed)
+        #expect(issues.first?.2 == true)
     }
 
     // MARK: 8. Enhance job, no transcript on disk
@@ -479,6 +525,31 @@ private actor SubtitleCollector {
         #expect(!FileManager.default.fileExists(atPath: mirrorDir.path))
         let backedUp = await backupCollector.meetingIDs
         #expect(backedUp.isEmpty)
+    }
+
+    @Test func missingAudioReportsPersistentRecoveryIssue() async throws {
+        let storage = makeStorage()
+        let record = try storage.create(Meeting(title: "Standup", date: .now))
+        let statusCollector = StatusCollector()
+        let chainCollector = ChainCollector()
+        let issueCollector = IssueCollector()
+        let processor = makeProcessor(
+            storage: storage,
+            engine: FakeEngine(transcript: makeTranscript()),
+            statusCollector: statusCollector,
+            chainCollector: chainCollector,
+            issueCollector: issueCollector
+        )
+
+        try await processor.execute(
+            ProcessingJob(kind: .transcribe, meetingID: record.meeting.id), progress: { _ in }
+        )
+
+        let issues = await issueCollector.updates
+        #expect(issues.count == 1)
+        #expect(issues.first?.0 == record.meeting.id)
+        #expect(issues.first?.1 == .recordingFileMissing)
+        #expect(issues.first?.2 == true)
     }
 
     // MARK: 10. Diarizer disabled is best-effort — transcription still completes

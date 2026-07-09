@@ -476,7 +476,12 @@ private struct MeetingRow: View {
     /// no chip, no color. Every other status keeps its own indicator so
     /// hovering doesn't hide information the user needs (progress, retry).
     @ViewBuilder private var trailing: some View {
-        if record.meeting.status == .ready {
+        if !record.meeting.processingIssues.isEmpty {
+            Text("Needs attention")
+                .font(Tokens.caption.weight(.semibold))
+                .foregroundStyle(Tokens.warningAmberText)
+                .help("Open this meeting for recovery actions.")
+        } else if record.meeting.status == .ready {
             if hovering {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .semibold))

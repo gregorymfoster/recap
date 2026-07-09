@@ -55,6 +55,7 @@ public struct MeetingNudgeView: View {
             RoundedRectangle(cornerRadius: Tokens.radiusCard)
                 .stroke(Tokens.darkSurfaceStroke, lineWidth: 1)
         )
+        .accessibilityElement(children: .contain)
         .axID(.nudgePanel)
     }
 
@@ -89,12 +90,20 @@ public struct MeetingNudgeView: View {
                 Spacer(minLength: 0)
                 if let appID, let onDontAsk {
                     let shortName = CallAppCatalog.apps.first { $0.id == appID }?.shortName
-                    Button("Don\u{2019}t ask for \(shortName ?? appName ?? appID)") {
+                    Button {
                         onDontAsk()
+                    } label: {
+                        Text("Don\u{2019}t ask for \(shortName ?? appName ?? appID)")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .padding(.horizontal, 9)
+                            .frame(height: 26)
+                            .background(.white.opacity(0.12), in: Capsule())
+                            .overlay {
+                                Capsule().stroke(.white.opacity(0.18), lineWidth: 1)
+                            }
                     }
                     .buttonStyle(.plain)
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Tokens.textTertiary)
                     .axID(.nudgeDontAskButton)
                 }
             }
@@ -104,7 +113,8 @@ public struct MeetingNudgeView: View {
                 Button("Stop") {
                     onStop?()
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
+                .tint(Tokens.recordRed)
                 .font(.system(size: 12, weight: .semibold))
                 .axID(.nudgeStopButton)
             }

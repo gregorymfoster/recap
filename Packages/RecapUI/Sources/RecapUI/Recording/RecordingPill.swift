@@ -74,6 +74,7 @@ struct RecordingPill: View {
         // The bottom overlay proposes a narrow width; without this the HStack
         // compresses.
         .fixedSize()
+        .accessibilityElement(children: .contain)
         .axID(.recordingPill)
     }
 

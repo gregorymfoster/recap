@@ -77,6 +77,13 @@ public final class QueueStore {
             changeBus: changeBus,
             onSubtitle: { @Sendable id, subtitle in
                 await library.updateSubtitle(subtitle, for: id)
+            },
+            onProcessingIssue: { @Sendable id, issue, isActive in
+                if isActive {
+                    await library.addProcessingIssue(issue, for: id)
+                } else {
+                    await library.clearProcessingIssue(issue, for: id)
+                }
             }
         )
         let queue = ProcessingQueue(executor: processor, pausesOnBattery: settings.pausesOnBattery)
@@ -118,6 +125,22 @@ public final class QueueStore {
         guard library.record(for: record.meeting.id) != nil else { return }
         library.updateStatus(record.meeting.id, to: .queued)
         enqueueTranscription(for: record.meeting.id)
+    }
+
+    /// Re-runs only the enhancement stage for a meeting that already has a
+    /// transcript. Its existing issue remains visible until the retry
+    /// succeeds, so users never lose the explanation mid-recovery.
+    public func retryEnhancement(_ record: MeetingRecord, in library: LibraryStore) {
+        guard library.record(for: record.meeting.id) != nil else { return }
+        library.updateStatus(record.meeting.id, to: .queued)
+        Task { await queue.enqueue(ProcessingJob(kind: .enhance, meetingID: record.meeting.id)) }
+    }
+
+    /// Re-runs configured exports without re-transcribing or re-enhancing the
+    /// meeting. Export issues are independently cleared only on success.
+    public func retryExport(_ record: MeetingRecord, in library: LibraryStore) {
+        guard library.record(for: record.meeting.id) != nil else { return }
+        Task { await queue.enqueue(ProcessingJob(kind: .export, meetingID: record.meeting.id)) }
     }
 
     /// Cancels every PENDING job for a meeting that just left the library

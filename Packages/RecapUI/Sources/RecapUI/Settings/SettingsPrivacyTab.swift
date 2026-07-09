@@ -58,7 +58,11 @@ struct SettingsPrivacyTab: View {
                                 settings.lastSystemAudioTapFailed = true
                             }
                         }
-                        .axID(.settingsSystemAudioProbeButton)
+                        // This is the actionable system-audio permission
+                        // control (macOS exposes no query API); keep the
+                        // stable permission ID on the actual button rather
+                        // than a wrapper so AX automation can invoke it.
+                        .axID(.settingsSystemAudioPermissionButton)
                     }
                 }
                 PermissionRow(

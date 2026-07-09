@@ -16,27 +16,18 @@ public struct SettingsWindowView: View {
     public init() {}
 
     public var body: some View {
-        TabView(selection: $selectedTab) {
-            Tab("General", systemImage: "gearshape", value: SettingsTab.general) {
-                SettingsGeneralTab()
-                    .axID(.settingsTabGeneral)
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                tabButton(.general, title: "General", image: "gearshape", id: .settingsTabGeneral)
+                tabButton(.recording, title: "Recording", image: "mic", id: .settingsTabRecording)
+                tabButton(.calendar, title: "Calendar", image: "calendar", id: .settingsTabCalendar)
+                tabButton(.sync, title: "Sync", image: "arrow.triangle.2.circlepath", id: .settingsTabSync)
+                tabButton(.privacy, title: "Privacy", image: "hand.raised", id: .settingsTabPrivacy)
             }
-            Tab("Recording", systemImage: "mic", value: SettingsTab.recording) {
-                SettingsRecordingTab()
-                    .axID(.settingsTabRecording)
-            }
-            Tab("Calendar", systemImage: "calendar", value: SettingsTab.calendar) {
-                SettingsCalendarTab()
-                    .axID(.settingsTabCalendar)
-            }
-            Tab("Sync", systemImage: "arrow.triangle.2.circlepath", value: SettingsTab.sync) {
-                SettingsSyncTab()
-                    .axID(.settingsTabSync)
-            }
-            Tab("Privacy", systemImage: "hand.raised", value: SettingsTab.privacy) {
-                SettingsPrivacyTab()
-                    .axID(.settingsTabPrivacy)
-            }
+            .padding(12)
+            .accessibilityElement(children: .contain)
+            Divider()
+            tabContent
         }
         .axID(.settingsWindow)
         .frame(width: 620)
@@ -50,6 +41,32 @@ public struct SettingsWindowView: View {
                 selectedTab = pending
                 router.pendingSettingsTab = nil
             }
+        }
+    }
+
+    private func tabButton(_ tab: SettingsTab, title: String, image: String, id: AXID) -> some View {
+        Button {
+            selectedTab = tab
+        } label: {
+            Label(title, systemImage: image)
+                .font(.system(size: 11.5, weight: .medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(selectedTab == tab ? Tokens.accentBlue : Tokens.chipBackground, in: Capsule())
+                .foregroundStyle(selectedTab == tab ? Color.white : Tokens.textSecondary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .axID(id)
+    }
+
+    @ViewBuilder private var tabContent: some View {
+        switch selectedTab {
+        case .general: SettingsGeneralTab()
+        case .recording: SettingsRecordingTab()
+        case .calendar: SettingsCalendarTab()
+        case .sync: SettingsSyncTab()
+        case .privacy: SettingsPrivacyTab()
         }
     }
 }

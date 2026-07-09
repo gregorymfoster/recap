@@ -51,6 +51,7 @@ import Testing
         """
         let meeting = try JSONDecoder().decode(Meeting.self, from: Data(legacyJSON.utf8))
         #expect(meeting.preferredNotesView == nil)
+        #expect(meeting.processingIssues.isEmpty)
     }
 
     @Test func preferredNotesViewRoundTripsThroughJSON() throws {
@@ -63,6 +64,23 @@ import Testing
         let data = try JSONEncoder().encode(meeting)
         let decoded = try JSONDecoder().decode(Meeting.self, from: data)
         #expect(decoded.preferredNotesView == .original)
+    }
+
+    @Test func processingIssuesRoundTripThroughJSON() throws {
+        let meeting = Meeting(
+            title: "Weekly standup", date: Date(timeIntervalSince1970: 1_780_000_000),
+            status: .ready, processingIssues: [.enhancementFailed, .mirrorBackupFailed]
+        )
+        let data = try JSONEncoder().encode(meeting)
+        let decoded = try JSONDecoder().decode(Meeting.self, from: data)
+        #expect(decoded.processingIssues == [.enhancementFailed, .mirrorBackupFailed])
+        #expect(ProcessingIssue.enhancementFailed.diagnosticCode == "REC-ENHANCE-001")
+    }
+
+    @Test func progressCannotRegressTerminalStatus() {
+        #expect(!MeetingStatusTransition.accepts(.transcribing(progress: 1), after: .ready))
+        #expect(!MeetingStatusTransition.accepts(.transcribing(progress: 0.4), after: .enhancing))
+        #expect(MeetingStatusTransition.accepts(.transcribing(progress: 0.4), after: .queued))
     }
 
     @Test func transcriptFullTextJoinsUtterances() {

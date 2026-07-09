@@ -50,6 +50,7 @@ struct Sidebar: View {
                         }
                     }
                     .tag(item)
+                    .axID(item == .models ? .sidebarModels : nil)
                 }
             }
             .listStyle(.sidebar)

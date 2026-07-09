@@ -178,6 +178,19 @@ private actor ChangeCollector {
         #expect(store.meetings.isEmpty)
     }
 
+    @Test func processingIssuePersistsAndClearsIndependently() throws {
+        let (store, storage, _) = makeStore()
+        let record = try #require(store.startNewMeeting(title: "Meeting"))
+
+        store.addProcessingIssue(.enhancementFailed, for: record.meeting.id)
+        store.addProcessingIssue(.mirrorBackupFailed, for: record.meeting.id)
+        store.clearProcessingIssue(.enhancementFailed, for: record.meeting.id)
+
+        #expect(store.record(for: record.meeting.id)?.meeting.processingIssues == [.mirrorBackupFailed])
+        let onDisk = try #require(try storage.loadAll().first { $0.meeting.id == record.meeting.id })
+        #expect(onDisk.meeting.processingIssues == [.mirrorBackupFailed])
+    }
+
     // MARK: updateDuration
 
     @Test func updateDurationPersistsNewDuration() async throws {
