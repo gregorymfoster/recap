@@ -128,13 +128,9 @@ struct OnboardingView: View {
     @ViewBuilder
     private func modelTrailing(_ model: ModelInfo) -> some View {
         switch models.states[model.id] ?? .available {
-        case .available:
+        case .available, .failed:
             Button {
                 models.download(model)
-                // Kick off the small live-transcription model alongside the
-                // main one so it's ready before the first recording instead
-                // of loading cold at that moment.
-                models.ensureStreamingModelDownloading()
             } label: {
                 Text("Download")
                     .font(.system(size: 12.5, weight: .semibold))
@@ -166,7 +162,7 @@ struct OnboardingView: View {
             }
             Spacer()
             switch models.states[tiny.id] ?? .available {
-            case .available:
+            case .available, .failed:
                 Button("Choose") {
                     models.download(tiny)
                 }

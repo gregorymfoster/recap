@@ -96,10 +96,6 @@ public final class RecordingController {
         // that window would run a whole second preflight/start in parallel.
         guard !session.isRecording, !recordingStartInFlight else { return }
         recordingStartInFlight = true
-        // Keep the light streaming model topped up in the background — first
-        // recording on a fresh install won't have it yet, and this makes
-        // sure it's there for the next one even if this one starts without it.
-        models.ensureStreamingModelDownloading()
         Task {
             defer { recordingStartInFlight = false }
             let (outcome, probeResult) = await session.preflight(
@@ -123,7 +119,6 @@ public final class RecordingController {
                 guard let record = library.startNewMeeting(title: title, attendees: attendees) else { return }
                 await session.start(
                     record: record,
-                    engine: models.streamingEngine(language: settings.transcriptionLanguage),
                     includeSystemAudio: includeSystemAudio,
                     includeMic: includeMic,
                     preferredInputUID: settings.preferredInputUID

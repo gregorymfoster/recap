@@ -105,6 +105,11 @@ private struct ModelRow: View {
                 .axID(.settingsModelDownloadButton(model.id))
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+        case .failed:
+            Button("Retry") { manager.download(model) }
+                .axID(.settingsModelDownloadButton(model.id))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
         case .downloading(let progress):
             HStack(spacing: 10) {
                 ProgressView(value: max(0.02, progress))
