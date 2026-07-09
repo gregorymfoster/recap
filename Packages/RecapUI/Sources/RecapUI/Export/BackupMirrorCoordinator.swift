@@ -15,8 +15,7 @@ public final class BackupMirrorCoordinator {
     }
 
     /// Mirrors every finished meeting to the configured backup folder.
-    /// Called when the backup toggle is switched on, mirroring
-    /// `ObsidianExportCoordinator.exportAllReadyMeetings()`'s backfill shape.
+    /// Called when the backup toggle is switched on.
     public func backfill() {
         guard settings.mirrorBackupEnabled, !settings.mirrorFolderPath.isEmpty else { return }
         let mirror = FolderMirrorExporter(destinationRootURL: URL(fileURLWithPath: settings.mirrorFolderPath))

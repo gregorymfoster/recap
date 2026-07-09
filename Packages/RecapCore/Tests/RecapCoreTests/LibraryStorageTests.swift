@@ -148,6 +148,33 @@ import Testing
         #expect(try storage.loadSpeakerNames(in: record) == updated)
     }
 
+    @Test func timedNotesRoundTripAndDefaultToEmpty() throws {
+        let storage = try makeStorage()
+        let record = try storage.create(Meeting(title: "Standup", date: .now))
+
+        // No notes.json yet — empty array, not an error.
+        #expect(try storage.loadTimedNotes(in: record) == [])
+
+        // Whole-second `createdAt` — the encoder's `.iso8601` date strategy
+        // truncates fractional seconds, so a sub-second default `.now` would
+        // fail a round-trip equality check for reasons unrelated to what
+        // this test covers.
+        let createdAt = Date(timeIntervalSince1970: 1_780_400_000)
+        let notes = [
+            TimedNote(offset: 12, text: "Follow up with Sam", createdAt: createdAt),
+            TimedNote(offset: 90, text: "Ship by Friday", createdAt: createdAt),
+        ]
+        try storage.saveTimedNotes(notes, in: record)
+
+        #expect(FileManager.default.fileExists(atPath: record.timedNotesURL.path))
+        #expect(try storage.loadTimedNotes(in: record) == notes)
+
+        // Overwriting persists the new list, not a merge of the old.
+        let updated = [TimedNote(offset: 5, text: "Just this one now", createdAt: createdAt)]
+        try storage.saveTimedNotes(updated, in: record)
+        #expect(try storage.loadTimedNotes(in: record) == updated)
+    }
+
     @Test func trashMovesFolderAndRemovesItFromLoadAll() throws {
         let storage = try makeStorage()
         let keep = try storage.create(Meeting(title: "Keep me", date: .now))

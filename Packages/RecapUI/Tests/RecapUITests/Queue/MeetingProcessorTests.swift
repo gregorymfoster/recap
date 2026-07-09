@@ -27,8 +27,12 @@ private struct FakeEnhancer: NoteEnhancer {
     var isAvailable: Bool
     var result: EnhancementResult = EnhancementResult(notes: "enhanced!")
     var failure: Error?
+    /// Captures the composed `rawNotes` input, so tests can assert on
+    /// `NotesRendering`'s timed + freeform composition without re-deriving it.
+    var onEnhance: (@Sendable (String) -> Void)?
 
     func enhance(rawNotes: String, transcript: Transcript) async throws -> EnhancementResult {
+        onEnhance?(rawNotes)
         if let failure { throw failure }
         return result
     }
@@ -312,6 +316,40 @@ private actor IssueCollector {
         #expect(try storage.loadEnhancedNotes(in: record) == "## Notes\nShipped it.")
     }
 
+    // MARK: 6a. Enhance job composes rawNotes from timed + freeform notes
+
+    /// Synchronous capture box for the one `enhance(rawNotes:transcript:)`
+    /// call the enhance job makes — safe as `@unchecked Sendable` because the
+    /// test only reads it after `await`ing `processor.execute` to completion,
+    /// so there is no concurrent access.
+    private final class RawNotesCapture: @unchecked Sendable {
+        var value: String?
+    }
+
+    @Test func enhanceJobComposesRawNotesFromTimedAndFreeformNotes() async throws {
+        let storage = makeStorage()
+        let record = try storage.create(Meeting(title: "Standup", date: .now))
+        try storage.saveTranscript(makeTranscript(), in: record)
+        try storage.saveNotes("- action item", in: record)
+        try storage.saveTimedNotes([TimedNote(offset: 5, text: "Kickoff")], in: record)
+
+        let statusCollector = StatusCollector()
+        let chainCollector = ChainCollector()
+        let capture = RawNotesCapture()
+        let processor = makeProcessor(
+            storage: storage,
+            enhancer: FakeEnhancer(isAvailable: true, onEnhance: { rawNotes in capture.value = rawNotes }),
+            statusCollector: statusCollector,
+            chainCollector: chainCollector
+        )
+
+        try await processor.execute(
+            ProcessingJob(kind: .enhance, meetingID: record.meeting.id), progress: { _ in }
+        )
+
+        #expect(capture.value == "[0:05] Kickoff\n\n- action item")
+    }
+
     // MARK: 6b. Enhance job reports the generated subtitle
 
     @Test func enhanceJobReportsSubtitle() async throws {
@@ -434,14 +472,9 @@ private actor IssueCollector {
         let record = try storage.create(Meeting(title: "Standup", date: .now))
         try storage.saveTranscript(makeTranscript(), in: record)
 
-        let vaultDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ObsidianVault-\(UUID().uuidString)")
         let mirrorDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MirrorBackup-\(UUID().uuidString)")
-        defer {
-            try? FileManager.default.removeItem(at: vaultDir)
-            try? FileManager.default.removeItem(at: mirrorDir)
-        }
+        defer { try? FileManager.default.removeItem(at: mirrorDir) }
 
         let statusCollector = StatusCollector()
         let chainCollector = ChainCollector()
@@ -450,15 +483,7 @@ private actor IssueCollector {
             storage: storage,
             enhancer: FakeEnhancer(isAvailable: false),
             settings: {
-                ProcessorSettings(
-                    transcriptionLanguage: nil,
-                    labelsSpeakers: true,
-                    syncsToObsidian: true,
-                    obsidianVaultPath: vaultDir.path,
-                    mirrorBackupEnabled: true,
-                    mirrorFolderPath: mirrorDir.path,
-                    webhookURL: ""
-                )
+                ProcessorSettings(mirrorBackupEnabled: true, mirrorFolderPath: mirrorDir.path)
             },
             statusCollector: statusCollector,
             chainCollector: chainCollector,
@@ -471,8 +496,6 @@ private actor IssueCollector {
 
         let statuses = await statusCollector.all
         #expect(statuses.last == .ready)
-        let exportedMarkdown = try FileManager.default.contentsOfDirectory(atPath: vaultDir.path)
-        #expect(!exportedMarkdown.isEmpty)
         let mirrored = try FileManager.default.contentsOfDirectory(atPath: mirrorDir.path)
         #expect(!mirrored.isEmpty)
         // A successful mirror reports back so the meeting's lastBackupDate
@@ -486,14 +509,9 @@ private actor IssueCollector {
         let record = try storage.create(Meeting(title: "Standup", date: .now))
         try storage.saveTranscript(makeTranscript(), in: record)
 
-        let vaultDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ObsidianVaultOff-\(UUID().uuidString)")
         let mirrorDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MirrorBackupOff-\(UUID().uuidString)")
-        defer {
-            try? FileManager.default.removeItem(at: vaultDir)
-            try? FileManager.default.removeItem(at: mirrorDir)
-        }
+        defer { try? FileManager.default.removeItem(at: mirrorDir) }
 
         let statusCollector = StatusCollector()
         let chainCollector = ChainCollector()
@@ -502,15 +520,7 @@ private actor IssueCollector {
             storage: storage,
             enhancer: FakeEnhancer(isAvailable: false),
             settings: {
-                ProcessorSettings(
-                    transcriptionLanguage: nil,
-                    labelsSpeakers: true,
-                    syncsToObsidian: false,
-                    obsidianVaultPath: vaultDir.path,
-                    mirrorBackupEnabled: false,
-                    mirrorFolderPath: mirrorDir.path,
-                    webhookURL: ""
-                )
+                ProcessorSettings(mirrorBackupEnabled: false, mirrorFolderPath: mirrorDir.path)
             },
             statusCollector: statusCollector,
             chainCollector: chainCollector,
@@ -521,7 +531,6 @@ private actor IssueCollector {
             ProcessingJob(kind: .enhance, meetingID: record.meeting.id), progress: { _ in }
         )
 
-        #expect(!FileManager.default.fileExists(atPath: vaultDir.path))
         #expect(!FileManager.default.fileExists(atPath: mirrorDir.path))
         let backedUp = await backupCollector.meetingIDs
         #expect(backedUp.isEmpty)
@@ -584,14 +593,6 @@ extension ProcessorSettings {
     /// All sync/export toggles off — the default for tests that don't care
     /// about export behavior.
     fileprivate static var disabled: ProcessorSettings {
-        ProcessorSettings(
-            transcriptionLanguage: nil,
-            labelsSpeakers: true,
-            syncsToObsidian: false,
-            obsidianVaultPath: "",
-            mirrorBackupEnabled: false,
-            mirrorFolderPath: "",
-            webhookURL: ""
-        )
+        ProcessorSettings(mirrorBackupEnabled: false, mirrorFolderPath: "")
     }
 }

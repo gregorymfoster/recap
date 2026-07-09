@@ -62,4 +62,29 @@ import Testing
         // and nothing silently mutated fixture state.
         #expect(store.loadNotes(for: record) == "original")
     }
+
+    @Test func timedNotesReturnsCannedNotesForFixtureRecord() {
+        let withNotes = Self.record("Weekly standup")
+        let withoutNotes = Self.record("1:1 with Sam")
+        let canned = [TimedNote(offset: 12, text: "Follow up with Sam")]
+        let store = LibraryStore(
+            fixtures: [withNotes, withoutNotes],
+            timedNotes: [withNotes.meeting.id: canned]
+        )
+        #expect(store.timedNotes(for: withNotes) == canned)
+        #expect(store.timedNotes(for: withoutNotes) == [])
+    }
+
+    /// `addTimedNote` must append in-memory only for a fixture record — no
+    /// `storage` to persist into, mirroring `notesChangedNoOpsForFixtureRecord`.
+    @Test func addTimedNoteAppendsInMemoryForFixtureRecord() {
+        let record = Self.record("Weekly standup")
+        let store = LibraryStore(fixtures: [record])
+
+        store.addTimedNote("Ship by Friday", at: 30, in: record)
+
+        let notes = store.timedNotes(for: record)
+        #expect(notes.map(\.text) == ["Ship by Friday"])
+        #expect(notes.map(\.offset) == [30])
+    }
 }

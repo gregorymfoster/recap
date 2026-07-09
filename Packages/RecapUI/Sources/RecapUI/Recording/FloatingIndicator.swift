@@ -3,10 +3,9 @@ import RecapCore
 import SwiftUI
 
 /// Pure visibility rule for the floating recording indicator: visible only
-/// while a recording is active, Recap itself isn't the frontmost app, AND
-/// the user hasn't turned the capsule off in Settings. Extracted so the
-/// show/hide decision is unit-testable without an NSPanel, NSApplication
-/// activation notifications, or `withObservationTracking`.
+/// while a recording is active and Recap itself isn't the frontmost app.
+/// Extracted so the show/hide decision is unit-testable without an NSPanel,
+/// NSApplication activation notifications, or `withObservationTracking`.
 public enum FloatingIndicatorVisibility {
     /// - Parameters:
     ///   - isRecording: `MeetingSessionStore.isRecording` — true for the
@@ -14,12 +13,8 @@ public enum FloatingIndicatorVisibility {
     ///   - isAppActive: Whether Recap is the frontmost application
     ///     (`NSApplication.shared.isActive`, tracked via
     ///     `didBecomeActive`/`didResignActive` notifications).
-    ///   - style: `SettingsStore.floatingCapsuleStyle` — `.off` hides the
-    ///     capsule unconditionally, regardless of the other two.
-    public static func isVisible(
-        isRecording: Bool, isAppActive: Bool, style: FloatingCapsuleStyle
-    ) -> Bool {
-        style != .off && isRecording && !isAppActive
+    public static func isVisible(isRecording: Bool, isAppActive: Bool) -> Bool {
+        isRecording && !isAppActive
     }
 }
 
@@ -54,12 +49,11 @@ public enum FloatingIndicatorPlacement {
 /// and Recap is backgrounded — a Granola-style confidence indicator. Visually
 /// a smaller sibling of `RecordingPill`: same dark-surface chrome and
 /// `PulsingDot`, but with only a click target (no pause/stop controls) since
-/// it's meant to be glanced at, not operated. Content follows
-/// `SettingsStore.floatingCapsuleStyle`: `.minimal` is dot + timer only,
-/// `.full` adds a small waveform. On hover the capsule brightens and the
-/// waveform (when present) swaps for an "Open Recap ↗" label.
+/// it's meant to be glanced at, not operated. Always shows dot + timer + a
+/// small waveform (previously the `.full` style — capsule style is no longer
+/// user-configurable). On hover the capsule brightens and the waveform swaps
+/// for an "Open Recap ↗" label.
 struct FloatingIndicatorView: View {
-    var style: FloatingCapsuleStyle
     var isPaused: Bool
     var levels: [Float]
     var elapsedLabel: String?
@@ -98,7 +92,7 @@ struct FloatingIndicatorView: View {
                             .foregroundStyle(.white.opacity(0.45))
                     }
                     .fixedSize()
-                } else if style == .full, !isPaused, levels.contains(where: { $0 > 0.01 }) {
+                } else if !isPaused, levels.contains(where: { $0 > 0.01 }) {
                     waveform
                 }
             }
@@ -150,16 +144,12 @@ private enum FloatingIndicatorTokens {
 #Preview("States") {
     VStack(alignment: .leading, spacing: 16) {
         FloatingIndicatorView(
-            style: .full, isPaused: false,
+            isPaused: false,
             levels: (0..<4).map { _ in Float.random(in: 0.2...0.9) },
             elapsedLabel: "12:41", onActivate: {}
         )
         FloatingIndicatorView(
-            style: .minimal, isPaused: false,
-            levels: [], elapsedLabel: "12:41", onActivate: {}
-        )
-        FloatingIndicatorView(
-            style: .full, isPaused: true,
+            isPaused: true,
             levels: [Float](repeating: 0, count: 4),
             elapsedLabel: "12:41", onActivate: {}
         )

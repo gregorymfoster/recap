@@ -114,9 +114,11 @@ struct MeetingProcessor: JobExecutor {
                 return
             }
             await onStatus(job.meetingID, .enhancing)
-            let notes = (try? storage.loadNotes(in: record)) ?? ""
+            let freeformNotes = (try? storage.loadNotes(in: record)) ?? ""
+            let timedNotes = (try? storage.loadTimedNotes(in: record)) ?? []
+            let rawNotes = NotesRendering.rawNotes(timed: timedNotes, freeform: freeformNotes)
             do {
-                let result = try await enhancer.enhance(rawNotes: notes, transcript: transcript)
+                let result = try await enhancer.enhance(rawNotes: rawNotes, transcript: transcript)
                 try storage.saveEnhancedNotes(result.notes, in: record)
                 await onProcessingIssue(job.meetingID, .enhancementFailed, false)
                 // Defensive: other NoteEnhancer implementations might hand
@@ -140,28 +142,12 @@ struct MeetingProcessor: JobExecutor {
         }
     }
 
-    /// Mirrors a finished meeting to the configured sync destinations
-    /// (Obsidian vault, folder-mirror backup, webhook). Best-effort: a failed
-    /// export never affects the meeting itself.
+    /// Mirrors a finished meeting to the configured folder-mirror backup.
+    /// Best-effort: a failed export never affects the meeting itself.
     private func exportToConfiguredDestinations(_ record: MeetingRecord) async {
         changeBus.post(.meetingChanged(record.meeting.id))
 
         let s = await settings()
-        let notes = try? storage.loadNotes(in: record)
-        let enhanced = (try? storage.loadEnhancedNotes(in: record)) ?? nil
-        let transcript = try? storage.loadTranscript(in: record)
-
-        if s.syncsToObsidian, !s.obsidianVaultPath.isEmpty {
-            let exporter = ObsidianExporter(vaultFolderURL: URL(fileURLWithPath: s.obsidianVaultPath))
-            let speakerNames = ((try? storage.loadSpeakerNames(in: record)) ?? SpeakerNames()).names
-            do {
-                try exporter.export(record, notes: notes, enhanced: enhanced, transcript: transcript, speakerNames: speakerNames)
-                await onProcessingIssue(record.meeting.id, .obsidianExportFailed, false)
-            } catch {
-                processorLog.error("Obsidian export failed: \(String(describing: error), privacy: .private)")
-                await onProcessingIssue(record.meeting.id, .obsidianExportFailed, true)
-            }
-        }
 
         if s.mirrorBackupEnabled, !s.mirrorFolderPath.isEmpty {
             let mirror = FolderMirrorExporter(destinationRootURL: URL(fileURLWithPath: s.mirrorFolderPath))
@@ -172,20 +158,6 @@ struct MeetingProcessor: JobExecutor {
             } catch {
                 processorLog.error("Folder-mirror backup failed: \(String(describing: error), privacy: .private)")
                 await onProcessingIssue(record.meeting.id, .mirrorBackupFailed, true)
-            }
-        }
-
-        if !s.webhookURL.isEmpty,
-           let url = URL(string: s.webhookURL), url.scheme?.hasPrefix("http") == true {
-            let exporter = WebhookExporter(endpoint: url)
-            do {
-                try await exporter.send(
-                    record.meeting, notes: notes, enhanced: enhanced, transcript: transcript
-                )
-                await onProcessingIssue(record.meeting.id, .webhookExportFailed, false)
-            } catch {
-                processorLog.error("Webhook delivery failed: \(String(describing: error), privacy: .private)")
-                await onProcessingIssue(record.meeting.id, .webhookExportFailed, true)
             }
         }
     }

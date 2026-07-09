@@ -368,7 +368,7 @@ struct MeetingDetailView: View {
             queue?.retranscribe(record, in: library)
         case .enhancementFailed:
             queue?.retryEnhancement(record, in: library)
-        case .obsidianExportFailed, .mirrorBackupFailed, .webhookExportFailed:
+        case .mirrorBackupFailed:
             queue?.retryExport(record, in: library)
         }
     }

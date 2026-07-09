@@ -52,12 +52,8 @@ struct ProcessingIssueCard: View {
             ("Transcription needs another try", "Your recording is still saved. Re-run transcription when you are ready.", "Retry transcription")
         case .enhancementFailed:
             ("Notes enhancement was skipped", "The transcript is ready. Re-run enhancement to create the summary.", "Retry enhancement")
-        case .obsidianExportFailed:
-            ("Obsidian export needs attention", "The meeting is saved locally. Check Sync settings, then retry delivery.", "Retry sync")
         case .mirrorBackupFailed:
             ("Backup needs attention", "The meeting is saved locally. Check the backup folder, then retry delivery.", "Retry sync")
-        case .webhookExportFailed:
-            ("Webhook delivery needs attention", "The meeting is saved locally. Check the webhook in Sync settings, then retry delivery.", "Retry sync")
         }
     }
 }

@@ -17,15 +17,11 @@ extension AXID {
     // MARK: - General tab
 
     public static let settingsLaunchAtLoginToggle = AXID("settings-general-launch-at-login-toggle")
-    public static let settingsFloatingCapsulePicker = AXID("settings-general-floating-capsule-picker")
 
     // MARK: - Recording tab
 
     public static let settingsInputDevicePicker = AXID("settings-recording-input-device-picker")
     public static let settingsSystemAudioToggle = AXID("settings-recording-system-audio-toggle")
-    public static let settingsPauseOnBatteryToggle = AXID("settings-recording-pause-on-battery-toggle")
-    public static let settingsLabelSpeakersToggle = AXID("settings-recording-label-speakers-toggle")
-    public static let settingsTranscriptionLanguagePicker = AXID("settings-recording-transcription-language-picker")
 
     // MARK: - Calendar tab
 
@@ -36,9 +32,6 @@ extension AXID {
 
     // MARK: - Sync tab
 
-    public static let settingsObsidianSyncToggle = AXID("settings-sync-obsidian-toggle")
-    public static let settingsObsidianVaultChangeButton = AXID("settings-sync-obsidian-vault-change-button")
-    public static let settingsWebhookURLField = AXID("settings-sync-webhook-url-field")
     public static let settingsMirrorBackupToggle = AXID("settings-sync-mirror-backup-toggle")
     public static let settingsMirrorFolderChangeButton = AXID("settings-sync-mirror-folder-change-button")
 

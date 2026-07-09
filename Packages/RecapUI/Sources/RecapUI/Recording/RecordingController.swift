@@ -123,7 +123,7 @@ public final class RecordingController {
                 guard let record = library.startNewMeeting(title: title, attendees: attendees) else { return }
                 await session.start(
                     record: record,
-                    engine: models.streamingEngine(language: settings.transcriptionLanguage),
+                    engine: models.streamingEngine(),
                     includeSystemAudio: includeSystemAudio,
                     includeMic: includeMic,
                     preferredInputUID: settings.preferredInputUID

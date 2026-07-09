@@ -9,14 +9,6 @@ public enum CalendarAutoRecordMode: String, CaseIterable, Sendable {
     case auto
 }
 
-/// How the floating always-on-top capsule renders while recording in the
-/// background. `.full` shows dot + timer + waveform; `.minimal` just dot + timer.
-public enum FloatingCapsuleStyle: String, CaseIterable, Sendable {
-    case off
-    case minimal
-    case full
-}
-
 /// User preferences, backed by UserDefaults.
 @MainActor
 @Observable
@@ -30,21 +22,8 @@ public final class SettingsStore {
         didSet { defaults.set(includeSystemAudio, forKey: "includeSystemAudio") }
     }
 
-    public var pausesOnBattery: Bool {
-        didSet { defaults.set(pausesOnBattery, forKey: "pauseOnBattery") }
-    }
-
-    /// Label who spoke in transcripts (on-device diarization).
-    public var labelsSpeakers: Bool {
-        didSet { defaults.set(labelsSpeakers, forKey: "labelSpeakers") }
-    }
-
     public var calendarAutoRecord: CalendarAutoRecordMode {
         didSet { defaults.set(calendarAutoRecord.rawValue, forKey: "calendarAutoRecord") }
-    }
-
-    public var floatingCapsuleStyle: FloatingCapsuleStyle {
-        didSet { defaults.set(floatingCapsuleStyle.rawValue, forKey: "floatingCapsuleStyle") }
     }
 
     /// Canonical `CallApp.id`s the user has muted for call detection
@@ -55,15 +34,6 @@ public final class SettingsStore {
         didSet { defaults.set(Array(disabledCallAppIDs).sorted(), forKey: "disabledCallAppIDs") }
     }
 
-    /// Mirror finished meetings into an Obsidian vault folder as Markdown.
-    public var syncsToObsidian: Bool {
-        didSet { defaults.set(syncsToObsidian, forKey: "obsidianSync") }
-    }
-
-    public var obsidianVaultPath: String {
-        didSet { defaults.set(obsidianVaultPath, forKey: "obsidianVaultPath") }
-    }
-
     /// Mirror finished meeting folders (incl. audio) into another folder —
     /// typically iCloud Drive, for a one-way backup outside the app.
     public var mirrorBackupEnabled: Bool {
@@ -72,11 +42,6 @@ public final class SettingsStore {
 
     public var mirrorFolderPath: String {
         didSet { defaults.set(mirrorFolderPath, forKey: "mirrorFolderPath") }
-    }
-
-    /// POST finished meetings (JSON) to this URL; empty disables.
-    public var webhookURL: String {
-        didSet { defaults.set(webhookURL, forKey: "webhookURL") }
     }
 
     /// Meeting library location. Applies to meetings created after a change.
@@ -109,40 +74,33 @@ public final class SettingsStore {
         }
     }
 
-    /// Forces transcription to a specific language (ISO 639-1 code). `nil`
-    /// means auto-detect — WhisperKit's default behavior.
-    public var transcriptionLanguage: String? {
-        didSet {
-            if let transcriptionLanguage {
-                defaults.set(transcriptionLanguage, forKey: "transcriptionLanguage")
-            } else {
-                defaults.removeObject(forKey: "transcriptionLanguage")
-            }
-        }
-    }
-
     private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         hasOnboarded = defaults.bool(forKey: "hasOnboarded")
         includeSystemAudio = defaults.object(forKey: "includeSystemAudio") as? Bool ?? true
-        pausesOnBattery = defaults.object(forKey: "pauseOnBattery") as? Bool ?? true
-        labelsSpeakers = defaults.object(forKey: "labelSpeakers") as? Bool ?? true
         calendarAutoRecord = defaults.string(forKey: "calendarAutoRecord")
             .flatMap(CalendarAutoRecordMode.init(rawValue:)) ?? .off
-        floatingCapsuleStyle = defaults.string(forKey: "floatingCapsuleStyle")
-            .flatMap(FloatingCapsuleStyle.init(rawValue:)) ?? .full
         disabledCallAppIDs = Set(defaults.stringArray(forKey: "disabledCallAppIDs") ?? [])
-        syncsToObsidian = defaults.bool(forKey: "obsidianSync")
-        obsidianVaultPath = defaults.string(forKey: "obsidianVaultPath") ?? ""
         mirrorBackupEnabled = defaults.bool(forKey: "mirrorBackup")
         mirrorFolderPath = defaults.string(forKey: "mirrorFolderPath") ?? ""
-        webhookURL = defaults.string(forKey: "webhookURL") ?? ""
         saveRootPath = defaults.string(forKey: "saveRootPath") ?? LibraryStorage.defaultRootURL.path
         lastSystemAudioTapFailed = defaults.object(forKey: "lastSystemAudioTapFailed") as? Bool
         preferredInputUID = defaults.string(forKey: "preferredInputUID")
-        transcriptionLanguage = defaults.string(forKey: "transcriptionLanguage")
+
+        // Scrub legacy keys: pause-on-battery, speaker labeling, Obsidian
+        // sync, the webhook, the transcription-language override, and the
+        // floating-capsule style picker are all unconditional/removed
+        // behavior now — a stale value here must never resurface if any of
+        // these settings ever get reintroduced under the same key.
+        defaults.removeObject(forKey: "pauseOnBattery")
+        defaults.removeObject(forKey: "labelSpeakers")
+        defaults.removeObject(forKey: "obsidianSync")
+        defaults.removeObject(forKey: "obsidianVaultPath")
+        defaults.removeObject(forKey: "webhookURL")
+        defaults.removeObject(forKey: "transcriptionLanguage")
+        defaults.removeObject(forKey: "floatingCapsuleStyle")
     }
 
     public var saveRootURL: URL {

@@ -22,7 +22,7 @@ public struct FolderMirrorExporter: Sendable {
         try fm.createDirectory(at: destinationFolderURL, withIntermediateDirectories: true)
 
         let fileNames = [
-            "meeting.json", "notes.md", "enhanced.md", "transcript.json", "audio.m4a",
+            "meeting.json", "notes.md", "notes.json", "enhanced.md", "transcript.json", "audio.m4a",
         ]
         for fileName in fileNames {
             let sourceURL = record.folderURL.appendingPathComponent(fileName)

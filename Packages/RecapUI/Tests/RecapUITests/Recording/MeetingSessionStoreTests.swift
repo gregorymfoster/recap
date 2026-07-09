@@ -177,6 +177,24 @@ private struct FakeError: Error {}
         #expect(store.menuBarElapsedLabel == nil)
     }
 
+    /// `currentOffset` is the pause-excluded elapsed time a timed note
+    /// captured right now should be pinned to — nil while not recording,
+    /// derived from the same `RecordingClock` the pill's timer uses.
+    @Test func currentOffsetNilWhileIdleAndNonNilWhileRecording() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let (store, _) = makeStore()
+        let record = makeRecord(in: dir)
+
+        #expect(store.currentOffset == nil)
+        await store.start(record: record, includeSystemAudio: true, includeMic: true)
+        #expect(store.currentOffset != nil)
+        #expect(store.currentOffset ?? -1 >= 0)
+
+        _ = await store.stop()
+        #expect(store.currentOffset == nil)
+    }
+
     @Test func startMapsAlreadyStartingToStartFailureMessage() async throws {
         let dir = try tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

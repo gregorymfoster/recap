@@ -79,6 +79,14 @@ public final class LibraryStore {
     /// Canned enhanced notes for fixture records, mirroring
     /// `fixtureTranscripts`. Empty in disk-backed mode.
     var fixtureEnhancedNotes: [UUID: String] = [:]
+    /// In-memory timed notes for fixture records, mirroring
+    /// `fixtureNotes` — `addTimedNote` appends here instead of touching disk.
+    /// Empty in disk-backed mode.
+    var fixtureTimedNotes: [UUID: [TimedNote]] = [:]
+    /// Per-meeting cache of disk-loaded timed notes, so repeat
+    /// `timedNotes(for:)` calls don't re-read `notes.json` — populated on
+    /// first load, kept in sync by `addTimedNote`. Disk-backed mode only.
+    var timedNotesCache: [UUID: [TimedNote]] = [:]
 
     private static let sortKey = "librarySort"
 
@@ -98,7 +106,8 @@ public final class LibraryStore {
         fixtures: [MeetingRecord], queueSummary: QueueSummary? = nil,
         transcripts: [UUID: Transcript] = [:],
         notes: [UUID: String] = [:],
-        enhancedNotes: [UUID: String] = [:]
+        enhancedNotes: [UUID: String] = [:],
+        timedNotes: [UUID: [TimedNote]] = [:]
     ) {
         self.storage = nil
         self.index = nil
@@ -111,6 +120,7 @@ public final class LibraryStore {
         self.fixtureTranscripts = transcripts
         self.fixtureNotes = notes
         self.fixtureEnhancedNotes = enhancedNotes
+        self.fixtureTimedNotes = timedNotes
     }
 
     /// `meetings` filtered then sorted — the source of truth (`meetings`,
