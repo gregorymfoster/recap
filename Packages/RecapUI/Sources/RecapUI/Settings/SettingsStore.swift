@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import RecapCore
+import RecapTranscription
 
 /// What Recap does when a meeting-shaped calendar event starts.
 public enum CalendarAutoRecordMode: String, CaseIterable, Sendable {
@@ -74,6 +75,13 @@ public final class SettingsStore {
         }
     }
 
+    /// Automatic-model-selection quality preference (replaces the old
+    /// manual Models screen). Absent key → `.bestQuality` for everyone,
+    /// regardless of whatever model happened to be active before.
+    public var transcriptionQuality: TranscriptionQuality {
+        didSet { defaults.set(transcriptionQuality.rawValue, forKey: "transcriptionQuality") }
+    }
+
     private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
@@ -88,6 +96,8 @@ public final class SettingsStore {
         saveRootPath = defaults.string(forKey: "saveRootPath") ?? LibraryStorage.defaultRootURL.path
         lastSystemAudioTapFailed = defaults.object(forKey: "lastSystemAudioTapFailed") as? Bool
         preferredInputUID = defaults.string(forKey: "preferredInputUID")
+        transcriptionQuality = defaults.string(forKey: "transcriptionQuality")
+            .flatMap(TranscriptionQuality.init(rawValue:)) ?? .bestQuality
 
         // Scrub legacy keys: pause-on-battery, speaker labeling, Obsidian
         // sync, the webhook, the transcription-language override, and the

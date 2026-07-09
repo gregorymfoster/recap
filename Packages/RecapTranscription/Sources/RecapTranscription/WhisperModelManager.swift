@@ -7,7 +7,22 @@ public enum ModelState: Equatable, Sendable {
     case available
     case downloading(progress: Double)
     case installed
+    /// The last download attempt failed (network error, corrupt snapshot,
+    /// etc.). Distinct from `.available` so callers (e.g.
+    /// `TranscriptionSetupStore`) can show/retry a failure instead of
+    /// silently looking like the download never happened.
+    case failed
 }
+
+/// Downloads a model variant into `downloadBase`, reporting fractional
+/// progress via `progressCallback`. The production default forwards to
+/// `WhisperKit.download`; tests inject a closure that succeeds/fails
+/// instantly without touching the network.
+public typealias ModelDownloader = @Sendable (
+    _ variant: String,
+    _ downloadBase: URL,
+    _ progressCallback: @escaping @Sendable (Double) -> Void
+) async throws -> Void
 
 /// Downloads, tracks, and activates WhisperKit models on disk.
 ///
@@ -19,39 +34,50 @@ public enum ModelState: Equatable, Sendable {
 public final class WhisperModelManager {
     public private(set) var states: [String: ModelState] = [:]
     public private(set) var activeModelID: String?
-    /// The dedicated light model used for the live (streaming) pass during
-    /// recording — independent of `activeModelID`, which drives the
-    /// canonical post-stop file pass. Defaults to Whisper Tiny: small enough
-    /// to load fast and keep up with a 4s realtime loop even when the file
-    /// pass model is something heavy like Large v3 Turbo.
-    public private(set) var streamingModelID: String
 
     private let modelsRoot: URL
     private let defaults: UserDefaults
+    private let downloader: ModelDownloader
     private var downloadTasks: [String: Task<Void, Never>] = [:]
 
     private static let activeModelKey = "activeModelID"
-    private static let streamingModelKey = "streamingModelID"
+    /// No longer used — the dedicated streaming/live-pass model was removed
+    /// in favor of automatic quality-driven selection. Cleared once at init
+    /// so a stale value doesn't linger in defaults forever.
+    private static let legacyStreamingModelKey = "streamingModelID"
 
     public static var defaultModelsRoot: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Recap/Models")
     }
 
-    public init(modelsRoot: URL = WhisperModelManager.defaultModelsRoot, defaults: UserDefaults = .standard) {
+    public init(
+        modelsRoot: URL = WhisperModelManager.defaultModelsRoot,
+        defaults: UserDefaults = .standard,
+        downloader: @escaping ModelDownloader = WhisperModelManager.defaultDownloader
+    ) {
         self.modelsRoot = modelsRoot
         self.defaults = defaults
+        self.downloader = downloader
         activeModelID = defaults.string(forKey: Self.activeModelKey)
-        streamingModelID = defaults.string(forKey: Self.streamingModelKey) ?? ModelCatalog.streamingDefault.id
+        defaults.removeObject(forKey: Self.legacyStreamingModelKey)
         refresh()
+    }
+
+    /// Forwards to `WhisperKit.download`, translating `Progress` into a bare
+    /// fraction.
+    public static let defaultDownloader: ModelDownloader = { variant, downloadBase, progressCallback in
+        _ = try await WhisperKit.download(
+            variant: variant,
+            downloadBase: downloadBase,
+            useBackgroundSession: false
+        ) { progress in
+            progressCallback(progress.fractionCompleted)
+        }
     }
 
     public var activeModel: ModelInfo? {
         activeModelID.flatMap(ModelCatalog.info(for:))
-    }
-
-    public var streamingModel: ModelInfo? {
-        ModelCatalog.info(for: streamingModelID)
     }
 
     /// Local folder of an installed model, or nil if not fully downloaded.
@@ -67,10 +93,13 @@ public final class WhisperModelManager {
         return folder
     }
 
-    /// Re-derives every model's state from disk.
+    /// Re-derives every model's state from disk. Leaves `.downloading` and
+    /// `.failed` states alone — those are session-lived facts refresh can't
+    /// re-derive from disk alone (a failed attempt still isn't installed).
     public func refresh() {
         for model in ModelCatalog.all {
             if case .downloading = states[model.id] { continue }
+            if case .failed = states[model.id] { continue }
             states[model.id] = installedFolder(for: model) != nil ? .installed : .available
         }
         if let activeModelID, states[activeModelID] != .installed {
@@ -82,15 +111,11 @@ public final class WhisperModelManager {
         guard downloadTasks[model.id] == nil else { return }
         states[model.id] = .downloading(progress: 0)
         let root = modelsRoot
+        let downloader = downloader
         downloadTasks[model.id] = Task { [weak self] in
             guard let self else { return }
             do {
-                _ = try await WhisperKit.download(
-                    variant: model.id,
-                    downloadBase: root,
-                    useBackgroundSession: false
-                ) { progress in
-                    let fraction = progress.fractionCompleted
+                try await downloader(model.id, root) { fraction in
                     Task { @MainActor in
                         self.setDownloadProgress(fraction, for: model)
                     }
@@ -134,13 +159,6 @@ public final class WhisperModelManager {
         }
     }
 
-    /// Changes the dedicated live-pass model. Persisted separately from
-    /// `activeModelID` so switching the file-pass model never disturbs it.
-    public func setStreamingModel(_ id: String) {
-        streamingModelID = id
-        defaults.set(id, forKey: Self.streamingModelKey)
-    }
-
     /// The engine for the active model, if one is installed.
     ///
     /// - Parameter language: Forces decoding to this language (ISO 639-1
@@ -157,43 +175,20 @@ public final class WhisperModelManager {
         )
     }
 
-    /// The engine for the dedicated streaming model, if one is installed.
-    /// Independent of `activeEngine()` — a second WhisperKit instance, kept
-    /// deliberately light so it can keep up with the realtime loop even when
-    /// the file-pass model is large. If the streaming and active models
-    /// happen to be the same variant, the two engines simply point at the
-    /// same folder; each still loads its own WhisperKit instance.
-    ///
-    /// - Parameter language: See `activeEngine(language:)`.
-    public func streamingEngine(language: String? = nil) -> WhisperKitEngine? {
-        guard let model = streamingModel, let folder = installedFolder(for: model) else { return nil }
-        return WhisperKitEngine(
-            modelFolder: folder, modelName: model.repoFolderName,
-            language: model.isEnglishOnly ? nil : language,
-            downloadBase: modelsRoot
-        )
-    }
-
-    /// True once the streaming model is installed and ready to use.
-    public var isStreamingModelInstalled: Bool {
-        guard let model = streamingModel else { return false }
-        return states[model.id] == .installed
-    }
-
-    /// Starts downloading the streaming model if it isn't already installed
-    /// or in flight. Safe to call unconditionally (e.g. on first recording).
-    public func ensureStreamingModelDownloading() {
-        guard let model = streamingModel, !isStreamingModelInstalled else { return }
-        download(model)
-    }
-
     // MARK: Private
 
     private func finishDownload(of model: ModelInfo, failed: Bool) {
         downloadTasks[model.id] = nil
+        if failed {
+            // A failed attempt may still have left a complete snapshot from
+            // an earlier successful download — trust disk over the network
+            // outcome.
+            states[model.id] = installedFolder(for: model) != nil ? .installed : .failed
+            return
+        }
         refreshState(of: model)
         // First installed model becomes active automatically.
-        if !failed, activeModelID == nil, states[model.id] == .installed {
+        if activeModelID == nil, states[model.id] == .installed {
             setActive(model.id)
         }
     }

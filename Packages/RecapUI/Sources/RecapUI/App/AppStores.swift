@@ -24,6 +24,11 @@ public final class AppStores {
     public let settings: SettingsStore
     public let library: LibraryStore
     public let models: WhisperModelManager
+    /// Drives automatic model download/activation from the quality
+    /// preference (replaces the manual Models screen). Inert (`.done`,
+    /// never downloads) unless `start()` is called — only the normal-mode
+    /// graph below does that.
+    public let setup: TranscriptionSetupStore
     public let session: MeetingSessionStore
     public let queue: QueueStore?
     /// Today's remaining calendar events for the Library's Upcoming section
@@ -108,6 +113,7 @@ public final class AppStores {
             settings = .ephemeralOnboarded()
             library = scenario.library
             models = WhisperModelManager()
+            setup = TranscriptionSetupStore(models: models, settings: settings)
             session = MeetingSessionStore()
             queue = nil
             storage = nil
@@ -131,6 +137,7 @@ public final class AppStores {
             let library = LibraryStore(storage: storage, index: index, changeBus: changeBus)
             self.library = library
             models = WhisperModelManager()
+            setup = TranscriptionSetupStore(models: models, settings: settings)
             self.storage = storage
             self.changeBus = changeBus
             session = MeetingSessionStore(makeRecorder: {
@@ -166,6 +173,7 @@ public final class AppStores {
             self.settings = settings
             self.library = library
             self.models = models
+            setup = TranscriptionSetupStore(models: models, settings: settings)
             self.storage = storage
             self.changeBus = changeBus
             session = MeetingSessionStore()
@@ -235,6 +243,7 @@ public final class AppStores {
         if configuration.mode == .normal {
             recording.registerGlobalControls()
             autoRecord.applyCalendarAutoRecordSetting()
+            setup.start()
             changeBusConsumer?.start()
             // Granting calendar access in Settings refreshes `upcoming`
             // itself (`SettingsPrivacyTab`); this covers the other stale-agenda
@@ -252,6 +261,7 @@ public final class AppStores {
         settings = .ephemeralOnboarded()
         self.library = library
         models = WhisperModelManager()
+        setup = TranscriptionSetupStore(models: models, settings: settings)
         session = MeetingSessionStore()
         queue = nil
         storage = nil
@@ -301,6 +311,7 @@ public final class AppStores {
         self.storage = storage
         self.library = library
         self.models = models
+        setup = TranscriptionSetupStore(models: models, settings: settings)
         self.session = session
         self.queue = queue
         self.changeBus = changeBus

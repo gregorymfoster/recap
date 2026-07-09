@@ -42,7 +42,7 @@ struct MeetingDetailView: View {
                         partial: isLiveMeeting ? session.partialUtterance : nil,
                         isLive: isLiveMeeting,
                         liveState: isLiveMeeting ? session.liveState : nil,
-                        onDownloadStreamingModel: { models.ensureStreamingModelDownloading() },
+                        onDownloadStreamingModel: nil,
                         speakerNames: speakerNames,
                         attendees: record.meeting.attendees,
                         onRenameSpeaker: isLiveMeeting ? nil : { speakerID, name in
