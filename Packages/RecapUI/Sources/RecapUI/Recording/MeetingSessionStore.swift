@@ -13,6 +13,13 @@ public final class MeetingSessionStore {
     /// Active-time clock for the current recording; nil while stopped.
     /// A struct — pause/resume reassign it so @Observable sees the change.
     public private(set) var clock: RecordingClock?
+
+    /// Elapsed, pause-excluded recording time right now — the offset a timed
+    /// note captured this instant should be pinned to. `nil` while not
+    /// recording (mirrors `clock`).
+    public var currentOffset: TimeInterval? {
+        clock?.elapsed(at: .now)
+    }
     /// Rolling window of recent RMS levels driving the pill's waveform bars.
     public private(set) var levels: [Float] = MeetingSessionStore.idleLevels
     public private(set) var permissionDenied = false

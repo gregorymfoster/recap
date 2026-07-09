@@ -2,20 +2,20 @@ import Foundation
 import RecapCore
 
 /// The one long-lived task that watches every library change and re-runs
-/// the currently-enabled exporters for the affected meeting, debounced per
-/// meeting ID. This is what makes notes edited *after* processing (Obsidian
-/// export otherwise only fires at pipeline completion) still reach the
-/// configured destinations. Extracted from `AppStores`, which constructs it
-/// only when disk-backed storage exists.
+/// the folder-mirror backup for the affected meeting, debounced per meeting
+/// ID. This is what makes notes edited *after* processing (the mirror
+/// otherwise only fires at pipeline completion) still reach the backup
+/// folder. Extracted from `AppStores`, which constructs it only when
+/// disk-backed storage exists.
 @MainActor
 final class ChangeBusConsumer {
     private let changeBus: LibraryChangeBus
     private let storage: LibraryStorage
     private let settings: SettingsStore
     /// Per-meeting debounce: each `.meetingChanged` cancels and restarts a
-    /// debounce sleep (5s in production) before the enabled exporters
-    /// actually run, so rapid edits coalesce into one export instead of one
-    /// per keystroke-flush.
+    /// debounce sleep (5s in production) before the mirror backup actually
+    /// runs, so rapid edits coalesce into one export instead of one per
+    /// keystroke-flush.
     private let exportDebounce: Duration
     private var exportDebounceTasks: [UUID: Task<Void, Never>] = [:]
     private var consumerTask: Task<Void, Never>?
@@ -50,33 +50,20 @@ final class ChangeBusConsumer {
         }
     }
 
-    /// Re-runs every currently-enabled exporter for one meeting, looked up
-    /// fresh from disk. Best-effort and detached — mirrors
+    /// Re-runs the mirror backup for one meeting, looked up fresh from disk.
+    /// Best-effort and detached — mirrors
     /// `MeetingProcessor.exportToConfiguredDestinations`, but is driven by
     /// the change bus instead of pipeline completion.
     private func runEnabledExporters(for meetingID: UUID) {
         let storage = storage
-        let obsidianEnabled = settings.syncsToObsidian
-        let obsidianPath = settings.obsidianVaultPath
         let mirrorEnabled = settings.mirrorBackupEnabled
         let mirrorPath = settings.mirrorFolderPath
-        guard (obsidianEnabled && !obsidianPath.isEmpty) || (mirrorEnabled && !mirrorPath.isEmpty) else { return }
+        guard mirrorEnabled, !mirrorPath.isEmpty else { return }
 
         Task.detached(priority: .utility) {
             guard let record = try? storage.loadAll().first(where: { $0.meeting.id == meetingID }) else { return }
-            let notes = try? storage.loadNotes(in: record)
-            let enhanced = (try? storage.loadEnhancedNotes(in: record)) ?? nil
-            let transcript = try? storage.loadTranscript(in: record)
-
-            if obsidianEnabled, !obsidianPath.isEmpty {
-                let exporter = ObsidianExporter(vaultFolderURL: URL(fileURLWithPath: obsidianPath))
-                let speakerNames = ((try? storage.loadSpeakerNames(in: record)) ?? SpeakerNames()).names
-                _ = try? exporter.export(record, notes: notes, enhanced: enhanced, transcript: transcript, speakerNames: speakerNames)
-            }
-            if mirrorEnabled, !mirrorPath.isEmpty {
-                let mirror = FolderMirrorExporter(destinationRootURL: URL(fileURLWithPath: mirrorPath))
-                try? mirror.mirror(record)
-            }
+            let mirror = FolderMirrorExporter(destinationRootURL: URL(fileURLWithPath: mirrorPath))
+            try? mirror.mirror(record)
         }
     }
 }

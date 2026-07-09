@@ -4,13 +4,13 @@ import RecapCore
 import SwiftUI
 
 /// Recording tab: input device, system audio capture, the global shortcut
-/// (informational — the recorder is not rebindable), processing priority
-/// (also informational — always low), pause-on-battery, speaker labeling,
-/// and transcription language.
+/// (informational — the recorder is not rebindable), and processing priority
+/// (also informational — always low). Pause-on-battery and speaker labeling
+/// are unconditional behavior now, and transcription always auto-detects the
+/// language — nothing to configure for any of the three.
 struct SettingsRecordingTab: View {
     @Environment(AppStores.self) private var stores: AppStores?
     @Environment(SettingsStore.self) private var settings
-    @Environment(QueueStore.self) private var queue: QueueStore?
     @State private var inputDevices: [AudioInputDevice] = AudioInputDevices.inputDevices()
     @State private var deviceListListener: AudioObjectPropertyListenerBlock?
 
@@ -55,25 +55,7 @@ struct SettingsRecordingTab: View {
 
             Section {
                 LabeledContent("Processing priority", value: "Low — never interrupts")
-                Toggle("Pause processing on battery", isOn: $settings.pausesOnBattery)
-                    .axID(.settingsPauseOnBatteryToggle)
-                    .onChange(of: settings.pausesOnBattery) {
-                        queue?.setPausesOnBattery(settings.pausesOnBattery)
-                    }
-                SettingsFootnote("Transcription and note enhancement always run at low priority so they never interrupt what you're doing; on battery they wait until you're plugged in.")
-            }
-
-            Section {
-                Toggle("Label speakers in transcripts", isOn: $settings.labelsSpeakers)
-                    .axID(.settingsLabelSpeakersToggle)
-                Picker("Transcription language", selection: $settings.transcriptionLanguage) {
-                    Text("Auto-detect").tag(String?.none)
-                    ForEach(TranscriptionLanguages.common) { language in
-                        Text(language.displayName).tag(String?.some(language.code))
-                    }
-                }
-                .axID(.settingsTranscriptionLanguagePicker)
-                SettingsFootnote("Speaker labeling runs on-device and downloads a small model (~50 MB) the first time; if it isn't ready yet, transcripts are simply unlabeled. Auto-detect works well for most meetings — force a language for short or heavily accented recordings.")
+                SettingsFootnote("Transcription and note enhancement always run at low priority so they never interrupt what you're doing; on battery they wait until you're plugged in. Speaker labeling runs on-device and downloads a small model (~50 MB) the first time; if it isn't ready yet, transcripts are simply unlabeled.")
             }
         }
         .formStyle(.grouped)

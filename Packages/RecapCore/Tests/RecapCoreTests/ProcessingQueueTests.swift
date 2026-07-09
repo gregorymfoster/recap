@@ -63,7 +63,8 @@ private func waitUntil(
         await executor.releaseHeldJob()
     }
 
-    @Test func batteryPowerPausesNextJobAndResumeOnAC() async {
+    /// Pause-on-battery is unconditional behavior now — no setting gates it.
+    @Test func batteryPowerAlwaysPausesNextJobAndResumeOnAC() async {
         let executor = FakeExecutor()
         let queue = ProcessingQueue(executor: executor)
         await queue.powerStateChanged(PowerState(onBattery: true))
@@ -74,14 +75,6 @@ private func waitUntil(
         #expect(await queue.snapshot.pauseReason == "paused — on battery")
 
         await queue.powerStateChanged(PowerState(onBattery: false))
-        #expect(await waitUntil { await executor.executed.count == 1 })
-    }
-
-    @Test func batteryPauseCanBeDisabled() async {
-        let executor = FakeExecutor()
-        let queue = ProcessingQueue(executor: executor, pausesOnBattery: false)
-        await queue.powerStateChanged(PowerState(onBattery: true))
-        await queue.enqueue(ProcessingJob(kind: .transcribe, meetingID: UUID()))
         #expect(await waitUntil { await executor.executed.count == 1 })
     }
 

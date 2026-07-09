@@ -16,7 +16,7 @@ import RecapTranscription
 ///
 /// This is a composition root: it owns the stores and wires the per-subsystem
 /// coordinators (`RecordingController`, `ImportCoordinator`,
-/// `AutoRecordCoordinator`, the export coordinators, `ChangeBusConsumer`),
+/// `AutoRecordCoordinator`, `BackupMirrorCoordinator`, `ChangeBusConsumer`),
 /// keeping thin forwarders for the coordinator entry points views already call.
 @MainActor
 @Observable
@@ -57,8 +57,6 @@ public final class AppStores {
     public let importer: ImportCoordinator
     /// Calendar auto-record policy + the "Meeting started?" nudge.
     public let autoRecord: AutoRecordCoordinator
-    /// Obsidian vault sync backfill.
-    public let obsidianExport: ObsidianExportCoordinator
     /// Folder-mirror backup backfill.
     public let mirrorBackup: BackupMirrorCoordinator
     /// Debounced change-bus re-export consumer; nil when there's no
@@ -225,7 +223,6 @@ public final class AppStores {
         recording = coordinators.recording
         importer = coordinators.importer
         autoRecord = coordinators.autoRecord
-        obsidianExport = coordinators.obsidianExport
         mirrorBackup = coordinators.mirrorBackup
 
         if configuration.mode == .normal, let storage {
@@ -270,7 +267,6 @@ public final class AppStores {
         recording = coordinators.recording
         importer = coordinators.importer
         autoRecord = coordinators.autoRecord
-        obsidianExport = coordinators.obsidianExport
         mirrorBackup = coordinators.mirrorBackup
         changeBusConsumer = nil
     }
@@ -320,7 +316,6 @@ public final class AppStores {
         recording = coordinators.recording
         importer = coordinators.importer
         autoRecord = coordinators.autoRecord
-        obsidianExport = coordinators.obsidianExport
         mirrorBackup = coordinators.mirrorBackup
 
         if registersHotKey {
@@ -382,7 +377,7 @@ public final class AppStores {
         ) -> CallStartNotifying? = { _, _ in nil }
     ) -> (
         recording: RecordingController, importer: ImportCoordinator, autoRecord: AutoRecordCoordinator,
-        obsidianExport: ObsidianExportCoordinator, mirrorBackup: BackupMirrorCoordinator
+        mirrorBackup: BackupMirrorCoordinator
     ) {
         let recording = RecordingController(
             session: session, library: library, models: models, settings: settings,
@@ -404,9 +399,8 @@ public final class AppStores {
             stopRecording: { recording.stopRecording() },
             makeCallStartNotifier: makeCallStartNotifier
         )
-        let obsidianExport = ObsidianExportCoordinator(settings: settings, library: library, storage: storage)
         let mirrorBackup = BackupMirrorCoordinator(settings: settings, library: library)
-        return (recording, importer, autoRecord, obsidianExport, mirrorBackup)
+        return (recording, importer, autoRecord, mirrorBackup)
     }
 
     // MARK: Cross-store seams
@@ -471,6 +465,5 @@ public final class AppStores {
         set { autoRecord.onNudgePresented = newValue }
     }
 
-    public func exportAllReadyMeetingsToObsidian() { obsidianExport.exportAllReadyMeetings() }
     public func backfillMirrorBackup() { mirrorBackup.backfill() }
 }

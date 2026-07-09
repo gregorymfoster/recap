@@ -6,16 +6,13 @@ import SwiftUI
 /// recording indicator whenever Recap is recording and backgrounded — the
 /// Granola-style "still recording" confidence capsule.
 ///
-/// Show/hide is driven by three independent signals, all observed without
+/// Show/hide is driven by two independent signals, both observed without
 /// polling:
 ///   - App activation: `NSApplication.didBecomeActiveNotification` /
 ///     `didResignActiveNotification` via `NotificationCenter`.
 ///   - Session state: `session.isRecording` / `session.isPaused` via a
 ///     self-re-arming `withObservationTracking` loop (the standard pattern
 ///     for observing `@Observable` state outside SwiftUI view bodies).
-///   - Settings: `settings.floatingCapsuleStyle` via the same
-///     `withObservationTracking` mechanism — flipping to `.off` hides the
-///     panel immediately even mid-recording.
 @MainActor
 public final class FloatingIndicatorController {
     private let stores: AppStores
@@ -35,10 +32,6 @@ public final class FloatingIndicatorController {
     /// offscreen.
     private var lastOrigin: NSPoint?
     private let positionStore: FloatingIndicatorPositionStore
-    /// Style last used to size the panel's content — tracked so a
-    /// `.minimal` ↔ `.full` change (different content width) triggers a
-    /// re-fit instead of leaving stale dead space or clipping.
-    private var lastStyle: FloatingCapsuleStyle?
 
     public init(stores: AppStores, positionStore: FloatingIndicatorPositionStore = FloatingIndicatorPositionStore()) {
         self.stores = stores
@@ -90,7 +83,6 @@ public final class FloatingIndicatorController {
         withObservationTracking {
             _ = stores.session.isRecording
             _ = stores.session.isPaused
-            _ = stores.settings.floatingCapsuleStyle
         } onChange: { [weak self] in
             MainActor.assumeIsolated {
                 self?.refreshVisibility()
@@ -100,12 +92,11 @@ public final class FloatingIndicatorController {
     }
 
     private func refreshVisibility() {
-        let style = stores.settings.floatingCapsuleStyle
         let visible = FloatingIndicatorVisibility.isVisible(
-            isRecording: stores.session.isRecording, isAppActive: isAppActive, style: style
+            isRecording: stores.session.isRecording, isAppActive: isAppActive
         )
         if visible {
-            showPanel(style: style)
+            showPanel()
         } else {
             hidePanel()
         }
@@ -113,16 +104,9 @@ public final class FloatingIndicatorController {
 
     // MARK: Panel lifecycle
 
-    private func showPanel(style: FloatingCapsuleStyle) {
+    private func showPanel() {
         if panel == nil {
             panel = makePanel()
-            lastStyle = style
-        } else if lastStyle != style {
-            // `.minimal` and `.full` fit different content widths — resize in
-            // place rather than tearing down and recreating the panel, which
-            // would also drop the user's dragged position for this show.
-            lastStyle = style
-            refit(panel!)
         }
         panel?.orderFrontRegardless()
     }
@@ -179,20 +163,6 @@ public final class FloatingIndicatorController {
         notificationTokens.append(moveToken)
 
         return panel
-    }
-
-    /// Re-fits an already-shown panel's content after a style change
-    /// (`.minimal` ↔ `.full` sizes differently) without disturbing its
-    /// current on-screen position, so the capsule doesn't jump to the
-    /// default corner just because the user toggled a Settings option while
-    /// it happened to be visible.
-    private func refit(_ panel: NSPanel) {
-        guard let hosting = panel.contentView as? FirstMouseHostingView<FloatingIndicatorHostView> else { return }
-        let origin = panel.frame.origin
-        let newSize = hosting.fittingSize
-        hosting.frame = NSRect(origin: .zero, size: newSize)
-        panel.setContentSize(newSize)
-        panel.setFrameOrigin(origin)
     }
 
     /// Places a freshly created panel: reuses the last known/persisted
@@ -260,7 +230,6 @@ struct FloatingIndicatorHostView: View {
 
     var body: some View {
         FloatingIndicatorView(
-            style: stores.settings.floatingCapsuleStyle,
             isPaused: stores.session.isPaused,
             levels: WaveformDownsample.bars(from: stores.session.levels, count: 4),
             elapsedLabel: stores.session.menuBarElapsedLabel,

@@ -38,9 +38,7 @@ public enum ProcessingIssue: String, Codable, CaseIterable, Equatable, Identifia
     case recordingFileMissing
     case transcriptionFailed
     case enhancementFailed
-    case obsidianExportFailed
     case mirrorBackupFailed
-    case webhookExportFailed
 
     public var id: String { rawValue }
 
@@ -49,9 +47,7 @@ public enum ProcessingIssue: String, Codable, CaseIterable, Equatable, Identifia
         case .recordingFileMissing: "REC-AUDIO-001"
         case .transcriptionFailed: "REC-TRANSCRIBE-001"
         case .enhancementFailed: "REC-ENHANCE-001"
-        case .obsidianExportFailed: "REC-OBSIDIAN-001"
         case .mirrorBackupFailed: "REC-BACKUP-001"
-        case .webhookExportFailed: "REC-WEBHOOK-001"
         }
     }
 }

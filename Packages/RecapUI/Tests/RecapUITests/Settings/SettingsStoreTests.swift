@@ -10,29 +10,31 @@ import Testing
         return suite
     }
 
-    @Test func transcriptionLanguageDefaultsToAutoDetect() {
-        let store = SettingsStore(defaults: Self.ephemeralSuite())
-        #expect(store.transcriptionLanguage == nil)
-    }
+    // MARK: - Legacy key scrubbing
 
-    @Test func transcriptionLanguageRoundTripsThroughUserDefaults() {
+    /// Removed settings (pause-on-battery, speaker labeling — now
+    /// unconditional behavior; Obsidian sync, the webhook, the transcription
+    /// language override, and the floating-capsule style — now removed
+    /// features) must never resurface from a stale value under their old key.
+    @Test func initScrubsLegacyKeysFromDefaults() {
         let defaults = Self.ephemeralSuite()
-        let store = SettingsStore(defaults: defaults)
-        store.transcriptionLanguage = "es"
+        defaults.set(false, forKey: "pauseOnBattery")
+        defaults.set(false, forKey: "labelSpeakers")
+        defaults.set(true, forKey: "obsidianSync")
+        defaults.set("/tmp/vault", forKey: "obsidianVaultPath")
+        defaults.set("https://example.com/hook", forKey: "webhookURL")
+        defaults.set("es", forKey: "transcriptionLanguage")
+        defaults.set("full", forKey: "floatingCapsuleStyle")
 
-        let reopened = SettingsStore(defaults: defaults)
-        #expect(reopened.transcriptionLanguage == "es")
-    }
+        _ = SettingsStore(defaults: defaults)
 
-    @Test func settingBackToNilRemovesTheStoredValue() {
-        let defaults = Self.ephemeralSuite()
-        let store = SettingsStore(defaults: defaults)
-        store.transcriptionLanguage = "fr"
-        store.transcriptionLanguage = nil
-
-        #expect(defaults.string(forKey: "transcriptionLanguage") == nil)
-        let reopened = SettingsStore(defaults: defaults)
-        #expect(reopened.transcriptionLanguage == nil)
+        #expect(defaults.object(forKey: "pauseOnBattery") == nil)
+        #expect(defaults.object(forKey: "labelSpeakers") == nil)
+        #expect(defaults.object(forKey: "obsidianSync") == nil)
+        #expect(defaults.object(forKey: "obsidianVaultPath") == nil)
+        #expect(defaults.object(forKey: "webhookURL") == nil)
+        #expect(defaults.object(forKey: "transcriptionLanguage") == nil)
+        #expect(defaults.object(forKey: "floatingCapsuleStyle") == nil)
     }
 
     // MARK: - Bool property round-trips
@@ -43,17 +45,13 @@ import Testing
     // inside the @MainActor test body.
 
     private nonisolated static let boolPropertyNames = [
-        "hasOnboarded", "includeSystemAudio", "pausesOnBattery",
-        "labelsSpeakers", "syncsToObsidian", "mirrorBackupEnabled",
+        "hasOnboarded", "includeSystemAudio", "mirrorBackupEnabled",
     ]
 
     private func boolAccessors(for name: String) -> (get: (SettingsStore) -> Bool, set: (SettingsStore, Bool) -> Void, defaultValue: Bool) {
         switch name {
         case "hasOnboarded": ({ $0.hasOnboarded }, { $0.hasOnboarded = $1 }, false)
         case "includeSystemAudio": ({ $0.includeSystemAudio }, { $0.includeSystemAudio = $1 }, true)
-        case "pausesOnBattery": ({ $0.pausesOnBattery }, { $0.pausesOnBattery = $1 }, true)
-        case "labelsSpeakers": ({ $0.labelsSpeakers }, { $0.labelsSpeakers = $1 }, true)
-        case "syncsToObsidian": ({ $0.syncsToObsidian }, { $0.syncsToObsidian = $1 }, false)
         case "mirrorBackupEnabled": ({ $0.mirrorBackupEnabled }, { $0.mirrorBackupEnabled = $1 }, false)
         default: fatalError("unknown bool property \(name)")
         }
@@ -78,14 +76,12 @@ import Testing
     // MARK: - String property round-trips
 
     private nonisolated static let stringPropertyNames = [
-        "obsidianVaultPath", "mirrorFolderPath", "webhookURL", "saveRootPath",
+        "mirrorFolderPath", "saveRootPath",
     ]
 
     private func stringAccessors(for name: String) -> (get: (SettingsStore) -> String, set: (SettingsStore, String) -> Void, value: String) {
         switch name {
-        case "obsidianVaultPath": ({ $0.obsidianVaultPath }, { $0.obsidianVaultPath = $1 }, "/tmp/vault")
         case "mirrorFolderPath": ({ $0.mirrorFolderPath }, { $0.mirrorFolderPath = $1 }, "/tmp/mirror")
-        case "webhookURL": ({ $0.webhookURL }, { $0.webhookURL = $1 }, "https://example.com/hook")
         case "saveRootPath": ({ $0.saveRootPath }, { $0.saveRootPath = $1 }, "/tmp/recap-root")
         default: fatalError("unknown string property \(name)")
         }
@@ -172,12 +168,12 @@ import Testing
 
         // Calling it again starts from a clean slate every time (the suite is
         // wiped on each call), regardless of what a previous call mutated.
-        ephemeral.syncsToObsidian = true
-        ephemeral.obsidianVaultPath = "/should/not/persist"
+        ephemeral.mirrorBackupEnabled = true
+        ephemeral.mirrorFolderPath = "/should/not/persist"
 
         let fresh = SettingsStore.ephemeralOnboarded()
         #expect(fresh.hasOnboarded == true)
-        #expect(fresh.syncsToObsidian == false)
-        #expect(fresh.obsidianVaultPath == "")
+        #expect(fresh.mirrorBackupEnabled == false)
+        #expect(fresh.mirrorFolderPath == "")
     }
 }

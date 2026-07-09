@@ -3,33 +3,23 @@ import Testing
 @testable import RecapUI
 
 /// `FloatingIndicatorVisibility.isVisible` — the pure show/hide rule for the
-/// Granola-style floating recording capsule: visible only while recording,
-/// Recap is not the frontmost app, AND the capsule style isn't `.off`.
+/// Granola-style floating recording capsule: visible only while recording
+/// AND Recap is not the frontmost app.
 @Suite struct FloatingIndicatorVisibilityTests {
     @Test func hiddenWhenNotRecordingAndAppInactive() {
-        #expect(!FloatingIndicatorVisibility.isVisible(isRecording: false, isAppActive: false, style: .full))
+        #expect(!FloatingIndicatorVisibility.isVisible(isRecording: false, isAppActive: false))
     }
 
     @Test func hiddenWhenNotRecordingAndAppActive() {
-        #expect(!FloatingIndicatorVisibility.isVisible(isRecording: false, isAppActive: true, style: .full))
+        #expect(!FloatingIndicatorVisibility.isVisible(isRecording: false, isAppActive: true))
     }
 
     @Test func hiddenWhenRecordingButAppActive() {
-        #expect(!FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: true, style: .full))
+        #expect(!FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: true))
     }
 
     @Test func visibleWhenRecordingAndAppInactive() {
-        #expect(FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: false, style: .full))
-    }
-
-    @Test func visibleWithMinimalStyleToo() {
-        #expect(FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: false, style: .minimal))
-    }
-
-    /// The whole point of the `.off` style: never show the capsule, even
-    /// while actively recording and backgrounded.
-    @Test func hiddenWhenStyleIsOffRegardlessOfOtherState() {
-        #expect(!FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: false, style: .off))
+        #expect(FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: false))
     }
 
     /// Paused recordings are still "recording" per `MeetingSessionStore` —
@@ -39,7 +29,7 @@ import Testing
         // isPaused is not a parameter of isVisible at all — this documents
         // that the caller must pass isRecording (activeRecord != nil), not
         // some pause-aware derivative.
-        #expect(FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: false, style: .full))
+        #expect(FloatingIndicatorVisibility.isVisible(isRecording: true, isAppActive: false))
     }
 }
 

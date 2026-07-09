@@ -40,12 +40,10 @@ public final class QueueStore {
         let processor = MeetingProcessor(
             storage: storage,
             engineProvider: { @Sendable in
-                let language = await settingsSnapshot().transcriptionLanguage
-                return await models.activeEngine(language: language)
+                await models.activeEngine()
             },
             diarizerProvider: { @Sendable in
-                let enabled = await settingsSnapshot().labelsSpeakers
-                return enabled ? diarizer : nil
+                diarizer
             },
             enhancer: enhancer,
             settings: settingsSnapshot,
@@ -86,7 +84,7 @@ public final class QueueStore {
                 }
             }
         )
-        let queue = ProcessingQueue(executor: processor, pausesOnBattery: settings.pausesOnBattery)
+        let queue = ProcessingQueue(executor: processor)
         self.queue = queue
         Task { await queueBox.set(queue) }
 
@@ -127,6 +125,17 @@ public final class QueueStore {
         enqueueTranscription(for: record.meeting.id)
     }
 
+    /// Starts transcription for a `.recovered` meeting (crash-salvaged audio
+    /// that stayed parked at launch instead of auto-requeuing) — the user's
+    /// explicit "Transcribe" action. Same shape as `retranscribe`: guards on
+    /// library membership so a stale action can't resurrect a trashed
+    /// meeting, resets status to `.queued`, then enqueues.
+    public func transcribeRecovered(_ record: MeetingRecord, in library: LibraryStore) {
+        guard library.record(for: record.meeting.id) != nil else { return }
+        library.updateStatus(record.meeting.id, to: .queued)
+        enqueueTranscription(for: record.meeting.id)
+    }
+
     /// Re-runs only the enhancement stage for a meeting that already has a
     /// transcript. Its existing issue remains visible until the retry
     /// succeeds, so users never lose the explanation mid-recovery.
@@ -161,30 +170,30 @@ public final class QueueStore {
         }
     }
 
-    /// Persistence is the caller's responsibility (`SettingsStore.pausesOnBattery`'s
-    /// `didSet` already writes UserDefaults) — this only pushes the live value
-    /// into the running queue actor.
-    public func setPausesOnBattery(_ value: Bool) {
-        Task { await queue.setPausesOnBattery(value) }
-    }
-
     /// Meetings that died mid-pipeline (app quit or crash) resume from where
     /// their files left off: with a transcript on disk only enhancement is
-    /// missing; otherwise transcription restarts.
+    /// missing; otherwise transcription restarts. A `.recovered` meeting
+    /// (crash-salvaged audio) is the one exception — it stays `.recovered`
+    /// until the user explicitly presses Transcribe (`transcribeRecovered`),
+    /// rather than silently auto-requeuing. Decision logic lives in the pure
+    /// `LaunchRecovery.action(for:)`.
     private func recoverUnfinishedWork(in library: LibraryStore) {
         for record in library.meetings {
-            switch record.meeting.status {
-            case .queued, .transcribing, .recording, .recovered:
+            switch LaunchRecovery.action(for: record.meeting.status) {
+            case .requeueTranscribe:
                 library.updateStatus(record.meeting.id, to: .queued)
                 enqueueTranscription(for: record.meeting.id)
-            case .enhancing:
+            case .requeueEnhance:
                 library.updateStatus(record.meeting.id, to: .queued)
                 Task { await queue.enqueue(ProcessingJob(kind: .enhance, meetingID: record.meeting.id)) }
-            case .error("No speech model installed"):
+            case .markRecovered:
+                // Already `.recovered` — nothing to do until the user acts.
+                break
+            case .migrateToNeedsModel:
                 // Migrate meetings saved before `.needsModel` existed so they
                 // become retryable instead of a permanent dead end.
                 library.updateStatus(record.meeting.id, to: .needsModel)
-            case .needsModel, .ready, .error:
+            case .none:
                 // `.needsModel` is retried by `retryMeetingsAwaitingModel` once a
                 // model is active; genuine errors stay put.
                 break

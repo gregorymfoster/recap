@@ -21,6 +21,7 @@ public struct MeetingRecord: Equatable, Sendable, Identifiable {
     public var transcriptURL: URL { folderURL.appendingPathComponent("transcript.json") }
     public var metadataURL: URL { folderURL.appendingPathComponent("meeting.json") }
     public var speakerNamesURL: URL { folderURL.appendingPathComponent("speakers.json") }
+    public var timedNotesURL: URL { folderURL.appendingPathComponent("notes.json") }
 }
 
 /// Reads and writes the user-visible meeting library on disk.
@@ -178,6 +179,23 @@ public struct LibraryStorage: Sendable {
         guard FileManager.default.fileExists(atPath: record.speakerNamesURL.path) else { return SpeakerNames() }
         return try logOnFailure("loadSpeakerNames") {
             try Self.decoder.decode(SpeakerNames.self, from: Data(contentsOf: record.speakerNamesURL))
+        }
+    }
+
+    /// Timestamped notes pinned to offsets into the meeting's timeline (see
+    /// `TimedNote`). Mirrors `saveSpeakerNames`/`loadSpeakerNames`'s pattern:
+    /// atomic write, empty-when-absent read (a meeting with no timed notes
+    /// yet is the common case, not an error).
+    public func saveTimedNotes(_ notes: [TimedNote], in record: MeetingRecord) throws {
+        try logOnFailure("saveTimedNotes") {
+            try Self.encoder.encode(notes).write(to: record.timedNotesURL, options: .atomic)
+        }
+    }
+
+    public func loadTimedNotes(in record: MeetingRecord) throws -> [TimedNote] {
+        guard FileManager.default.fileExists(atPath: record.timedNotesURL.path) else { return [] }
+        return try logOnFailure("loadTimedNotes") {
+            try Self.decoder.decode([TimedNote].self, from: Data(contentsOf: record.timedNotesURL))
         }
     }
 

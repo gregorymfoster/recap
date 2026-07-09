@@ -51,7 +51,7 @@ public struct PowerState: Equatable, Sendable {
 }
 
 /// FIFO background-processing queue: one job at a time at utility priority,
-/// pausing on battery (configurable), Low Power Mode, thermal pressure, or
+/// unconditionally pausing on battery, Low Power Mode, thermal pressure, or
 /// manual request. In-flight jobs finish; pausing gates the *next* job.
 public actor ProcessingQueue {
     private var pending: [ProcessingJob] = []
@@ -61,15 +61,13 @@ public actor ProcessingQueue {
 
     private var manuallyPaused = false
     private var powerState = PowerState()
-    public var pausesOnBattery = true
 
     private let executor: JobExecutor
     private var observer: (@Sendable (QueueSnapshot) -> Void)?
     private var lastLoggedPauseReason: String??
 
-    public init(executor: JobExecutor, pausesOnBattery: Bool = true) {
+    public init(executor: JobExecutor) {
         self.executor = executor
-        self.pausesOnBattery = pausesOnBattery
         // Seeded to "not paused" so the initial notify() (queue starts
         // unpaused) doesn't log a spurious "resumed".
         self.lastLoggedPauseReason = .some(nil)
@@ -79,11 +77,6 @@ public actor ProcessingQueue {
     public func setObserver(_ observer: @escaping @Sendable (QueueSnapshot) -> Void) {
         self.observer = observer
         notify()
-    }
-
-    public func setPausesOnBattery(_ value: Bool) {
-        pausesOnBattery = value
-        pump()
     }
 
     public func enqueue(_ job: ProcessingJob) {
@@ -141,7 +134,7 @@ public actor ProcessingQueue {
         if manuallyPaused { return "paused" }
         if powerState.thermalPressure { return "paused — Mac is warm" }
         if powerState.lowPowerMode { return "paused — Low Power Mode" }
-        if pausesOnBattery, powerState.onBattery { return "paused — on battery" }
+        if powerState.onBattery { return "paused — on battery" }
         return nil
     }
 

@@ -319,6 +319,50 @@ private actor ChangeCollector {
         #expect(store.loadSpeakerNames(for: record).isEmpty)
     }
 
+    // MARK: addTimedNote / timedNotes
+
+    @Test func addTimedNotePersistsAndPostsChange() async throws {
+        let (store, storage, changeBus) = makeStore()
+        let record = try #require(store.startNewMeeting(title: "Meeting"))
+        let collector = ChangeCollector.make(changeBus)
+
+        #expect(store.timedNotes(for: record).isEmpty)
+
+        store.addTimedNote("Follow up with Sam", at: 42, in: record)
+
+        let notes = store.timedNotes(for: record)
+        #expect(notes.map(\.text) == ["Follow up with Sam"])
+        #expect(notes.map(\.offset) == [42])
+        let onDisk = try storage.loadTimedNotes(in: record)
+        #expect(onDisk.map(\.text) == ["Follow up with Sam"])
+
+        let changes = await collector.waitForCount(1)
+        #expect(changes == [.meetingChanged(record.meeting.id)])
+    }
+
+    @Test func addTimedNoteTwiceAppendsBothInOffsetOrder() throws {
+        let (store, _, _) = makeStore()
+        let record = try #require(store.startNewMeeting(title: "Meeting"))
+
+        store.addTimedNote("First", at: 5, in: record)
+        store.addTimedNote("Second", at: 90, in: record)
+
+        #expect(store.timedNotes(for: record).map(\.text) == ["First", "Second"])
+    }
+
+    @Test func timedNotesCachesAfterFirstDiskLoad() throws {
+        let (store, storage, _) = makeStore()
+        let record = try #require(store.startNewMeeting(title: "Meeting"))
+
+        // First read populates the cache from disk (empty — nothing saved yet).
+        #expect(store.timedNotes(for: record).isEmpty)
+
+        // Writing to disk directly, bypassing the store, must not appear —
+        // proves the second read comes from the cache, not a fresh disk read.
+        try storage.saveTimedNotes([TimedNote(offset: 1, text: "Written directly")], in: record)
+        #expect(store.timedNotes(for: record).isEmpty)
+    }
+
     // MARK: rename
 
     @Test func renamePersistsNewTitleAndPostsChange() async throws {

@@ -222,17 +222,17 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
     /// Blocks until `stores`'s change-bus consumer `Task` (spawned in
     /// `init`) has demonstrably subscribed, by posting a throwaway change
     /// for an unrelated meeting and waiting for its mirror-backup export to
-    /// land in a scratch directory — then cleans up. Deliberately uses the
-    /// *mirror* toggle rather than Obsidian so it never shares mutable
-    /// settings state with a caller that's mid-way through asserting
-    /// Obsidian export timing: `runEnabledExporters` reads `settings` live
-    /// at fire time, so flipping a shared `obsidianVaultPath` back and forth
-    /// while a canary debounce Task might still be in flight is itself a
-    /// race. Tests that assert timing around a real post (e.g. "no export
-    /// before the debounce window elapses") need the consumer warmed up
-    /// first without the warm-up racing the assertion; a fixed sleep isn't
-    /// reliable under CI-runner contention where the consumer's Task may not
-    /// run its first loop iteration for a while.
+    /// land in a scratch directory — then cleans up (resets the mirror
+    /// toggle) so it doesn't share mutable settings state with a caller
+    /// that's mid-way through asserting export timing at a different
+    /// destination: `runEnabledExporters` reads `settings` live at fire time,
+    /// so flipping a shared `mirrorFolderPath` back and forth while a canary
+    /// debounce Task might still be in flight is itself a race. Tests that
+    /// assert timing around a real post (e.g. "no export before the debounce
+    /// window elapses") need the consumer warmed up first without the
+    /// warm-up racing the assertion; a fixed sleep isn't reliable under
+    /// CI-runner contention where the consumer's Task may not run its first
+    /// loop iteration for a while.
     private func waitForConsumerSubscribed(
         stores: AppStores, changeBus: LibraryChangeBus, storage: LibraryStorage, settings: SettingsStore
     ) async throws {
@@ -257,14 +257,14 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
 
     // MARK: 1. Change-bus debounced export
 
-    @Test func changeBusPostDebouncesThenExportsToObsidian() async throws {
-        let vaultDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ObsidianVault-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: vaultDir) }
+    @Test func changeBusPostDebouncesThenExportsMirrorBackup() async throws {
+        let mirrorDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MirrorBackup-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: mirrorDir) }
 
         let (stores, storage, settings, changeBus) = makeStores()
-        settings.syncsToObsidian = true
-        settings.obsidianVaultPath = vaultDir.path
+        settings.mirrorBackupEnabled = true
+        settings.mirrorFolderPath = mirrorDir.path
 
         let record = try makeReadyMeeting(in: storage)
         _ = stores // keep the consumer task alive via the strong reference below
@@ -279,15 +279,15 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
         // time out; once the consumer is subscribed, one of these posts is
         // guaranteed to be seen.
         let exported = try await withRetriedPost(
-            changeBus, .meetingChanged(record.meeting.id), until: vaultDir
+            changeBus, .meetingChanged(record.meeting.id), until: mirrorDir
         )
         #expect(!exported.isEmpty)
     }
 
     @Test func rapidChangeBusPostsCoalesceIntoOneExportWindow() async throws {
-        let vaultDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ObsidianVault-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: vaultDir) }
+        let mirrorDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MirrorBackup-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: mirrorDir) }
 
         // A generous debounce (vs. the 50ms used elsewhere) gives wide
         // margins around the mid-sequence checks below, so CPU contention
@@ -298,15 +298,15 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
         let record = try makeReadyMeeting(in: storage)
         _ = stores // keep the consumer task alive via the strong reference
 
-        // Warm up the consumer against a throwaway mirror destination first
-        // — before turning on Obsidian sync at vaultDir below — so the
-        // timed sequence isn't itself racing the consumer's Task getting
-        // scheduled, and so the warm-up's own export can't land in vaultDir
-        // (see waitForConsumerSubscribed).
+        // Warm up the consumer against a throwaway destination first — before
+        // pointing the mirror at mirrorDir below — so the timed sequence
+        // isn't itself racing the consumer's Task getting scheduled, and so
+        // the warm-up's own export can't land in mirrorDir (see
+        // waitForConsumerSubscribed).
         try await waitForConsumerSubscribed(stores: stores, changeBus: changeBus, storage: storage, settings: settings)
 
-        settings.syncsToObsidian = true
-        settings.obsidianVaultPath = vaultDir.path
+        settings.mirrorBackupEnabled = true
+        settings.mirrorFolderPath = mirrorDir.path
 
         changeBus.post(.meetingChanged(record.meeting.id))
         // Posted again well inside the debounce window: this should cancel
@@ -317,48 +317,46 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
         // Checked at roughly half the (restarted) window — comfortably
         // before it can have elapsed even under heavy scheduling jitter.
         try await Task.sleep(for: debounce / 2)
-        #expect(!FileManager.default.fileExists(atPath: vaultDir.path))
+        #expect(!FileManager.default.fileExists(atPath: mirrorDir.path))
 
-        let exported = try await waitForNonEmptyDirectory(at: vaultDir)
+        let exported = try await waitForNonEmptyDirectory(at: mirrorDir)
         #expect(exported.count == 1)
     }
 
-    // MARK: 2. exportAllReadyMeetingsToObsidian backfill
+    // MARK: 2. backfillMirrorBackup only exports ready meetings
 
-    @Test func exportAllReadyMeetingsToObsidianExportsOnlyReadyOnes() async throws {
-        let vaultDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ObsidianVault-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: vaultDir) }
+    @Test func backfillMirrorBackupExportsOnlyReadyOnes() async throws {
+        let mirrorDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MirrorBackup-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: mirrorDir) }
 
         let (stores, storage, settings, _) = makeStores()
-        settings.syncsToObsidian = true
-        settings.obsidianVaultPath = vaultDir.path
+        settings.mirrorBackupEnabled = true
+        settings.mirrorFolderPath = mirrorDir.path
 
         _ = try storage.create(Meeting(title: "Ready one", date: .now, status: .ready))
         _ = try storage.create(Meeting(title: "Ready two", date: .now, status: .ready))
         _ = try storage.create(Meeting(title: "Still recording", date: .now, status: .recording))
         stores.library.reload()
 
-        stores.exportAllReadyMeetingsToObsidian()
+        stores.backfillMirrorBackup()
 
-        let exported = try await waitForDirectory(at: vaultDir) { $0.count == 2 }
+        let exported = try await waitForDirectory(at: mirrorDir) { $0.count == 2 }
         #expect(exported.count == 2)
     }
 
-    @Test func exportAllReadyMeetingsToObsidianNoOpWhenDisabledOrPathEmpty() async throws {
+    @Test func backfillMirrorBackupNoOpWhenDisabledOrPathEmpty() async throws {
         let (stores, storage, settings, _) = makeStores()
-        settings.syncsToObsidian = false
-        settings.obsidianVaultPath = ""
+        settings.mirrorBackupEnabled = false
+        settings.mirrorFolderPath = ""
         _ = try storage.create(Meeting(title: "Ready one", date: .now, status: .ready))
         stores.library.reload()
 
-        // Should not crash and should not attempt any export (no vault path
+        // Should not crash and should not attempt any export (no folder path
         // to check — absence of a crash and immediate return is the contract).
-        stores.exportAllReadyMeetingsToObsidian()
+        stores.backfillMirrorBackup()
         try await Task.sleep(for: .milliseconds(100))
     }
-
-    // MARK: 3. backfillMirrorBackup
 
     @Test func backfillMirrorBackupMirrorsReadyMeetings() async throws {
         let mirrorDir = FileManager.default.temporaryDirectory
