@@ -2,19 +2,6 @@ import Foundation
 import Observation
 import RecapCore
 
-/// Aggregate state of the background processing queue, for the sidebar widget.
-public struct QueueSummary: Equatable, Sendable {
-    public var jobCount: Int
-    public var progress: Double
-    public var pauseReason: String?
-
-    public init(jobCount: Int, progress: Double, pauseReason: String? = nil) {
-        self.jobCount = jobCount
-        self.progress = progress
-        self.pauseReason = pauseReason
-    }
-}
-
 /// Library list ordering. Persisted to UserDefaults — the user's chosen sort
 /// should survive a relaunch, unlike the filter (session-only).
 public enum LibrarySort: String, CaseIterable, Sendable {
@@ -57,7 +44,6 @@ public struct LibraryFilter: Equatable, Sendable {
 public final class LibraryStore {
     public private(set) var meetings: [MeetingRecord] = []
     public var selectedMeetingID: UUID?
-    public var queueSummary: QueueSummary?
 
     public var sort: LibrarySort {
         didSet { defaults?.set(sort.rawValue, forKey: Self.sortKey) }
@@ -103,7 +89,7 @@ public final class LibraryStore {
 
     /// Fixture store for previews and early UI work.
     public init(
-        fixtures: [MeetingRecord], queueSummary: QueueSummary? = nil,
+        fixtures: [MeetingRecord],
         transcripts: [UUID: Transcript] = [:],
         notes: [UUID: String] = [:],
         enhancedNotes: [UUID: String] = [:],
@@ -116,7 +102,6 @@ public final class LibraryStore {
         self.defaults = nil
         self.sort = .newest
         self.meetings = fixtures
-        self.queueSummary = queueSummary
         self.fixtureTranscripts = transcripts
         self.fixtureNotes = notes
         self.fixtureEnhancedNotes = enhancedNotes

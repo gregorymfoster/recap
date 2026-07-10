@@ -36,17 +36,12 @@ extension View {
 /// App-global anchors used across features. Per-feature IDs belong in an
 /// `AXID+<Feature>.swift` file inside that feature's folder instead.
 extension AXID {
-    /// The main sidebar navigation list (`Sidebar`).
-    public static let sidebar = AXID("sidebar")
-
     /// The Library screen's meeting list container (`LibraryView`).
     public static let libraryList = AXID("library-list")
 
     /// The Library toolbar's search entry point, which opens the ⌘K search
     /// overlay (`LibraryView.searchField`).
     public static let searchField = AXID("search-field")
-    /// Sidebar's Models navigation row.
-    public static let sidebarModels = AXID("sidebar-models")
 
     /// The menu bar extra's popover content root (`MenuBarContent`).
     public static let menuBarContent = AXID("menu-bar-content")

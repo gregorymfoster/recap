@@ -4,6 +4,7 @@ import SwiftUI
 /// ⌘K full-text search over the whole library, Spotlight-style.
 struct SearchOverlay: View {
     @Environment(LibraryStore.self) private var library
+    @Environment(AppRouter.self) private var router
     @Binding var isPresented: Bool
     /// Prefills the field when the overlay first appears — set by
     /// `-open search:<query>` (`LaunchRouteApplier`/`RootView`). Only applied
@@ -127,6 +128,7 @@ struct SearchOverlay: View {
     private func open(hitAt index: Int) {
         guard hits.indices.contains(index) else { return }
         library.selectedMeetingID = hits[index].meetingID
+        router.screen = .detail(meetingID: hits[index].meetingID)
         isPresented = false
     }
 }
@@ -186,6 +188,7 @@ enum SearchHitPresentation {
 #Preview("Light") {
     SearchOverlay(isPresented: .constant(true))
         .environment(LibraryStore.fixture())
+        .environment(AppRouter())
         .padding(40)
         .background(Tokens.subtleBackground)
 }
@@ -193,6 +196,7 @@ enum SearchHitPresentation {
 #Preview("Dark") {
     SearchOverlay(isPresented: .constant(true))
         .environment(LibraryStore.fixture())
+        .environment(AppRouter())
         .padding(40)
         .background(Tokens.subtleBackground)
         .preferredColorScheme(.dark)

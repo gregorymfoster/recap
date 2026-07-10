@@ -493,11 +493,11 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
 
     // MARK: 5. showMeeting
 
-    @Test func showMeetingRoutesSectionAndSelection() throws {
+    @Test func showMeetingRoutesToDetailScreenAndSelection() throws {
         let (stores, _, _, _) = makeStores()
         let id = UUID()
         stores.showMeeting(id)
-        #expect(stores.router.section == .library)
+        #expect(stores.router.screen == .detail(meetingID: id))
         #expect(stores.library.selectedMeetingID == id)
     }
 

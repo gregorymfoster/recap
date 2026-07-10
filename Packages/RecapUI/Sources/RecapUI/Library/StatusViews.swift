@@ -87,7 +87,7 @@ struct MeetingStatusView: View {
         if let onInstallModel {
             Button(action: onInstallModel) { label }
                 .buttonStyle(.plain)
-                .help("No speech model is installed yet. Click to open Models and download one — this meeting transcribes automatically once it's ready.")
+                .help("No speech model is installed yet. Click to retry setup — this meeting transcribes automatically once a model is ready.")
                 .axID(.rowInstallModelButton)
         } else {
             label

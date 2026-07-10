@@ -105,7 +105,11 @@ struct LibraryView: View {
             }
         }
         ToolbarItem(placement: .primaryAction) {
-            recordButton
+            if session.isRecording {
+                recordingIndicatorButton
+            } else {
+                recordButton
+            }
         }
     }
 
@@ -166,6 +170,31 @@ struct LibraryView: View {
         .buttonStyle(.plain)
         .keyboardShortcut("n", modifiers: .command)
         .axID(.libraryRecordButton)
+    }
+
+    /// Swapped in for `recordButton` while a recording is in progress
+    /// (design note: recording now lives on its own full-window screen —
+    /// `router.screen == .recording` — so navigating back to the Library
+    /// while it's running needs a quiet way back in). Tapping it returns to
+    /// the recording screen; the docked `RecordingPill` overlay stays the
+    /// actual pause/stop control everywhere, including here.
+    private var recordingIndicatorButton: some View {
+        Button {
+            router.screen = .recording
+        } label: {
+            HStack(spacing: 7) {
+                Circle().fill(Tokens.recordRed).frame(width: 7, height: 7)
+                Text(session.menuBarElapsedLabel.map { "Recording · \($0)" } ?? "Recording")
+                    .font(.system(size: 12.5, weight: .semibold))
+            }
+            .foregroundStyle(Tokens.textPrimary)
+            .padding(.horizontal, 14)
+            .frame(height: 28)
+            .background(Tokens.chipBackground, in: Capsule())
+            .overlay(Capsule().stroke(Tokens.hairline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .axID(.libraryRecordingIndicatorButton)
     }
 
     private var sortFilterMenu: some View {
@@ -333,19 +362,36 @@ struct LibraryView: View {
     }
 
     private func row(for record: MeetingRecord) -> some View {
-        MeetingRow(record: record, onInstallModel: { router.section = .models })
+        // The manual Models screen is gone — model install/selection is now
+        // fully automatic (`TranscriptionSetupStore`, driven by the
+        // transcription-quality preference). Tapping the chip just re-kicks
+        // setup rather than navigating anywhere.
+        MeetingRow(record: record, onInstallModel: { stores?.setup.retry() })
             .contentShape(Rectangle())
-            .onTapGesture { library.selectedMeetingID = record.meeting.id }
+            .onTapGesture { openMeeting(record) }
             .contextMenu {
                 rowContextMenu(for: record)
             }
             .axID(.meetingRow(record.meeting.id.uuidString))
     }
 
+    /// Routes to the meeting's screen: the `.recording` placeholder when it's
+    /// the live recording, otherwise its `.detail` screen. `selectedMeetingID`
+    /// is kept in sync because `TranscriptPane` (pinned API) still reads it
+    /// for per-meeting transcription progress.
+    private func openMeeting(_ record: MeetingRecord) {
+        library.selectedMeetingID = record.meeting.id
+        if session.activeRecord?.meeting.id == record.meeting.id {
+            router.screen = .recording
+        } else {
+            router.screen = .detail(meetingID: record.meeting.id)
+        }
+    }
+
     @ViewBuilder
     private func rowContextMenu(for record: MeetingRecord) -> some View {
         Button("Open") {
-            library.selectedMeetingID = record.meeting.id
+            openMeeting(record)
         }
         .axID(.libraryRowOpen)
         Button("Copy notes as Markdown") {

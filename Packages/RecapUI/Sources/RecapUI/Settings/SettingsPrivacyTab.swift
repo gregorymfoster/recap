@@ -179,9 +179,7 @@ struct SettingsPrivacyTab: View {
     }
 
     private func openMeeting(_ id: UUID) {
-        guard let stores else { return }
-        stores.router.section = .library
-        stores.library.selectedMeetingID = id
+        stores?.showMeeting(id)
     }
 
     private var systemAudioStatus: PermissionStatus {
