@@ -13,9 +13,10 @@ public enum LaunchRouteAction: Equatable, Sendable {
     case showLibrary
     /// Select the Library section and open one meeting.
     case selectMeeting(id: String)
-    /// Open the Settings window, optionally preselecting a tab. `tab == nil`
-    /// when the route didn't name one, or named one that doesn't exist.
-    case openSettings(tab: SettingsTab?)
+    /// Open the Settings window, optionally preselecting a section. `section
+    /// == nil` when the route didn't name a tab, or named one that doesn't
+    /// map to a section on the one-page Settings surface.
+    case openSettings(section: AppRouter.SettingsSection?)
     /// Open the ⌘K search overlay prefilled with `query` and focus it.
     case openSearch(query: String)
 
@@ -40,22 +41,11 @@ public enum LaunchRouteAction: Equatable, Sendable {
             }
             return [.showLibrary]
         case .settings(tab: let rawTab):
-            return [.openSettings(tab: rawTab.flatMap(SettingsTab.init(rawValue:)))]
+            return [.openSettings(section: AppRouter.SettingsSection(routeTabName: rawTab))]
         case .search(query: let query):
             return [.openSearch(query: query)]
         }
     }
-}
-
-/// Which Settings tab to preselect. Raw values are the `-open settings/<tab>`
-/// route's tab names (lowercase, matching the tab labels) — see
-/// `SettingsWindowView`'s `TabView(selection:)`.
-public enum SettingsTab: String, Equatable, Sendable, CaseIterable {
-    case general
-    case recording
-    case calendar
-    case sync
-    case privacy
 }
 
 /// Single-shot application of `-open <route>` to a `LibraryStore` id lookup,

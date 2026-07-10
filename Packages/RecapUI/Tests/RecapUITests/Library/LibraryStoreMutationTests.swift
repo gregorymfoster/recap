@@ -236,33 +236,6 @@ private actor ChangeCollector {
         #expect(updated.meeting.updatedAt != nil)
     }
 
-    // MARK: setPreferredNotesView
-
-    @Test func setPreferredNotesViewPersistsChoiceAndPostsChange() async throws {
-        let (store, storage, changeBus) = makeStore()
-        let record = try #require(store.startNewMeeting(title: "Meeting"))
-        let collector = ChangeCollector.make(changeBus)
-
-        store.setPreferredNotesView(.original, for: record.meeting.id)
-
-        #expect(store.record(for: record.meeting.id)?.meeting.preferredNotesView == .original)
-        let onDisk = try #require(try storage.loadAll().first { $0.meeting.id == record.meeting.id })
-        #expect(onDisk.meeting.preferredNotesView == .original)
-
-        let changes = await collector.waitForCount(1)
-        #expect(changes == [.meetingChanged(record.meeting.id)])
-    }
-
-    @Test func setPreferredNotesViewNilClearsStoredPreference() throws {
-        let (store, _, _) = makeStore()
-        let record = try #require(store.startNewMeeting(title: "Meeting"))
-        store.setPreferredNotesView(.original, for: record.meeting.id)
-
-        store.setPreferredNotesView(nil, for: record.meeting.id)
-
-        #expect(store.record(for: record.meeting.id)?.meeting.preferredNotesView == nil)
-    }
-
     // MARK: updateSubtitle
 
     @Test func updateSubtitlePersistsAndPostsChange() async throws {

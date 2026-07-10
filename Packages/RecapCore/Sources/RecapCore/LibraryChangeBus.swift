@@ -12,8 +12,8 @@ public enum LibraryChange: Sendable {
 /// Fans out library changes to any number of independent subscribers.
 ///
 /// `LibraryStore` posts here after every persisted change; consumers —
-/// today's folder-mirror/Obsidian re-export task, tomorrow's CloudKit sync
-/// engine — each get their own `AsyncStream` and see every change, not just
+/// today's folder-mirror backup task, tomorrow's CloudKit sync engine —
+/// each get their own `AsyncStream` and see every change, not just
 /// the first subscriber. This is the single hook every mirror/sync consumer
 /// should subscribe to instead of only hooking processing completion, which
 /// misses later notes edits.

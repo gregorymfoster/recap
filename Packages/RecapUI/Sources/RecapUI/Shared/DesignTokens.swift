@@ -123,10 +123,9 @@ public enum Tokens {
 
     // MARK: Shadows
 
-    /// Drop shadow used behind the session capsule. Following
-    /// `RecordingPill`'s pattern (a plain `.shadow` modifier, since the
-    /// capsule — unlike `FloatingIndicator`'s `NSPanel` — isn't clipped by a
-    /// window boundary that would cut the shadow off).
+    /// Drop shadow used behind the session capsule — a plain `.shadow`
+    /// modifier, since the capsule (unlike `FloatingIndicator`'s `NSPanel`)
+    /// isn't clipped by a window boundary that would cut the shadow off.
     public static func capsuleShadow<V: View>(_ view: V) -> some View {
         view.shadow(color: .black.opacity(0.45), radius: 32, y: 12)
     }

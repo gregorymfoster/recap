@@ -7,8 +7,8 @@ RecapCore, RecapAudio, RecapTranscription, and RecapEnhancement. Keep logic in s
 - `AppStores.swift` — composition root: app-lifetime store graph, constructed once by the App
   struct; wires per-subsystem coordinators (`RecordingController`, `ImportCoordinator`,
   `AutoRecordCoordinator` — home of the `MeetingEventWatching` seam over `CalendarWatcher` —
-  `ObsidianExportCoordinator`/`BackupMirrorCoordinator`, `ChangeBusConsumer`) and keeps thin
-  forwarders for their pre-decomposition entry points (`startRecording()` etc.).
+  `BackupStatusStore`, `ChangeBusConsumer`) and keeps thin forwarders for their
+  pre-decomposition entry points (`startRecording()` etc.).
 - `LibraryStore.swift` — meeting list state; owns fixture data for `-fixtures` mode
   (`fixtureTranscripts`/`fixtureNotes`/`fixtureEnhancedNotes` dictionaries, no disk writes).
 - `TranscriptPane.swift`, `LibraryView.swift`, `MeetingDetailView.swift` — largest views (each
@@ -29,15 +29,19 @@ usually; use one for iterating on a single store, e.g. `--filter LibraryStore`.
 `Sources/RecapUI/` and `Tests/RecapUITests/` are organized into matching feature folders
 (SwiftPM globs `Sources/**`, so this is a pure layout convention, not a module boundary):
 
-- `App/` — app-lifetime store graph, root view, onboarding, update/completion notifications.
-- `Library/` — meeting list, meeting detail, transcript pane, notes, search, playback.
-- `Queue/` — processing queue UI and processor settings snapshot.
-- `Recording/` — active recording session, pill, floating capsule, preflight checks.
+- `App/` — app-lifetime store graph, root view + router, first-run onboarding (`FirstRunView`),
+  launch configuration/routes, update/completion notifications.
+- `Library/` — meeting list (footer, next-meeting banner), meeting detail (summary disclosure),
+  transcript pane, notes, search.
+- `Queue/` — processing queue store and processor settings snapshot (no views of its own).
+- `Recording/` — active recording session, full-window `RecordingView`, `SessionCapsule`,
+  floating background capsule, preflight checks.
 - `Calendar/` — calendar watching, upcoming meetings, meeting-start nudge.
 - `Import/` — audio file import.
 - `MenuBar/` — menu bar extra popover content.
-- `Settings/` — settings store, all Settings tabs, permissions, model manager, onboarding helpers.
-- `Fixtures/` — synthetic audio for `-fixtures` mode.
+- `Export/` — folder-mirror backup status store.
+- `Settings/` — settings store, the one-page Settings window, permissions, launch at login.
+- `Fixtures/` — fixture scenarios + synthetic audio for `-fixtures` mode.
 - `Shared/` — design tokens, toasts, global hotkey, small reusable views.
 
 ## Gotchas
@@ -49,7 +53,8 @@ usually; use one for iterating on a single store, e.g. `--filter LibraryStore`.
   processing queue; `-show-menubar-content` (with `-fixtures`) exposes `MenuBarView`'s popover
   content in a screenshot-able window.
 - `-fixtures <scenario>` selects a named graph from `Fixtures/FixtureScenarios.swift`
-  (`default`/`empty`/`busy`/`processing`/`error`; unknown names log a warning and fall back to
-  `default`) — `LibraryStore.fixture()` is just `FixtureScenario.default.library` kept as the
-  legacy no-arg entry point every preview/test already calls. See `Fixtures/README.md` for the
-  scenario list.
+  (`default`/`empty`/`firstRunWithAgenda`/`noMeetingsToday`/`busy`/`processing`/`error`/
+  `recording`/`firstRun`/`backupStuck`/`recovered`/`waitingForSetup`/`nextMeetingSoon`; unknown
+  names log a warning and fall back to `default`) — `LibraryStore.fixture()` is just
+  `FixtureScenario.default.library` kept as the legacy no-arg entry point every preview/test
+  already calls. See `Fixtures/README.md` for the scenario list.

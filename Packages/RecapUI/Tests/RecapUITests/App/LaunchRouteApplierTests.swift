@@ -27,25 +27,32 @@ struct LaunchRouteActionTests {
         #expect(actions == [.showLibrary])
     }
 
-    @Test func settingsWithNoTabOpensSettingsWithNilTab() {
+    @Test func settingsWithNoTabOpensSettingsWithNilSection() {
         let actions = LaunchRouteAction.actions(for: .settings(tab: nil), resolveMeetingID: { _ in nil })
-        #expect(actions == [.openSettings(tab: nil)])
+        #expect(actions == [.openSettings(section: nil)])
     }
 
-    @Test func settingsWithKnownTabOpensThatTab() {
+    @Test func settingsWithKnownTabOpensMappedSection() {
         let actions = LaunchRouteAction.actions(for: .settings(tab: "recording"), resolveMeetingID: { _ in nil })
-        #expect(actions == [.openSettings(tab: .recording)])
+        #expect(actions == [.openSettings(section: .audio)])
     }
 
-    @Test func settingsWithUnknownTabOpensSettingsWithNilTab() {
+    @Test func settingsWithUnknownTabOpensSettingsWithNilSection() {
         let actions = LaunchRouteAction.actions(for: .settings(tab: "nonexistent"), resolveMeetingID: { _ in nil })
-        #expect(actions == [.openSettings(tab: nil)])
+        #expect(actions == [.openSettings(section: nil)])
     }
 
-    @Test func allSettingsTabNamesResolve() {
-        for tab in SettingsTab.allCases {
-            let actions = LaunchRouteAction.actions(for: .settings(tab: tab.rawValue), resolveMeetingID: { _ in nil })
-            #expect(actions == [.openSettings(tab: tab)])
+    @Test func allLegacyTabNamesMapToASection() {
+        let expected: [String: AppRouter.SettingsSection] = [
+            "general": .audio,
+            "recording": .audio,
+            "calendar": .audio,
+            "privacy": .audio,
+            "sync": .storage,
+        ]
+        for (tab, section) in expected {
+            let actions = LaunchRouteAction.actions(for: .settings(tab: tab), resolveMeetingID: { _ in nil })
+            #expect(actions == [.openSettings(section: section)])
         }
     }
 
@@ -73,7 +80,7 @@ struct LaunchRouteApplierTests {
 
     @Test func appliesSettingsRouteOnce() {
         var applier = LaunchRouteApplier(route: .settings(tab: "sync"))
-        #expect(applier.applyOnce(resolveMeetingID: { _ in nil }) == [.openSettings(tab: .sync)])
+        #expect(applier.applyOnce(resolveMeetingID: { _ in nil }) == [.openSettings(section: .storage)])
         #expect(applier.applyOnce(resolveMeetingID: { _ in nil }) == [])
     }
 
@@ -84,19 +91,19 @@ struct LaunchRouteApplierTests {
     }
 }
 
-@Suite("AppRouter.SettingsSection legacy-tab mapping")
-@MainActor
-struct SettingsSectionLegacyTabTests {
-    @Test func legacyTabsMapToRedesignedSections() {
-        #expect(AppRouter.SettingsSection(legacyTab: .general) == .audio)
-        #expect(AppRouter.SettingsSection(legacyTab: .recording) == .audio)
-        #expect(AppRouter.SettingsSection(legacyTab: .calendar) == .audio)
-        #expect(AppRouter.SettingsSection(legacyTab: .privacy) == .audio)
-        #expect(AppRouter.SettingsSection(legacyTab: .sync) == .storage)
+@Suite("AppRouter.SettingsSection route-tab-name mapping")
+struct SettingsSectionRouteTabNameTests {
+    @Test func legacyTabNamesMapToSections() {
+        #expect(AppRouter.SettingsSection(routeTabName: "general") == .audio)
+        #expect(AppRouter.SettingsSection(routeTabName: "recording") == .audio)
+        #expect(AppRouter.SettingsSection(routeTabName: "calendar") == .audio)
+        #expect(AppRouter.SettingsSection(routeTabName: "privacy") == .audio)
+        #expect(AppRouter.SettingsSection(routeTabName: "sync") == .storage)
     }
 
-    @Test func nilLegacyTabMapsToNil() {
-        #expect(AppRouter.SettingsSection(legacyTab: nil) == nil)
+    @Test func nilOrUnknownTabNameMapsToNil() {
+        #expect(AppRouter.SettingsSection(routeTabName: nil) == nil)
+        #expect(AppRouter.SettingsSection(routeTabName: "nonexistent") == nil)
     }
 }
 

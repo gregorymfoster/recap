@@ -23,13 +23,15 @@ public enum TranscriptionUpdate: Sendable {
     /// Confirmed utterance — will appear in the final transcript.
     case confirmed(Utterance)
     case progress(Double)
-    /// Pipeline health of the live streaming pass — lets the UI show honest
-    /// state instead of a "Listening…" placeholder that never changes.
+    /// Pipeline health of the live streaming pass.
     case status(LiveState)
 }
 
-/// State of the live (streaming) transcription pipeline, surfaced end-to-end
-/// from `WhisperKitEngine.runStreaming` through to the transcript pane header.
+/// State of the live (streaming) transcription pipeline, yielded by
+/// `TranscriptionEngine.transcribe(stream:)` implementations (e.g.
+/// `WhisperKitEngine.runStreaming`). Exercised today by
+/// `transcribe-probe --stream`; no UI currently consumes live transcription
+/// during an active recording.
 public enum LiveState: Equatable, Sendable {
     /// No streaming-capable model is installed at all — the caller never
     /// started a streaming task.
@@ -41,50 +43,6 @@ public enum LiveState: Equatable, Sendable {
     /// The streaming pipeline couldn't start or hit a fatal error. The
     /// post-stop file pass is unaffected and will still produce a transcript.
     case failed(reason: String)
-}
-
-/// Pure reducer turning a stream of `TranscriptionUpdate`s into live-transcript
-/// UI state. Factored out of `MeetingSessionStore` so the state-machine part —
-/// which utterances/partial/liveState result from a given update — is
-/// unit-testable without an actor, a recorder, or mic permission.
-public struct LiveTranscriptState: Equatable, Sendable {
-    public var utterances: [Utterance] = []
-    public var partial: Utterance?
-    public var liveState: LiveState = .noModelInstalled
-    public var lastHeardText: String?
-
-    public init(
-        utterances: [Utterance] = [],
-        partial: Utterance? = nil,
-        liveState: LiveState = .noModelInstalled,
-        lastHeardText: String? = nil
-    ) {
-        self.utterances = utterances
-        self.partial = partial
-        self.liveState = liveState
-        self.lastHeardText = lastHeardText
-    }
-
-    /// Applies one update, returning the next state. `self` is left
-    /// unchanged; call sites re-assign the result.
-    public func applying(_ update: TranscriptionUpdate) -> LiveTranscriptState {
-        var next = self
-        switch update {
-        case .confirmed(let utterance):
-            next.utterances.append(utterance)
-            next.partial = nil
-            if !utterance.text.isEmpty {
-                next.lastHeardText = utterance.text
-            }
-        case .partial(let utterance):
-            next.partial = utterance
-        case .progress:
-            break
-        case .status(let state):
-            next.liveState = state
-        }
-        return next
-    }
 }
 
 /// A speech-to-text engine. Implementations: WhisperKit (v1); Parakeet / Apple SpeechAnalyzer later.

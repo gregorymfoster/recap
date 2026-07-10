@@ -15,9 +15,6 @@ extension AXID {
     /// Recording-header "Stop" button.
     public static let menuBarStopButton = AXID("menu-bar-stop-button")
 
-    /// "Open meeting" row (recording state) — jumps to the active meeting.
-    public static let menuBarOpenMeetingButton = AXID("menu-bar-open-meeting-button")
-
     /// "Open Recap" row (idle state) — activates the main window.
     public static let menuBarOpenAppButton = AXID("menu-bar-open-app-button")
 
@@ -37,7 +34,6 @@ extension AXID {
     /// A single row in the "Recent" section, keyed by the meeting's id.
     public static func menuBarRecentRow(_ id: String) -> AXID { AXID("menu-bar-recent-row-\(id)") }
 
-    /// The menu bar popover's input-device menu (`InputDeviceMenu`,
-    /// Phase 0 scaffolding for the redesigned popover).
+    /// The menu bar popover's input-device menu (`InputDeviceMenu`).
     public static let menuBarDeviceMenu = AXID("menu-bar-device-menu")
 }

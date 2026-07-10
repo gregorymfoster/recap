@@ -181,8 +181,8 @@ struct LibraryView: View {
     /// (design note: recording now lives on its own full-window screen —
     /// `router.screen == .recording` — so navigating back to the Library
     /// while it's running needs a quiet way back in). Tapping it returns to
-    /// the recording screen; the docked `RecordingPill` overlay stays the
-    /// actual pause/stop control everywhere, including here.
+    /// the recording screen, where `SessionCapsule` is the actual
+    /// pause/stop control.
     private var recordingIndicatorButton: some View {
         Button {
             router.screen = .recording

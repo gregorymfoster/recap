@@ -14,7 +14,7 @@ public final class LibraryStore {
     let changeBus: LibraryChangeBus?
     /// Canned transcripts for fixture records (no disk in fixture mode), so
     /// -fixtures runs and screenshot dumps can show the transcript pane —
-    /// avatars, rename affordance, playback follow. Empty in disk-backed mode.
+    /// avatars, rename affordance. Empty in disk-backed mode.
     var fixtureTranscripts: [UUID: Transcript] = [:]
     /// Canned raw notes for fixture records, mirroring `fixtureTranscripts`.
     /// Empty in disk-backed mode.
@@ -143,7 +143,7 @@ public final class LibraryStore {
     }
 
     /// Clears one successfully recovered stage while preserving any unrelated
-    /// issues (for example, a repaired backup must not hide a webhook error).
+    /// issues (for example, a repaired backup must not hide a transcription error).
     public func clearProcessingIssue(_ issue: ProcessingIssue, for id: UUID) {
         guard var record = record(for: id), record.meeting.processingIssues.contains(issue) else { return }
         record.meeting.processingIssues.removeAll { $0 == issue }
@@ -171,14 +171,6 @@ public final class LibraryStore {
     public func updateDuration(_ id: UUID, to duration: TimeInterval) {
         guard var record = record(for: id) else { return }
         record.meeting.duration = duration
-        replace(record)
-    }
-
-    /// Persists the user's explicit Enhanced/My notes choice (design handoff
-    /// v2 §8c) through the same metadata save path as every other mutation.
-    public func setPreferredNotesView(_ preference: NotesViewPreference?, for id: UUID) {
-        guard var record = record(for: id) else { return }
-        record.meeting.preferredNotesView = preference
         replace(record)
     }
 

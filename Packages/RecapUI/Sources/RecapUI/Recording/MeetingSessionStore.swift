@@ -28,22 +28,6 @@ public final class MeetingSessionStore {
     /// running system-audio only — drives the "mic off" indicator in the pill.
     public private(set) var micUnavailable = false
 
-    /// Live transcript state (split view), reduced from `TranscriptionUpdate`s
-    /// by the pure `LiveTranscriptState.applying(_:)`. Provisional — the
-    /// post-stop file pass produces the canonical transcript.
-    private var liveTranscript = LiveTranscriptState()
-
-    public var liveUtterances: [Utterance] { liveTranscript.utterances }
-    public var partialUtterance: Utterance? { liveTranscript.partial }
-
-    /// Health of the live streaming pipeline — drives the transcript pane
-    /// header so "Listening…" never lies about a stalled or missing model.
-    public var liveState: LiveState { liveTranscript.liveState }
-
-    /// The most recent confirmed utterance's text, for the RecordingPill's
-    /// "last heard" snippet — visible even without the main window open.
-    public var lastHeardText: String? { liveTranscript.lastHeardText }
-
     /// True while recording, when the system-audio tap couldn't start —
     /// other meeting participants aren't being captured.
     public private(set) var systemAudioUnavailable = false
@@ -83,7 +67,6 @@ public final class MeetingSessionStore {
     private let requestMicPermission: @MainActor () async -> Bool
     private let probeSystemAudio: @MainActor () async -> SystemAudioProbeResult
     private var levelTask: Task<Void, Never>?
-    private var transcriptTask: Task<Void, Never>?
     private var eventTask: Task<Void, Never>?
 
     /// Elapsed-time string ("12:34") for the menu bar extra's label, updated
@@ -164,11 +147,9 @@ public final class MeetingSessionStore {
         return (outcome, probeResult)
     }
 
-    /// Starts capture; when a transcription engine is available, live
-    /// transcription runs alongside it feeding the split view.
+    /// Starts capture.
     public func start(
         record: MeetingRecord,
-        engine: (any TranscriptionEngine)? = nil,
         includeSystemAudio: Bool = true,
         includeMic: Bool = true,
         preferredInputUID: String? = nil
@@ -188,7 +169,6 @@ public final class MeetingSessionStore {
             systemAudioUnavailable = includeSystemAudio && !recorder.systemAudioActive
             activeRecord = record
             clock = recorder.clock ?? RecordingClock(startedAt: .now)
-            liveTranscript = LiveTranscriptState()
             activeInputDeviceName = recorder.activeInputDeviceName
             refreshMenuBarLabel()
             menuBarLabelTask = Task { [weak self] in
@@ -211,19 +191,6 @@ public final class MeetingSessionStore {
                 for await event in output.events {
                     self?.handle(event)
                 }
-            }
-            if let engine {
-                liveTranscript.liveState = .loadingModel
-                let updates = engine.transcribe(stream: output.chunks)
-                transcriptTask = Task { [weak self] in
-                    for await update in updates {
-                        self?.apply(update)
-                    }
-                }
-            } else {
-                // No streaming-capable model at all — say so plainly instead
-                // of leaving the pane on a "Listening…" placeholder forever.
-                liveTranscript.liveState = .noModelInstalled
             }
         } catch MeetingRecorder.RecorderError.noAudioSource {
             // Belt-and-braces fallback: `preflight(...)` now gates this
@@ -273,10 +240,6 @@ public final class MeetingSessionStore {
         }
     }
 
-    private func apply(_ update: TranscriptionUpdate) {
-        liveTranscript = liveTranscript.applying(update)
-    }
-
     // MARK: Pause / resume
 
     /// Gates capture without tearing anything down. Awaits the recorder (and
@@ -305,8 +268,6 @@ public final class MeetingSessionStore {
         let duration = await recorder.stop()
         levelTask?.cancel()
         levelTask = nil
-        transcriptTask?.cancel()
-        transcriptTask = nil
         eventTask?.cancel()
         eventTask = nil
         menuBarLabelTask?.cancel()
@@ -318,7 +279,6 @@ public final class MeetingSessionStore {
         systemAudioUnavailable = false
         systemAudioStalled = false
         micUnavailable = false
-        liveTranscript = LiveTranscriptState()
         activeInputDeviceName = nil
         return (record, duration)
     }

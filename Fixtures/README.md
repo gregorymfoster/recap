@@ -39,10 +39,16 @@ open <path>/Recap.app --args -fixtures busy
   today — `UpcomingStore` authorized-but-empty, distinct from `empty`'s unauthorized state.
 - `busy` — 20+ meetings spread across many weeks with every status represented, several with
   canned transcripts/notes — exercises list grouping and scroll performance.
-- `processing` — several meetings actively transcribing/queued/enhancing, so the sidebar queue
-  widget renders real in-flight work.
+- `processing` — several meetings actively transcribing/queued/enhancing, so the list's
+  per-row progress states render real in-flight work.
 - `error` — failed and recoverable job states: meetings with `.error` statuses, one
   `.needsModel`, and a paused queue summary with a pause reason.
+- `recording` — a recording mid-flight: `router.screen == .recording`, so the app boots straight
+  into the full-window `RecordingView` with the docked `SessionCapsule` (synthetic zero-hardware
+  recorder, canned waveform levels, a couple of timed notes already saved).
+- `firstRun` — onboarding not yet completed: the `FirstRunView` sheet renders over an empty
+  library, with `TranscriptionSetupStore.phase` forced to a mid-download state so the
+  "setting up transcription" card has something to show.
 - `backupStuck` — the `error` library, with `BackupStatusStore.state` overridden to `.stuck` so
   the Library footer renders its amber "Backup paused" + "Fix…" treatment.
 - `recovered` — a meeting parked at `.recovered` (crash-salvaged audio) sorted to the top of

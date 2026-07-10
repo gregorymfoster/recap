@@ -399,7 +399,7 @@ enum FixtureScenarios {
             record.folderURL = folderURL
         }
         Task { @MainActor in
-            await session.start(record: record, engine: nil, includeSystemAudio: true, includeMic: true)
+            await session.start(record: record, includeSystemAudio: true, includeMic: true)
             session.setLevelsForFixtures([0.2, 0.55, 0.8, 0.35, 0.65, 0.3, 0.9, 0.45, 0.6, 0.25, 0.7, 0.4, 0.55, 0.3, 0.6, 0.35])
             library.addTimedNote("Follow up on Q3 roadmap numbers with Sam", at: 45, in: record)
             library.addTimedNote("Ask Priya about the onboarding usability pass timeline", at: 132, in: record)

@@ -12,12 +12,12 @@ elsewhere are defined here.
 - `Meeting.swift` — the core `Meeting` model.
 - `ProcessingQueue.swift` — serial transcribe/enhance job queue (`ProcessingJob`, one job kind at a time).
 - `LibraryChangeBus.swift` — fan-out `AsyncStream` bus; `LibraryStore` posts here after every
-  persisted change so mirror/sync consumers (folder mirror, Obsidian export, future CloudKit) subscribe once.
+  persisted change so mirror/sync consumers (folder mirror, future CloudKit) subscribe once.
 - `Protocols.swift` — cross-package contracts: `AudioChunk`, `TranscriptionUpdate`, engine protocols
   implemented by RecapTranscription/RecapEnhancement.
 - `SearchIndex.swift` — GRDB-backed full-text search (`SearchHit`).
 - `MeetingDetectionRules.swift` / `MeetingEventDetection.swift` — calendar/call-app meeting detection logic.
-- `FolderMirrorExporter.swift`, `ObsidianExporter.swift`, `WebhookExporter.swift` — `LibraryChangeBus` consumers.
+- `FolderMirrorExporter.swift` — `LibraryChangeBus` consumer.
 
 ## Test
 `swift test --package-path Packages/RecapCore` (or `./Scripts/test.sh --filter LibraryStorage`

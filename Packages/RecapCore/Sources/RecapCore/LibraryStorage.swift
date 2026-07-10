@@ -81,7 +81,7 @@ public struct LibraryStorage: Sendable {
 
     /// Renames a meeting's display title. Only `meeting.json` changes — the
     /// on-disk folder name is fixed at creation time, so existing exports
-    /// (Obsidian, folder-mirror) that reference the folder path stay valid.
+    /// (folder-mirror backups) that reference the folder path stay valid.
     public func rename(_ record: MeetingRecord, to title: String) throws -> MeetingRecord {
         var updated = record
         updated.meeting.title = title

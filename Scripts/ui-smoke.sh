@@ -48,6 +48,19 @@ done
 
 start_time=$(date +%s)
 
+# A locked screen means the window server never realizes new apps' windows —
+# the app launches, runs its event loop, and simply has zero windows forever.
+# That failure is indistinguishable from a real "no window at launch" bug
+# (diagnosed the hard way on 2026-07-10), so fail fast with the actual cause.
+if [[ "$(swift -e 'import Quartz
+let d = CGSessionCopyCurrentDictionary() as? [String: Any]
+print((d?["CGSSessionScreenIsLocked"] as? Int) == 1 ? "locked" : "unlocked")' 2>/dev/null)" == "locked" ]]; then
+  echo "FAIL: the screen is locked — macOS will not create windows for newly launched apps."
+  echo "Unlock the Mac and re-run. (This is a host condition, not an app bug.)"
+  echo '{"ok":false,"found":0,"missing":["screen-locked"],"seconds":0}'
+  exit 1
+fi
+
 AXPROBE_BIN=".build/release/ax-probe"
 echo "── building ax-probe ──"
 if ! swift build -c release --package-path Tools/AXProbe; then

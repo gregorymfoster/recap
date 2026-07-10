@@ -48,10 +48,9 @@ public struct SettingsWindowView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             // `-open settings/<tab>` (`LaunchRouteApplier`) stages a section
-            // on `router.pendingSettingsSection` (mapped from the legacy
-            // `pendingSettingsTab`) and opens this window; consuming it here
-            // (once, then clearing both) means a later manual ⌘, doesn't
-            // keep reapplying a stale launch route.
+            // on `router.pendingSettingsSection` and opens this window;
+            // consuming it here (once, then clearing it) means a later
+            // manual ⌘, doesn't keep reapplying a stale launch route.
             .task {
                 if let pending = router.pendingSettingsSection {
                     withAnimation {
@@ -59,11 +58,12 @@ public struct SettingsWindowView: View {
                     }
                     router.pendingSettingsSection = nil
                 }
-                router.pendingSettingsTab = nil
             }
         }
         .axID(.settingsPage)
-        .frame(width: Self.width)
+        // Fixed height too: the Settings scene's default window height clips
+        // the last group and lets the footnote overlap the backup rows.
+        .frame(width: Self.width, height: 640)
         .navigationTitle("Settings")
     }
 

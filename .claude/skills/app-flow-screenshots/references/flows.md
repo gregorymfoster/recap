@@ -5,6 +5,11 @@ Read this whole file before driving the app. The app under automation is **"Reca
 interactive element worth targeting has a stable AXIdentifier — navigate by identifier,
 never by screen coordinate.
 
+There is no sidebar, no Models screen, and no Settings tabs anymore: the Library list IS
+the whole main window, navigation is push-style (`library-back-button` returns from a
+meeting), Settings is a single fixed-width page, and recording is a full-window screen
+(`recording-view`) with a docked `session-capsule`.
+
 ## Driving toolkit
 
 Build `ax-probe` once per session (`swift build --package-path Tools/AXProbe`), then call
@@ -28,10 +33,11 @@ you didn't get from `launch.sh` in this session.
 
 **Finding identifiers**: `Packages/RecapUI/Sources/RecapUI/**/AXID+*.swift` is the
 authoritative, current source — grep it rather than trusting the specific identifier names
-below if the UI has changed since this doc was written. Dynamic rows (meeting rows, model
-rows, queue rows) are keyed by a stable id suffix, not title or position — get the live
-value with `ax-probe tree --pid "$PID" | grep meeting-row` (or `find`/`grep` for whatever
-prefix you need) rather than hardcoding a UUID, since fixture ids can differ per launch.
+below if the UI has changed since this doc was written. Dynamic rows (meeting rows,
+search hits, menu-bar recent rows) are keyed by a stable id suffix, not title or
+position — get the live value with `ax-probe tree --pid "$PID" | grep meeting-row` (or
+`find`/`grep` for whatever prefix you need) rather than hardcoding a UUID, since fixture
+ids can differ per launch.
 
 **Gotcha — SF Symbols leak as AXIdentifiers.** `Image(systemName:)` views expose their
 symbol name (e.g. `"text.quote"`, `"waveform"`) as their own AXIdentifier when nothing
@@ -79,40 +85,40 @@ Always confirm you're capturing the live one via `ax-probe windows --pid "$PID"`
 reflects current navigation state, e.g. "Weekly standup" once you've opened that meeting)
 rather than assuming index 0.
 
-## Phase A — fixtures instance (`-fixtures`)
+## Phase A — default fixtures instance (`-fixtures`)
 
 Fixture data: 6 meetings ("Design sync — Q3 roadmap" transcribing at 42%,
 "Customer call — Meridian" queued, "Budget review" needs-model, "Weekly standup",
-"1:1 with Sam", "Pricing brainstorm" ready) plus a sidebar processing-queue widget.
-Statuses are frozen — nothing progresses, so shots are stable. Meeting detail views now
-ship with real fixture notes/transcript content (no staging needed) — verify this is
-still true for the meeting you pick before assuming an empty pane means something broke.
+"1:1 with Sam", "Pricing brainstorm" ready). Statuses are frozen — nothing progresses,
+so shots are stable. Meeting detail views ship with real fixture notes/transcript
+content (no staging needed) — verify this is still true for the meeting you pick before
+assuming an empty pane means something broke.
 
 | # | File | Flow | How to get there | Must be visible in the PNG |
 |---|------|------|------------------|----------------------------|
-| 1 | `01-library.png` | Library home | Default view on launch. If you've navigated away, use `library-back-button` from a detail view to return. | Sidebar (`sidebar`) + `library-list` with mixed status chips (Transcribing 42%, Queued, Needs model, Ready), `library-record-button` |
-| 2 | `02-meeting-detail.png` | Meeting detail | Find a meeting row: `ax-probe tree --pid "$PID" \| grep meeting-row \| grep "Weekly standup"` to get its live id, then `ax-probe click --pid "$PID" meeting-row-<id>`. Confirm navigation via `ax-probe windows --pid "$PID"` (title becomes the meeting name). | Meeting title, attendee chips, `library-detail-pane` with notes content, `library-player-bar` at the bottom |
-| 3 | `03-meeting-detail-transcript.png` | Transcript pane | From the detail view, `ax-probe click --pid "$PID" library-transcript-toggle-button`. | Split view: `library-transcript-pane` + `library-detail-pane` both visible |
+| 1 | `01-library.png` | Library home | Default view on launch. If you've navigated away, use `library-back-button` from a detail view to return. | `library-list` with mixed status chips (Transcribing 42%, Queued, Needs model, Ready), `library-record-button` in the toolbar, `library-footer` at the bottom with `library-backup-status` |
+| 2 | `02-meeting-detail.png` | Meeting detail | Find a meeting row: `ax-probe tree --pid "$PID" \| grep meeting-row \| grep "Weekly standup"` to get its live id, then `ax-probe click --pid "$PID" meeting-row-<id>`. Confirm navigation via `ax-probe windows --pid "$PID"` (title becomes the meeting name). | One centered column inside `library-detail-pane`: title (`library-detail-title-text`), meta line, `library-summary-disclosure` (collapsed one-line summary or expanded notes), transcript inline below (`library-transcript-pane`) |
+| 3 | `03-meeting-detail-summary-open.png` | Summary disclosure expanded | From the detail view, `ax-probe click --pid "$PID" library-summary-disclosure` (toggles the disclosure). Confirm via `ax-probe find --pid "$PID" library-enhanced-notes-view` or the notes editor appearing. | Expanded disclosure: enhanced summary (`library-enhanced-notes-view`) and/or `library-notes-editor`, transcript still visible below |
 | 4 | `04-search.png` | ⌘K search overlay | Go back to Library via `ax-probe click --pid "$PID" library-back-button`. Then `ax-probe click --pid "$PID" search-field` (opens the overlay), then `ax-probe type --pid "$PID" library-search-overlay-field "sam"`. Confirm via `ax-probe find --pid "$PID" library-search-overlay-field` that the value actually contains the query before capturing. | `library-search-overlay` with query "sam" in `library-search-overlay-field`, at least one result row (search matches titles only, not attendees) |
-| 5 | `05-models.png` | Model manager | From Library, click the sidebar's "Models" entry — find its identifier live with `ax-probe tree --pid "$PID" | grep -i model` if it isn't obviously one of the `settings-models-*` ids (those tag the list/rows once you're on the screen, not necessarily the sidebar nav item itself). | `settings-models-list` with model rows showing Download/Use actions and Recommended/Active chips |
-| 6 | `06-settings.png` | Settings (top) | No reliable AX path into Settings from the main window chrome — use the keyboard fallback: `"$INPUT" activate $PID && "$INPUT" key 43 cmd` (⌘,). Confirm via `ax-probe windows --pid "$PID"` that a `settings-window` titled window appeared. Then `ax-probe click --pid "$PID" settings-tab-privacy`. | `settings-window`, Privacy tab active: `settings-privacy-microphone-permission-button`, `settings-privacy-system-audio-permission-button`, `settings-privacy-calendar-permission-button` rows |
-| 7 | `07-settings-recording.png` | Settings (Recording tab) | `ax-probe click --pid "$PID" settings-tab-recording`. | `settings-recording-input-device-picker`, `settings-recording-system-audio-toggle`, `settings-recording-label-speakers-toggle`, `settings-recording-transcription-language-picker` |
-| 8 | `08-menubar.png` | Menu bar dropdown | Relaunch (or launch a second, disposable instance) with `-fixtures -show-menubar-content` — this opens an ordinary, screenshot-able window hosting the same `menu-bar-content` view instead of the real status-item popover, which headless tooling can't reach. `ax-probe windows --pid "$PID"` to find the "Menu Bar Content" window index, then `ax-probe screenshot --pid "$PID" 08-menubar.png --window "Menu Bar Content"`. | `menu-bar-content` root with `menu-bar-start-recording-button` (idle) or the recording header controls, recent-meetings rows, `menu-bar-open-app-button`, `menu-bar-settings-button` |
-| 9 | `09-nudge.png` | "Meeting started?" nudge | Relaunch with `-fixtures -show-nudge` — opens a debug window stacking all three `MeetingNudgeView` variants (ask-with-match, ask-app-only, recordingStarted) so nothing needs a real calendar/call-app event. `ax-probe screenshot --pid "$PID" 09-nudge.png --window "Nudge Preview"`. | `nudge-panel` instances showing `nudge-record-button`/`nudge-dismiss-button`/`nudge-dont-ask-button` (ask variants) and `nudge-stop-button` (recordingStarted variant) |
+| 5 | `05-settings.png` | Settings (one page) | No reliable AX path into Settings from the main window chrome — use the keyboard fallback: `"$INPUT" activate $PID && "$INPUT" key 43 cmd` (⌘,). Confirm via `ax-probe windows --pid "$PID"` that a "Settings" window appeared, then `ax-probe find --pid "$PID" settings-page`. | The single settings page (`settings-page`): Microphone row (`settings-recording-input-device-picker`, or the `settings-privacy-microphone-permission-button` fix-it), `settings-recording-system-audio-toggle`, `settings-quality-picker`, `settings-privacy-meetings-folder-change-button`, `settings-backup-toggle`, `settings-general-launch-at-login-toggle`, footnote text. (Raw id strings kept their legacy tab prefixes — grep `AXID+Settings.swift`.) |
+| 6 | `06-menubar.png` | Menu bar dropdown | Relaunch (or launch a second, disposable instance) with `launch.sh -fixtures -show-menubar-content --skip-build` — this opens an ordinary, screenshot-able window hosting the same `menu-bar-content` view instead of the real status-item popover, which headless tooling can't reach. `ax-probe windows --pid "$PID"` to find the "Menu Bar Content" window index, then `ax-probe screenshot --pid "$PID" 06-menubar.png --window "Menu Bar Content"`. | `menu-bar-content` root with `menu-bar-start-recording-button` (idle), recent-meetings rows (`menu-bar-recent-row-*`), `menu-bar-open-app-button`, `menu-bar-settings-button`, `menu-bar-quit-button` |
+| 7 | `07-nudge.png` | "Meeting started?" nudge | Relaunch with `launch.sh -fixtures -show-nudge --skip-build` — opens a debug window stacking all three `MeetingNudgeView` variants (ask-with-match, ask-app-only, recordingStarted) so nothing needs a real calendar/call-app event. `ax-probe screenshot --pid "$PID" 07-nudge.png --window "Nudge Preview"`. | `nudge-panel` instances showing `nudge-record-button`/`nudge-dismiss-button`/`nudge-dont-ask-button` (ask variants) and `nudge-stop-button` (recordingStarted variant) |
 
-## Phase B — soak instance (`-soak`)
+## Phase B — scenario instances (`-fixtures <scenario>`)
 
-Kill the fixtures PID first, then `launch.sh -soak --skip-build`. Soak auto-starts a
-synthetic recording at launch — no clicks, no mic/system-audio permission prompts, no
-real hardware. There is no transcription engine attached, so live-transcript text stays
-empty ("Listening…"-style states are expected and correct).
+Kill the previous PID first, then relaunch with `launch.sh -fixtures <scenario>
+--skip-build` per shot. All scenarios share plain `-fixtures`' zero-disk-write contract
+and are safe to SIGTERM. The full scenario list lives in `Fixtures/README.md`.
 
 | # | File | Flow | How to get there | Must be visible in the PNG |
 |---|------|------|------------------|----------------------------|
-| 10 | `10-recording-pill.png` | Recording in progress | Wait ~5s after launch for the session to start; the app auto-navigates to the live meeting. `ax-probe screenshot --pid "$PID" 10-recording-pill.png`. | `recording-pill` pinned to the bottom: `recording-pause-button`, `recording-stop-button`, elapsed timer, waveform; live transcript pane in its empty/loading state |
-| 11 | `11-floating-capsule.png` | Floating capsule | Deactivate Recap so it backgrounds: `"$INPUT" activate <Finder-pid>` (or `open -a Finder`), wait ~2s. The capsule (`floating-indicator`) is a small borderless always-on-top panel — `ax-probe windows --pid "$PID"` may not enumerate it if it's a non-standard-layer panel; if so fall back to `scripts/shot.sh list $PID` to find its window id by size (small, not 1060×660) and `shot.sh id <id> 11-floating-capsule.png`. | The capsule: elapsed time, waveform, recording state |
+| 8 | `08-recording.png` | Full-window recording view | `launch.sh -fixtures recording --skip-build` — boots straight into `recording-view` with a synthetic mid-flight session (canned waveform levels, timed notes). | `recording-view`: editable title (`recording-title-field`), live notes field (`recording-notes-field`), docked `session-capsule` with `capsule-pause-button`, `capsule-stop-button`, `capsule-device-menu`, elapsed timer, waveform |
+| 9 | `09-floating-capsule.png` | Floating capsule | From the same `-fixtures recording` instance, deactivate Recap so it backgrounds: `open -a Finder`, wait ~2s. The capsule (`floating-indicator`) is a small borderless always-on-top panel — `ax-probe windows --pid "$PID"` may not enumerate it if it's a non-standard-layer panel; if so fall back to `scripts/shot.sh list $PID` to find its window id by size (small, not 1060×660) and `shot.sh id <id> 09-floating-capsule.png`. | The capsule: elapsed time, waveform, `floating-pause-button`, `floating-stop-button` |
+| 10 | `10-next-meeting-banner.png` | Next-meeting banner | `launch.sh -fixtures nextMeetingSoon --skip-build`. | `library-next-meeting-banner` above the list with `library-banner-record-button`, the default library below |
+| 11 | `11-first-run.png` | First-run onboarding | `launch.sh -fixtures firstRun --skip-build` — onboarding not yet completed, so the `first-run-view` sheet renders over an empty library, with the model-download card mid-download. | `first-run-view` sheet: `first-run-model-card` (downloading state), `first-run-allow-system-audio`, `first-run-start-button` |
+| 12 | `12-backup-stuck.png` | Backup stuck footer | `launch.sh -fixtures backupStuck --skip-build`. | `library-footer` in its amber "Backup paused" treatment with `library-fix-backup-link`; error-state meeting rows above |
 
-Kill the soak PID when done (soak writes only to a throwaway temp dir; SIGTERM is fine).
+Kill the last PID when done.
 
 ## Flows still needing a non-AX step, and why
 
@@ -120,8 +126,8 @@ Kill the soak PID when done (soak writes only to a throwaway temp dir; SIGTERM i
   real entry points are the app menu ("Recap Dev → Settings…") and the global shortcut.
   Driving the actual menu bar item needs the Apple Events "Automation" TCC grant this
   host doesn't have, so the keyboard shortcut via `scripts/input.swift key 43 cmd` is the
-  practical option. Once the Settings window is open, every tab/control inside it is
-  reached by `ax-probe click`/`type` as normal.
+  practical option. Once the Settings window is open, every control inside it is reached
+  by `ax-probe click`/`type` as normal.
 - **Menu bar dropdown / nudge panel** — the real surfaces (status-item popover,
   borderless all-spaces `NSPanel`) aren't reliably reachable by any UI-automation tool,
   AX or otherwise, so the app ships dedicated debug windows (`-show-menubar-content`,

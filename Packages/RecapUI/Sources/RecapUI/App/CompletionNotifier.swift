@@ -24,8 +24,9 @@ public enum QuitGuard {
     /// - Parameters:
     ///   - isRecording: `MeetingSessionStore.isRecording` (true while paused too).
     ///   - title: The active meeting's title, for the alert's message text.
-    ///   - elapsedLabel: Pre-formatted elapsed time (`RecordingPill.elapsedLabel`),
-    ///     for the alert's informative text.
+    ///   - elapsedLabel: Pre-formatted elapsed time (e.g.
+    ///     `MeetingSessionStore.menuBarElapsedLabel`), for the alert's
+    ///     informative text.
     public static func decide(isRecording: Bool, title: String, elapsedLabel: String) -> Decision {
         guard isRecording else { return .terminateNow }
         return .confirmBeforeTerminating(title: title, elapsedLabel: elapsedLabel)

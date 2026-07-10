@@ -13,6 +13,7 @@ import SwiftUI
 /// `RecordingHostPlaceholderView` placeholder.
 struct RecordingView: View {
     @Environment(AppStores.self) private var stores: AppStores?
+    @Environment(AppRouter.self) private var router
     @Environment(MeetingSessionStore.self) private var session
     @Environment(LibraryStore.self) private var library
     @Environment(SettingsStore.self) private var settings
@@ -40,6 +41,15 @@ struct RecordingView: View {
         .background(Tokens.surface)
         .toolbar {
             ToolbarItem(placement: .navigation) {
+                Button("Library", systemImage: "chevron.left") {
+                    // Back to the Library while the session keeps recording —
+                    // the toolbar there swaps Record for a quiet
+                    // "● Recording · MM:SS" pill that returns here.
+                    router.screen = .library
+                }
+                .axID(.libraryBackButton)
+            }
+            ToolbarItem(placement: .primaryAction) {
                 savingStatus
             }
         }
@@ -50,7 +60,6 @@ struct RecordingView: View {
                     clock: clock,
                     isPaused: session.isPaused,
                     levels: WaveformDownsample.bars(from: session.levels, count: 5),
-                    deviceName: session.activeInputDeviceName,
                     inputDevices: inputDevices,
                     selectedDeviceUID: settings.preferredInputUID,
                     onSelectDevice: { uid in

@@ -46,7 +46,7 @@ public final class AppStores {
     /// transition through a real queue, so there's nothing to notify about.
     @ObservationIgnored private var completionNotifier: CompletionNotifier?
     /// In-app "update available" indicator state. Driven by the app target's
-    /// Sparkle owner (`UpdaterModel`); read by the sidebar and menu bar.
+    /// Sparkle owner (`UpdaterModel`); read by the menu bar extra.
     public let updateStatus = UpdateStatus()
     /// nil in fixture/preview graphs, where nothing touches disk.
     private let storage: LibraryStorage?
@@ -182,7 +182,7 @@ public final class AppStores {
             let session = self.session
             Task { @MainActor in
                 guard let record = library.startNewMeeting(title: "Soak recording") else { return }
-                await session.start(record: record, engine: nil, includeSystemAudio: true, includeMic: true)
+                await session.start(record: record, includeSystemAudio: true, includeMic: true)
             }
         } else {
             let settings = SettingsStore()
@@ -304,8 +304,8 @@ public final class AppStores {
             autoRecord.applyCalendarAutoRecordSetting()
             setup.start()
             changeBusConsumer?.start()
-            // Granting calendar access in Settings refreshes `upcoming`
-            // itself (`SettingsPrivacyTab`); this covers the other stale-agenda
+            // Granting calendar access during onboarding (`FirstRunView`)
+            // refreshes `upcoming` itself; this covers the other stale-agenda
             // path — switching back to Recap after granting access in the
             // System Settings pane directly, or just after time has passed.
             observeAppForegroundRefresh()
@@ -491,8 +491,8 @@ public final class AppStores {
         queue?.cancel(meetingID: record.meeting.id)
     }
 
-    /// Navigates to a meeting (used by the menu bar extra's jump items, and
-    /// `SettingsPrivacyTab`'s backup-fix deep link). Routes to the
+    /// Navigates to a meeting (used by the menu bar extra's jump items, the
+    /// floating indicator, and the recording-start flow). Routes to the
     /// full-window `.recording` placeholder when `id` is the meeting
     /// currently being recorded, otherwise to its `.detail` screen.
     public func showMeeting(_ id: UUID) {

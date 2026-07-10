@@ -64,21 +64,6 @@ extension AXID {
     /// The raw notes `TextEditor` (`MeetingDetailView.editor`).
     public static let notesEditor = AXID("library-notes-editor")
 
-    /// Segmented "✨ Enhanced / My notes" toggle (`MeetingDetailView.notesModeToggle`).
-    public static let notesModeToggle = AXID("library-notes-mode-toggle")
-
-    /// "Undo" link in the enhanced-notes caption, switches back to My notes.
-    public static let enhancedNotesUndoButton = AXID("library-enhanced-notes-undo-button")
-
-    /// Toolbar "Copy notes"/"Copy summary" button (`MeetingDetailView.copyNotesButton`).
-    public static let detailCopyNotesButton = AXID("library-detail-copy-notes-button")
-
-    /// Toolbar transcript show/hide toggle (`MeetingDetailView.transcriptToggle`).
-    public static let transcriptToggleButton = AXID("library-transcript-toggle-button")
-
-    /// Live-meeting input-device picker (`MeetingDetailView.liveInputRow`).
-    public static let liveInputDevicePicker = AXID("library-live-input-device-picker")
-
     /// The read-only detail-view title text (`MeetingDetailView.titleText`).
     /// Double-click reveals `.detailTitleField` for inline rename.
     public static let detailTitleText = AXID("library-detail-title-text")
@@ -100,10 +85,6 @@ extension AXID {
 
     /// "Copy transcript" button in the transcript pane header.
     public static let transcriptCopyButton = AXID("library-transcript-copy-button")
-
-    /// "Download" button shown when no streaming model is installed
-    /// (`TranscriptPane.emptyState`).
-    public static let transcriptDownloadModelButton = AXID("library-transcript-download-model-button")
 
     /// A speaker name label in a transcript row, keyed by the diarization
     /// speaker id (e.g. "S1") — tap opens the rename popover.
@@ -128,7 +109,7 @@ extension AXID {
     /// A single search result row, keyed by the hit's stable id.
     public static func searchHitRow(_ id: String) -> AXID { AXID("library-search-hit-row-\(id)") }
 
-    // MARK: Redesign (Phase 0 scaffolding)
+    // MARK: Library footer, banner, and detail edge states
 
     /// The Library window's footer (backup status + related affordances).
     public static let libraryFooter = AXID("library-footer")

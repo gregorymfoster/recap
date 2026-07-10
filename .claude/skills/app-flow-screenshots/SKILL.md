@@ -1,6 +1,6 @@
 ---
 name: app-flow-screenshots
-description: Capture a complete "state of the app" screenshot dump of Recap — builds the dev app, launches it with fixture data, drives every core flow (library, meeting detail, search, models, settings, recording pill, floating capsule, menu bar) via accessibility identifiers, and saves clean per-window PNGs plus a README manifest to a timestamped folder in ~/Downloads, ready to drop into Claude Design or any design tool. Use whenever the user asks for app screenshots, a screenshot dump, "state of the app", captures of the core flows, design-reference images, or wants to show the current UI to a design tool — even if they only say "grab the screens", "export the UI", or "screenshot the app".
+description: Capture a complete "state of the app" screenshot dump of Recap — builds the dev app, launches it with fixture data, drives every core flow (library, meeting detail, search, one-page settings, recording view + session capsule, floating capsule, first run, menu bar) via accessibility identifiers, and saves clean per-window PNGs plus a README manifest to a timestamped folder in ~/Downloads, ready to drop into Claude Design or any design tool. Use whenever the user asks for app screenshots, a screenshot dump, "state of the app", captures of the core flows, design-reference images, or wants to show the current UI to a design tool — even if they only say "grab the screens", "export the UI", or "screenshot the app".
 ---
 
 # App flow screenshots
@@ -41,7 +41,12 @@ swift -e 'import CoreGraphics; print("SCREEN_RECORDING:", CGPreflightScreenCaptu
 
 Accessibility powers `ax-probe` (click/type by identifier) and the keyboard-shortcut
 fallback (`scripts/input.swift`); Screen Recording powers `shot.sh`'s
-`screencapture -l`. Do NOT drive input through `osascript`/System Events — that needs
+`screencapture -l`. Also confirm the screen is UNLOCKED — a locked screen makes every
+newly launched app run windowless forever (looks exactly like an app bug; it isn't):
+
+```bash
+swift -e 'import Quartz; let d = CGSessionCopyCurrentDictionary() as? [String: Any]; print((d?["CGSSessionScreenIsLocked"] as? Int) == 1 ? "LOCKED — stop, ask the user to unlock" : "unlocked")'
+``` Do NOT drive input through `osascript`/System Events — that needs
 the separate Apple Events "Automation" grant, which this host typically lacks
 (error -1743).
 
@@ -52,11 +57,13 @@ the separate Apple Events "Automation" grant, which this host typically lacks
 ```
 
 builds Debug (`xcodegen` + `xcodebuild`, derived data in `build/screenshots/` so it
-never collides with soak or dev-install builds), launches the raw binary, waits until
+never collides with soak or dev-install builds), launches via `open -n` (raw-exec'd
+binaries sometimes never register with the window server on this host), waits until
 the main window is on screen, and prints `APP=` and `PID=`. Keep the PID — it's how you
-target the right instance. `-fixtures` is disk-free and idempotent — safe to relaunch
-endlessly. For the second phase relaunch with `-soak --skip-build` (same binary, no
-rebuild).
+target the right instance. All arguments except `--skip-build` are forwarded to the app,
+so scenario launches work: `launch.sh -fixtures recording --skip-build`. `-fixtures`
+(any scenario) is disk-free and idempotent — safe to relaunch endlessly; use
+`--skip-build` for every relaunch after the first.
 
 ### 3. Drive the app with ax-probe, by accessibility identifier
 
@@ -102,16 +109,19 @@ content live in [references/flows.md](references/flows.md). Have each subagent r
 that file — its brief then only needs: the output dir, the app PID, which flows it
 owns, and the worker/no-delegation rule.
 
-- **Phase A — fixtures instance**: library, meeting detail (notes + transcript), search
-  overlay, models, settings (two scroll positions), menu-bar dropdown (via
-  `-show-menubar-content`), nudge panel (via `-show-nudge`).
-- **Phase B — soak instance** (kill the fixtures process first, relaunch with
-  `-soak --skip-build`): recording pill in the main window, then deactivate the app
-  (activate Finder) and capture the floating capsule.
+- **Phase A — default fixtures instance** (`-fixtures`): library (footer + banner-free
+  home), meeting detail (summary disclosure + inline transcript), search overlay,
+  the one-page Settings window (⌘,), menu-bar dropdown (via `-show-menubar-content`),
+  nudge panel (via `-show-nudge`).
+- **Phase B — scenario instances** (kill the previous PID, relaunch per shot with
+  `launch.sh -fixtures <scenario> --skip-build`): `recording` for the full-window
+  recording view + session capsule, then deactivate the app (activate Finder) for the
+  floating capsule; `nextMeetingSoon` for the next-meeting banner; `firstRun` for the
+  onboarding sheet; `backupStuck` for the amber footer state.
 
 The one non-negotiable in every brief: **verify every shot by Reading the PNG** before
-moving on — confirm the intended state is actually visible (overlay open, right sidebar
-section selected, pill present) and retake if not. A dump with a wrong or stale frame is
+moving on — confirm the intended state is actually visible (overlay open, disclosure
+expanded, capsule present) and retake if not. A dump with a wrong or stale frame is
 worse than a missing one, because nobody re-checks it downstream. Also verify each
 `ax-probe click`/`type` actually landed by re-querying (`ax-probe find <axid>`) or
 checking the window title/AX tree changed — a `click` that fell back to a CGEvent
@@ -124,7 +134,7 @@ expected-content column in flows.md before writing the manifest. Then write `REA
 (version from `project.yml`'s `MARKETING_VERSION`, commit from `git rev-parse --short
 HEAD`), kill any remaining app PID, and `open` the folder.
 
-Known fixture limitations to state in the manifest, not apologize for: the soak
-instance produces no live-transcript text (no engine attached). Onboarding is
-unreachable in both modes (`hasOnboarded` is forced true) — it is deliberately not part
-of the dump.
+Known fixture limitations to state in the manifest, not apologize for: the `recording`
+scenario's session is synthetic (no live-transcript text, canned waveform levels).
+Onboarding renders only under `-fixtures firstRun` (every other scenario forces
+`hasOnboarded` true so its own surface shows underneath).

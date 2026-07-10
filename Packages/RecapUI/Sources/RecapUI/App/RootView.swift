@@ -20,38 +20,30 @@ public final class AppRouter {
 
     public var screen: Screen = .library
 
-    /// Preselects a Settings tab the next time the Settings window opens —
-    /// set by `-open settings/<tab>` (`LaunchRouteApplier`) and read once by
-    /// `SettingsWindowView`'s `.task`, which clears it back to `nil` so a
-    /// later manual ⌘, doesn't keep reapplying a stale launch route.
-    /// `SettingsWindowView` still drives its tab selection from this today —
-    /// the Settings one-page rewrite (Phase 3D) retires it in favor of
-    /// `pendingSettingsSection` below.
-    public var pendingSettingsTab: SettingsTab?
-
-    /// Settings tab groupings for the redesigned Settings surface. Distinct
-    /// from `SettingsTab` (today's tab enum) — later phases reconcile the two.
+    /// Settings groupings on the one-page Settings surface (`SettingsWindowView`).
     public enum SettingsSection: String, Sendable {
         case audio
         case transcription
         case storage
 
-        /// Coarse mapping from today's legacy `SettingsTab` names, wired
-        /// alongside `pendingSettingsTab` by `-open settings/<tab>` so the
-        /// redesigned Settings surface (Phase 3D) has real routing data to
-        /// switch onto once it exists; `SettingsWindowView` doesn't read this
-        /// yet.
-        public init?(legacyTab: SettingsTab?) {
-            guard let legacyTab else { return nil }
-            switch legacyTab {
-            case .general, .recording, .calendar, .privacy: self = .audio
-            case .sync: self = .storage
+        /// Maps a `-open settings/<tab>` route's raw tab name (the old
+        /// per-tab window's tab names: general/recording/calendar/sync/privacy)
+        /// to a section on the one-page Settings surface. `nil` when the
+        /// route didn't name a tab, or named one with no section mapping.
+        public init?(routeTabName: String?) {
+            switch routeTabName {
+            case "general", "recording", "calendar", "privacy": self = .audio
+            case "sync": self = .storage
+            default: return nil
             }
         }
     }
 
-    /// Preselects a redesigned-Settings section the next time it opens,
-    /// mirroring `pendingSettingsTab`'s "set once, consume once" contract.
+    /// Preselects a Settings section the next time the Settings window
+    /// opens — set by `-open settings/<tab>` (`LaunchRouteApplier`) or a
+    /// direct assignment (e.g. `LibraryFooter`'s "Fix backup" link) and read
+    /// once by `SettingsWindowView`'s `.task`, which clears it back to `nil`
+    /// so a later manual ⌘, doesn't keep reapplying a stale launch route.
     public var pendingSettingsSection: SettingsSection?
 
     public init() {}
@@ -152,10 +144,10 @@ public struct RootView: View {
 
     /// Runs whatever `LaunchRouteAction`s `routeApplier` hands back for
     /// `stores.launchRoute` — a no-op after the first successful call.
-    /// `settings/<tab>` is staged on `router.pendingSettingsTab` and the
+    /// `settings/<tab>` is staged on `router.pendingSettingsSection` and the
     /// Settings window opened via the `openSettings` environment action (no
     /// `AppStores` write: `launchRoute` is read-only for this work);
-    /// `SettingsWindowView` consumes and clears the staged tab itself.
+    /// `SettingsWindowView` consumes and clears the staged section itself.
     private func applyLaunchRouteIfNeeded() {
         let meetingIDs = library.meetings.map { $0.meeting.id.uuidString }
         let actions = routeApplier.applyOnce { rawID in
@@ -170,9 +162,8 @@ public struct RootView: View {
                 guard let uuid = UUID(uuidString: id) else { continue }
                 router.screen = .detail(meetingID: uuid)
                 library.selectedMeetingID = uuid
-            case .openSettings(let tab):
-                router.pendingSettingsTab = tab
-                router.pendingSettingsSection = AppRouter.SettingsSection(legacyTab: tab)
+            case .openSettings(let section):
+                router.pendingSettingsSection = section
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
             case .openSearch(let query):

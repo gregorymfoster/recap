@@ -19,8 +19,7 @@ struct SessionCapsule: View {
     var clock: RecordingClock
     var isPaused: Bool
     var levels: [Float]
-    /// The mic device actually in use, shown next to the meter (docked only).
-    var deviceName: String?
+    /// Selectable input devices for the device menu (docked only).
     var inputDevices: [AudioInputDevice] = []
     var selectedDeviceUID: String?
     var onSelectDevice: (String?) -> Void = { _ in }
@@ -46,13 +45,8 @@ struct SessionCapsule: View {
             HStack(spacing: 8) {
                 LevelMeter(levels: levels)
                     .opacity(isPaused ? 0.35 : 1)
-                if let deviceName {
-                    Text(deviceName)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Tokens.textPrimary.opacity(0.75))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
+                // The menu's own label carries the device name — a separate
+                // deviceName Text here would show the same thing twice.
                 InputDeviceMenu(
                     devices: inputDevices, selectedUID: selectedDeviceUID, onSelect: onSelectDevice,
                     axID: .capsuleDeviceMenu
@@ -192,7 +186,6 @@ struct SessionCapsule: View {
         SessionCapsule(
             variant: .docked, clock: RecordingClock(startedAt: .now.addingTimeInterval(-1453)),
             isPaused: false, levels: (0..<5).map { _ in Float.random(in: 0.1...0.9) },
-            deviceName: "MacBook Pro Microphone",
             onPauseToggle: {}, onStop: {}
         )
         SessionCapsule(
@@ -203,7 +196,6 @@ struct SessionCapsule: View {
                 return clock
             }(),
             isPaused: true, levels: [Float](repeating: 0, count: 5),
-            deviceName: "MacBook Pro Microphone",
             onPauseToggle: {}, onStop: {}
         )
     }

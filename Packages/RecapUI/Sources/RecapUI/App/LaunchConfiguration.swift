@@ -145,10 +145,11 @@ public struct LaunchConfiguration: Equatable, Sendable {
 ///
 /// Forms: `library`, `library/<meeting-id>` (fixture meeting ids are random
 /// per launch — `library/first` is a stable alias for the first meeting in
-/// `-fixtures` mode), `settings`, `settings/<tab>` (tab names match
-/// `SettingsTab`'s raw values: general/recording/calendar/sync/privacy),
-/// `search:<query>`. Anything else (including empty path/query components)
-/// fails the parse.
+/// `-fixtures` mode), `settings`, `settings/<tab>` (tab names are the old
+/// per-tab Settings window's tab names — general/recording/calendar/sync/privacy —
+/// mapped to a section on the one-page Settings surface by
+/// `AppRouter.SettingsSection.init(routeTabName:)`), `search:<query>`.
+/// Anything else (including empty path/query components) fails the parse.
 public enum Route: Equatable, Sendable {
     case library(meetingID: String?)
     case settings(tab: String?)

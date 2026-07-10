@@ -210,16 +210,15 @@ public struct MenuBarContent: View {
         .padding(.top, 6)
     }
 
-    /// "Mic: <device>" plus the shared `InputDeviceMenu` — switching here
-    /// goes through the same `settings.preferredInputUID`/
+    /// "Mic:" plus the shared `InputDeviceMenu` (whose own label carries the
+    /// device name — repeating it here would show it twice). Switching goes
+    /// through the same `settings.preferredInputUID`/
     /// `session.setPreferredInputUID` path as `RecordingView`'s capsule.
     private var deviceRow: some View {
         HStack(spacing: 6) {
-            Text("Mic: \(stores.session.activeInputDeviceName ?? "System default")")
+            Text("Mic:")
                 .font(.system(size: 11.5))
                 .foregroundStyle(Tokens.textSecondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
             Spacer(minLength: 6)
             InputDeviceMenu(
                 devices: inputDevices, selectedUID: stores.settings.preferredInputUID,
