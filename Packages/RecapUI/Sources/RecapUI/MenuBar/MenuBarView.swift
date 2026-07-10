@@ -276,9 +276,7 @@ public struct MenuBarContent: View {
                 stores.startRecording(title: event.title, attendees: event.otherAttendees)
                 activateApp()
             }
-            .buttonStyle(.plain)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(Tokens.recordRed)
+            .buttonStyle(.quietBlueOutline)
             .fixedSize()
             .axID(.menuBarUpNextRecordButton)
         }

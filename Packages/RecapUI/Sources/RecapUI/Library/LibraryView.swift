@@ -435,7 +435,7 @@ private struct MeetingRow: View {
     private var recoveredRow: some View {
         HStack(spacing: 11) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(record.meeting.title)
+                Text(RecoveredRowTitle.display(for: record.meeting.title))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Tokens.textPrimary)
                     .lineLimit(1)

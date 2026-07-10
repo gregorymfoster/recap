@@ -97,6 +97,11 @@ struct SessionCapsule: View {
 
     // MARK: Floating
 
+    // Intentionally no input-device menu here — per the 11f mock (design
+    // decision 2026-07-10), this supersedes the handoff README's "every
+    // recording surface" global rule. Device switching lives in the menu-bar
+    // popover and the `.docked` in-window capsule; the floating background
+    // capsule stays a compact glanceable status, not a full control surface.
     private var floatingContent: some View {
         HStack(spacing: 10) {
             statusIndicator(dotSize: 7)

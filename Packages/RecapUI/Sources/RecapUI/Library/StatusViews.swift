@@ -93,7 +93,7 @@ struct MeetingStatusView: View {
                     Button("Retry", action: onInstallModel)
                         .buttonStyle(.quietBlueOutline)
                         .help("No speech model is installed yet. Click to retry setup — this meeting transcribes automatically once a model is ready.")
-                        .axID(.rowInstallModelButton)
+                        .axID(.rowRetryDownloadButton)
                 }
             }
         case .done, nil:

@@ -37,7 +37,7 @@ extension AXID {
 
     /// "Install model to transcribe" chip on a row needing a model
     /// (`MeetingStatusView.needsModelChip`).
-    public static let rowInstallModelButton = AXID("library-row-install-model-button")
+    public static let rowRetryDownloadButton = AXID("library-row-install-model-button")
 
     /// "Move to Trash" row context menu item.
     public static let libraryRowTrash = AXID("library-row-trash")
