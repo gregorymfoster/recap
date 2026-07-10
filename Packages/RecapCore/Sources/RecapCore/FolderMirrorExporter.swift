@@ -15,28 +15,56 @@ public struct FolderMirrorExporter: Sendable {
     /// `destinationRootURL/<meeting folder name>/`, skipping files that are
     /// already up to date at the destination. Best-effort per file — a
     /// missing source file (e.g. no `audio.m4a` yet, or Apple Intelligence
-    /// off so no `enhanced.md`) is simply skipped, never thrown.
+    /// off so no `enhanced.md`) is simply skipped, never thrown. A
+    /// destination that can't be reached or written to, however, throws the
+    /// most severe classified `MirrorError` — the caller (queue/backfill/
+    /// change-bus consumer) needs that signal to surface a stuck backup.
     public func mirror(_ record: MeetingRecord) throws {
         let fm = FileManager.default
+
+        // Pre-check reachability without touching any files: a destination
+        // root that isn't there (iCloud Drive unmounted, folder deleted,
+        // external volume ejected) must never silently get re-created.
+        do {
+            guard try destinationRootURL.checkResourceIsReachable() else {
+                throw MirrorError.destinationUnreachable
+            }
+        } catch {
+            throw MirrorError.destinationUnreachable
+        }
+
         let destinationFolderURL = destinationRootURL.appendingPathComponent(record.folderURL.lastPathComponent)
-        try fm.createDirectory(at: destinationFolderURL, withIntermediateDirectories: true)
+        do {
+            try fm.createDirectory(at: destinationFolderURL, withIntermediateDirectories: true)
+        } catch {
+            throw MirrorError.destinationUnreachable
+        }
 
         let fileNames = [
             "meeting.json", "notes.md", "notes.json", "enhanced.md", "transcript.json", "audio.m4a",
         ]
+        var failures: [MirrorError] = []
         for fileName in fileNames {
             let sourceURL = record.folderURL.appendingPathComponent(fileName)
             let destinationURL = destinationFolderURL.appendingPathComponent(fileName)
-            copyIfNeeded(from: sourceURL, to: destinationURL)
+            if let failure = copyIfNeeded(from: sourceURL, to: destinationURL) {
+                failures.append(failure)
+            }
+        }
+
+        if let mostSevere = Self.mostSevere(of: failures) {
+            throw mostSevere
         }
     }
 
     /// Copies `sourceURL` to `destinationURL` if the source exists and is
     /// newer or different in size than what's already at the destination.
-    /// Failures are swallowed — one bad file must never abort the mirror.
-    private func copyIfNeeded(from sourceURL: URL, to destinationURL: URL) {
+    /// A missing source file is skipped (not a failure); an actual copy
+    /// failure is classified and returned rather than thrown, so the caller
+    /// keeps going through the rest of the file list instead of aborting.
+    private func copyIfNeeded(from sourceURL: URL, to destinationURL: URL) -> MirrorError? {
         let fm = FileManager.default
-        guard let sourceAttributes = try? fm.attributesOfItem(atPath: sourceURL.path) else { return }
+        guard let sourceAttributes = try? fm.attributesOfItem(atPath: sourceURL.path) else { return nil }
 
         if let destinationAttributes = try? fm.attributesOfItem(atPath: destinationURL.path) {
             let sourceDate = sourceAttributes[.modificationDate] as? Date
@@ -46,7 +74,7 @@ public struct FolderMirrorExporter: Sendable {
 
             let isNewer = (sourceDate ?? .distantPast) > (destinationDate ?? .distantPast)
             let sizeDiffers = sourceSize != destinationSize
-            guard isNewer || sizeDiffers else { return }
+            guard isNewer || sizeDiffers else { return nil }
         }
 
         // Copy via a temp file in the destination directory, then replace
@@ -57,8 +85,18 @@ public struct FolderMirrorExporter: Sendable {
         do {
             try fm.copyItem(at: sourceURL, to: tempURL)
             _ = try fm.replaceItemAt(destinationURL, withItemAt: tempURL)
+            return nil
         } catch {
             try? fm.removeItem(at: tempURL)
+            return MirrorError.classify(error)
         }
+    }
+
+    /// Most severe failure across every file in one mirror pass, by
+    /// `diskFull > destinationUnreachable > copyFailed`.
+    private static func mostSevere(of failures: [MirrorError]) -> MirrorError? {
+        if failures.contains(.diskFull) { return .diskFull }
+        if failures.contains(.destinationUnreachable) { return .destinationUnreachable }
+        return failures.first
     }
 }

@@ -39,6 +39,10 @@ import Testing
         defer { try? FileManager.default.removeItem(at: record.folderURL) }
         let destRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("mirror-dest-\(UUID().uuidString)")
+        // The exporter refuses to invent a missing destination root (that's
+        // the `destinationUnreachable` signal), so create it like a user
+        // picking an existing folder would.
+        try FileManager.default.createDirectory(at: destRoot, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: destRoot) }
 
         let exporter = FolderMirrorExporter(destinationRootURL: destRoot)
@@ -55,6 +59,10 @@ import Testing
         defer { try? FileManager.default.removeItem(at: record.folderURL) }
         let destRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("mirror-dest-\(UUID().uuidString)")
+        // The exporter refuses to invent a missing destination root (that's
+        // the `destinationUnreachable` signal), so create it like a user
+        // picking an existing folder would.
+        try FileManager.default.createDirectory(at: destRoot, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: destRoot) }
 
         let exporter = FolderMirrorExporter(destinationRootURL: destRoot)
@@ -90,6 +98,10 @@ import Testing
         defer { try? FileManager.default.removeItem(at: record.folderURL) }
         let destRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("mirror-dest-\(UUID().uuidString)")
+        // The exporter refuses to invent a missing destination root (that's
+        // the `destinationUnreachable` signal), so create it like a user
+        // picking an existing folder would.
+        try FileManager.default.createDirectory(at: destRoot, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: destRoot) }
 
         let exporter = FolderMirrorExporter(destinationRootURL: destRoot)
@@ -99,6 +111,45 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: destFolder.appendingPathComponent("audio.m4a").path))
         for name in ["meeting.json", "notes.md", "enhanced.md", "transcript.json"] {
             #expect(FileManager.default.fileExists(atPath: destFolder.appendingPathComponent(name).path))
+        }
+    }
+
+    // MARK: Error surfacing
+
+    @Test func missingDestinationRootThrowsDestinationUnreachable() throws {
+        let record = try makeSourceRecord()
+        defer { try? FileManager.default.removeItem(at: record.folderURL) }
+        let destRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mirror-dest-\(UUID().uuidString)")
+        // Deliberately never created.
+
+        let exporter = FolderMirrorExporter(destinationRootURL: destRoot)
+        #expect(throws: MirrorError.destinationUnreachable) {
+            try exporter.mirror(record)
+        }
+        // And it must not have invented the root as a side effect.
+        #expect(!FileManager.default.fileExists(atPath: destRoot.path))
+    }
+
+    @Test func unwritableDestinationFolderSurfacesCopyFailure() throws {
+        let record = try makeSourceRecord()
+        defer { try? FileManager.default.removeItem(at: record.folderURL) }
+        let destRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mirror-dest-\(UUID().uuidString)")
+        let destFolder = destRoot.appendingPathComponent(record.folderURL.lastPathComponent)
+        try FileManager.default.createDirectory(at: destFolder, withIntermediateDirectories: true)
+        // Read+execute only: createDirectory(withIntermediateDirectories:)
+        // still succeeds on the existing folder, but every file copy into it
+        // fails with a permission error.
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: destFolder.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destFolder.path)
+            try? FileManager.default.removeItem(at: destRoot)
+        }
+
+        let exporter = FolderMirrorExporter(destinationRootURL: destRoot)
+        #expect(throws: MirrorError.copyFailed) {
+            try exporter.mirror(record)
         }
     }
 

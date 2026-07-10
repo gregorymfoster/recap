@@ -221,12 +221,21 @@ public final class LibraryStore {
         replace(record)
     }
 
-    /// Records a successful folder-mirror backup, persisting through the
-    /// same metadata save path as every other meeting mutation.
+    /// Records a successful folder-mirror backup. Deliberately NOT routed
+    /// through `replace(_:)`: a backup timestamp isn't a content change, so
+    /// it must neither bump `updatedAt` (that would leave the meeting
+    /// forever "pending" — `lastBackupDate < updatedAt` — for the next
+    /// backfill) nor post `.meetingChanged` (that would re-trigger the very
+    /// mirror export that just completed, looping through the change-bus
+    /// consumer indefinitely).
     public func markBackedUp(_ id: UUID, at date: Date = .now) {
         guard var record = record(for: id) else { return }
         record.meeting.lastBackupDate = date
-        replace(record)
+        if let i = meetings.firstIndex(where: { $0.meeting.id == id }) {
+            meetings[i] = record
+        }
+        guard let storage else { return }
+        try? storage.saveMetadata(record)
     }
 
     /// Used by crash salvage: the recovered file is the only duration source.

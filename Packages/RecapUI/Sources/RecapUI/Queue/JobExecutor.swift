@@ -21,9 +21,12 @@ struct MeetingProcessor: JobExecutor {
     let onStatus: @Sendable (UUID, MeetingStatus) async -> Void
     /// Crash salvage recovered the audio; the file length is the duration.
     let onDurationRecovered: @Sendable (UUID, TimeInterval) async -> Void
-    /// The folder-mirror backup succeeded for this meeting — persist the
-    /// timestamp so the UI can truthfully show "Backed up".
-    let onBackedUp: @Sendable (UUID) async -> Void
+    /// The folder-mirror backup's lifecycle for this meeting — `.started`
+    /// before mirroring, then `.succeeded` or `.failed(classified)`. The
+    /// caller (`QueueStore`) persists `lastBackupDate` on `.succeeded` and
+    /// forwards every event to `BackupStatusStore` so the aggregate status
+    /// stays accurate.
+    let onBackupEvent: @Sendable (UUID, BackupEvent) async -> Void
     /// Enqueues a follow-up job (transcribe → enhance chaining).
     let chain: @Sendable (ProcessingJob) async -> Void
     /// Announces a meeting is about to be exported, so other subscribers
@@ -150,14 +153,17 @@ struct MeetingProcessor: JobExecutor {
         let s = await settings()
 
         if s.mirrorBackupEnabled, !s.mirrorFolderPath.isEmpty {
+            await onBackupEvent(record.meeting.id, .started)
             let mirror = FolderMirrorExporter(destinationRootURL: URL(fileURLWithPath: s.mirrorFolderPath))
             do {
                 try mirror.mirror(record)
-                await onBackedUp(record.meeting.id)
                 await onProcessingIssue(record.meeting.id, .mirrorBackupFailed, false)
+                await onBackupEvent(record.meeting.id, .succeeded)
             } catch {
+                let classified = MirrorError.classify(error)
                 processorLog.error("Folder-mirror backup failed: \(String(describing: error), privacy: .private)")
                 await onProcessingIssue(record.meeting.id, .mirrorBackupFailed, true)
+                await onBackupEvent(record.meeting.id, .failed(classified))
             }
         }
     }

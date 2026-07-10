@@ -57,6 +57,7 @@ import Testing
         let queue = QueueStore(
             library: library, storage: storage, models: WhisperModelManager(),
             changeBus: changeBus, settings: settings,
+            backup: BackupStatusStore(settings: settings, library: library, storage: storage),
             onError: { message in errors.append(message) }
         )
 
@@ -98,6 +99,7 @@ import Testing
         let queue = QueueStore(
             library: library, storage: storage, models: WhisperModelManager(),
             changeBus: changeBus, settings: settings,
+            backup: BackupStatusStore(settings: settings, library: library, storage: storage),
             onError: { message in errors.append(message) }
         )
 
@@ -134,7 +136,8 @@ import Testing
 
         let queue = QueueStore(
             library: library, storage: storage, models: WhisperModelManager(),
-            changeBus: changeBus, settings: settings
+            changeBus: changeBus, settings: settings,
+            backup: BackupStatusStore(settings: settings, library: library, storage: storage)
         )
 
         library.moveToTrash(record)

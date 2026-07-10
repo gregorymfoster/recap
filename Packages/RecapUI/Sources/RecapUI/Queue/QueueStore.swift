@@ -26,7 +26,7 @@ public final class QueueStore {
     ///   the "‹meeting› is ready" notification.
     public init(
         library: LibraryStore, storage: LibraryStorage, models: WhisperModelManager,
-        changeBus: LibraryChangeBus, settings: SettingsStore,
+        changeBus: LibraryChangeBus, settings: SettingsStore, backup: BackupStatusStore,
         enhancer: NoteEnhancer = FoundationModelEnhancer(),
         onError: (@MainActor (String) -> Void)? = nil,
         onMeetingReady: (@MainActor (UUID) -> Void)? = nil
@@ -66,8 +66,11 @@ public final class QueueStore {
             onDurationRecovered: { @Sendable id, duration in
                 await library.updateDuration(id, to: duration)
             },
-            onBackedUp: { @Sendable id in
-                await library.markBackedUp(id)
+            onBackupEvent: { @Sendable id, event in
+                if case .succeeded = event {
+                    await library.markBackedUp(id)
+                }
+                await backup.noteMirrorEvent(meetingID: id, event)
             },
             chain: { @Sendable job in
                 await queueBox.queue?.enqueue(job)
