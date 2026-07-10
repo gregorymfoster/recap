@@ -217,20 +217,25 @@ public final class MicSource {
         notificationTokens.append(center.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
+            // These callbacks are already dispatched on queue .main, so an
+            // explicit hop just degrades to a scheduling delay rather than
+            // trapping if that dispatch-queue↔MainActor-executor assumption
+            // ever breaks — safe here since scheduleRebuild only starts a
+            // 400ms-debounced rebuild.
+            Task { @MainActor [weak self] in
                 self?.scheduleRebuild(reason: "engine configuration changed")
             }
         })
         notificationTokens.append(NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 self?.scheduleRebuild(reason: "woke from sleep")
             }
         })
 
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 self?.scheduleRebuild(reason: "default input changed")
             }
         }
@@ -243,7 +248,7 @@ public final class MicSource {
         // as it reappears, not just wait for the (unrelated) default-input
         // notification.
         deviceListListener = AudioInputDevices.addDeviceListListener(queue: .main) { [weak self] in
-            MainActor.assumeIsolated {
+            Task { @MainActor [weak self] in
                 guard let self, self.preferredInputUID != nil else { return }
                 self.scheduleRebuild(reason: self.preferredDeviceRebuildReason())
             }

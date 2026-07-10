@@ -1,7 +1,10 @@
 import Foundation
 import Observation
+import os
 import RecapAudio
 import RecapCore
+
+private let log = Logger(subsystem: "com.gregfoster.recap", category: "MeetingRecorder")
 
 /// The active recording: owns the recorder, exposes timer state and
 /// waveform levels to the pill, and hands the finished meeting back
@@ -212,6 +215,9 @@ public final class MeetingSessionStore {
             // surface as a toast).
             activeRecord = nil
         } catch {
+            // Error descriptions here are diagnostic strings, not meeting
+            // content, so they're safe to log as public.
+            log.error("Recording failed to start: \(error, privacy: .public)")
             activeRecord = nil
             startFailureMessage = "Couldn't start recording"
         }
