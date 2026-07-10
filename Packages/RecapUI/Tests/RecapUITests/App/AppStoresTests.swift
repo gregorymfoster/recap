@@ -26,6 +26,8 @@ private final class FakeMicSourceForGateTest: MicCapturing {
         continuation?.finish()
         continuation = nil
     }
+
+    func forceRebuild() {}
 }
 
 @MainActor

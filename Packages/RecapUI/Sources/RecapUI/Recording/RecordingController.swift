@@ -85,6 +85,17 @@ public final class RecordingController {
                 PrivacyPane.open(PrivacyPane.systemAudio)
             }
         }
+        // Mic went silent mid-call and the recorder's bounded auto-recovery
+        // (up to two forced rebuilds) didn't bring it back — mirrors
+        // `onSystemAudioStalled` above, minus the Privacy pane deep link
+        // (this isn't a permission problem, it's a dead/unplugged device).
+        session.onMicStalled = { [weak self] in
+            self?.toasts.show(
+                RecapCopy.micStalledMessage, style: .warning, actionTitle: "Change…"
+            ) {
+                SettingsOpener.open()
+            }
+        }
     }
 
     /// The one start-recording flow, shared by the Record button, the menu

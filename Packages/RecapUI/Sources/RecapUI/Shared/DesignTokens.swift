@@ -180,6 +180,12 @@ public enum RecapCopy {
     public static let systemAudioStalledMessage =
         "System audio has gone quiet — the other participant may not be recording. Your microphone is still capturing."
 
+    /// Toast fired when the mic goes silent mid-call (`RecorderEvent.micStalled`)
+    /// and bounded auto-recovery didn't bring it back — mirrors
+    /// `systemAudioStalledMessage` for the other direction.
+    public static let micStalledMessage =
+        "Microphone stopped responding. Check your input device."
+
     /// Toast fired when preflight finds no usable audio source at all — no
     /// meeting record is created for this attempt.
     public static let noAudioAccessMessage =

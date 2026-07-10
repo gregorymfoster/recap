@@ -42,6 +42,13 @@ public final class MeetingSessionStore {
     /// (the underlying `RecorderEvent.systemAudioStalled` only fires once).
     public private(set) var systemAudioStalled = false
 
+    /// True once the recorder's watchdog has detected the mic going silent
+    /// mid-recording and its bounded auto-recovery didn't bring it back —
+    /// mirrors `systemAudioStalled` but for the other direction. Sticky for
+    /// the rest of the recording, same as its mirror (`RecorderEvent.micStalled`
+    /// only reaches the UI once, after recovery attempts are exhausted).
+    public private(set) var micStalled = false
+
     /// Set when recording can't continue safely (e.g. disk full) — the
     /// session auto-stops so the audio captured so far is salvaged.
     public private(set) var recordingFailureMessage: String?
@@ -64,6 +71,11 @@ public final class MeetingSessionStore {
     /// arrives — `AppStores`/`RecordingController` wires this to a warning
     /// toast (mirrors `onInputRebuilt`'s wiring pattern).
     public var onSystemAudioStalled: (@MainActor () -> Void)?
+
+    /// Fires once per recording when `RecorderEvent.micStalled` arrives
+    /// (i.e. after bounded auto-recovery already failed) — mirrors
+    /// `onSystemAudioStalled`'s wiring pattern for the other direction.
+    public var onMicStalled: (@MainActor () -> Void)?
 
     private static let idleLevels = [Float](repeating: 0, count: 16)
     private let recorder: MeetingRecorder
@@ -163,6 +175,7 @@ public final class MeetingSessionStore {
         startFailureMessage = nil
         recordingFailureMessage = nil
         systemAudioStalled = false
+        micStalled = false
         do {
             let output = try await recorder.start(
                 writingTo: record.audioURL, includeSystemAudio: includeSystemAudio,
@@ -250,6 +263,12 @@ public final class MeetingSessionStore {
             // failure. `onSystemAudioStalled` routes the toast.
             systemAudioStalled = true
             onSystemAudioStalled?()
+        case .micStalled:
+            // Mirror image of `.systemAudioStalled`: the recorder already
+            // made bounded auto-recovery attempts before this arrived, so
+            // there's nothing left for the UI to do but tell the user.
+            micStalled = true
+            onMicStalled?()
         }
     }
 
@@ -291,6 +310,7 @@ public final class MeetingSessionStore {
         levels = Self.idleLevels
         systemAudioUnavailable = false
         systemAudioStalled = false
+        micStalled = false
         micUnavailable = false
         activeInputDeviceName = nil
         return (record, duration)

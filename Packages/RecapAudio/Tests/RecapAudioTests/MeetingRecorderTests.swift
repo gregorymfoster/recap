@@ -17,6 +17,12 @@ private final class FakeMicSource: MicCapturing {
     private(set) var stopCalled = false
     private(set) var continuation: AsyncStream<[Float]>.Continuation?
 
+    /// Counts calls to `forceRebuild()` — the liveness watchdog's bounded
+    /// mic auto-recovery. Tests set `onForceRebuild` to simulate a
+    /// successful (or permanently failed) recovery attempt.
+    private(set) var forceRebuildCallCount = 0
+    var onForceRebuild: (() -> Void)?
+
     func start() throws -> AsyncStream<[Float]> {
         if let startError { throw startError }
         let (stream, continuation) = AsyncStream.makeStream(of: [Float].self)
@@ -28,6 +34,11 @@ private final class FakeMicSource: MicCapturing {
         stopCalled = true
         continuation?.finish()
         continuation = nil
+    }
+
+    func forceRebuild() {
+        forceRebuildCallCount += 1
+        onForceRebuild?()
     }
 }
 
@@ -94,6 +105,23 @@ private struct FakeError: Error {}
             await Task.yield()
         }
         // Let the detached pump tasks catch up with the mixer actor.
+        try? await Task.sleep(for: .milliseconds(50))
+    }
+
+    /// Same as `push(_:seconds:...)` above but for the system-audio side —
+    /// used by the mic-stall tests, which need system audio to keep flowing
+    /// while the mic side stays silent.
+    private func pushSystem(
+        _ continuation: AsyncStream<[Float]>.Continuation, seconds: Double,
+        chunkSeconds: Double = 0.5, sampleRate: Double = AudioPipeline.mixerSampleRate
+    ) async {
+        var remaining = seconds
+        while remaining > 0 {
+            let this = min(chunkSeconds, remaining)
+            continuation.yield(sineBlock(seconds: this, sampleRate: sampleRate))
+            remaining -= this
+            await Task.yield()
+        }
         try? await Task.sleep(for: .milliseconds(50))
     }
 
@@ -484,6 +512,109 @@ private struct FakeError: Error {}
         await collectorTask.value
 
         #expect(!collected.contains(.systemAudioStalled))
+    }
+
+    // MARK: 7c. Mic stall detection + bounded auto-recovery (mirror image of 7b)
+
+    /// Mirror image of `systemAudioGoingSilentMidRecordingEmitsStallEvent`:
+    /// the mic goes silent mid-call (e.g. a USB device unplugged with no
+    /// fallback) while system audio keeps flowing. Unlike the system side,
+    /// the recorder first makes bounded recovery attempts
+    /// (`MicCapturing.forceRebuild()`, up to `maxMicRebuildAttempts` == 2)
+    /// before giving up and emitting `.micStalled` — this fake's
+    /// `forceRebuild()` is a no-op (simulating a truly dead device with no
+    /// fallback), so recovery never succeeds and the event must eventually
+    /// surface exactly once.
+    @Test func micGoingSilentMidRecordingAttemptsRecoveryThenEmitsMicStalledEvent() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("audio.m4a")
+        let mic = FakeMicSource()
+        let tap = FakeSystemAudioSource()
+        let recorder = MeetingRecorder(mic: mic, makeSystemTap: { tap })
+
+        let output = try await recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
+        #expect(recorder.micActive == true)
+        let micContinuation = try #require(mic.continuation)
+        let systemContinuation = try #require(tap.continuation)
+
+        var collected: [RecorderEvent] = []
+        let collectorTask = Task {
+            for await event in output.events {
+                collected.append(event)
+            }
+        }
+
+        // A brief moment of real two-sided audio first, so this is a
+        // genuine mid-call dropout, not "the mic never started".
+        await push(micContinuation, seconds: 0.2)
+        systemContinuation.yield(sineBlock(seconds: 0.2))
+        try? await Task.sleep(for: .milliseconds(50))
+
+        // Mic goes silent for good; system audio keeps flowing past three
+        // stall thresholds — two bounded recovery attempts, then the final
+        // report once recovery keeps failing.
+        let secondsPerThreshold = Double(LivenessWatchdog.stallThreshold) / AudioPipeline.mixerSampleRate
+        await pushSystem(systemContinuation, seconds: secondsPerThreshold * 3.5)
+
+        #expect(mic.forceRebuildCallCount == 2)
+        #expect(collected.contains(.micStalled))
+        // Exactly once — not repeated on every subsequent system push.
+        #expect(collected.filter { $0 == .micStalled }.count == 1)
+        // Mirrors `.systemAudioStalled`'s non-fatal semantics: the recording
+        // itself is not stopped or marked inactive by a stall alone. Checked
+        // before `stop()`, which unconditionally resets `micActive`.
+        #expect(recorder.micActive == true)
+
+        _ = await recorder.stop()
+        await collectorTask.value
+    }
+
+    /// When the bounded recovery attempt actually brings the mic back (the
+    /// fake's `forceRebuild()` here pushes fresh samples, simulating a
+    /// successful graph rebuild against a fallback device), the recorder
+    /// must NOT emit `.micStalled` and must reset its attempt counter — a
+    /// later, independent stall gets its own fresh attempts rather than
+    /// being treated as already-exhausted.
+    @Test func micRecoveringDuringFirstAttemptSuppressesMicStalledAndResetsAttempts() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("audio.m4a")
+        let mic = FakeMicSource()
+        let tap = FakeSystemAudioSource()
+        let recorder = MeetingRecorder(mic: mic, makeSystemTap: { tap })
+
+        let output = try await recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
+        let micContinuation = try #require(mic.continuation)
+        let systemContinuation = try #require(tap.continuation)
+
+        // Simulate a successful rebuild: as soon as `forceRebuild()` is
+        // called, mic samples start flowing again.
+        mic.onForceRebuild = { [micContinuation] in
+            micContinuation.yield([Float](repeating: 0.1, count: 4_800))
+        }
+
+        var collected: [RecorderEvent] = []
+        let collectorTask = Task {
+            for await event in output.events {
+                collected.append(event)
+            }
+        }
+
+        await push(micContinuation, seconds: 0.2)
+        systemContinuation.yield(sineBlock(seconds: 0.2))
+        try? await Task.sleep(for: .milliseconds(50))
+
+        // Cross exactly one stall threshold — first recovery attempt fires,
+        // and (per the fake's hook above) immediately "succeeds".
+        let secondsPerThreshold = Double(LivenessWatchdog.stallThreshold) / AudioPipeline.mixerSampleRate
+        await pushSystem(systemContinuation, seconds: secondsPerThreshold + 0.2)
+
+        #expect(mic.forceRebuildCallCount == 1)
+        #expect(!collected.contains(.micStalled))
+
+        _ = await recorder.stop()
+        await collectorTask.value
     }
 
     // MARK: 7. Levels stream RMS > 0

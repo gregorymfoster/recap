@@ -108,6 +108,16 @@ public final class MicSource {
         activeDeviceName = nil
     }
 
+    /// Bypasses the 400ms debounce and rebuilds right now — the liveness
+    /// watchdog's bounded recovery attempts need the rebuild to happen
+    /// immediately, not after the debounce window a passive device-change
+    /// notification can afford to wait for.
+    public func forceRebuild() {
+        rebuildDebounce?.cancel()
+        rebuildDebounce = nil
+        rebuildNow(reason: "mic unresponsive — attempting recovery")
+    }
+
     // MARK: Capture graph
 
     private func attachTapAndStart() throws {

@@ -14,6 +14,11 @@ public protocol MicCapturing: AnyObject {
     var activeDeviceName: String? { get }
     func start() throws -> AsyncStream<[Float]>
     func stop()
+    /// Immediately rebuilds the capture graph, bypassing the normal
+    /// debounce — used by the liveness watchdog's bounded auto-recovery when
+    /// the mic has gone silent mid-recording. A no-op if capture isn't
+    /// currently running.
+    func forceRebuild()
 }
 
 /// System-audio capture as `MeetingRecorder` consumes it. `SystemAudioTap` is

@@ -27,6 +27,8 @@ private final class FakeMicSource: MicCapturing {
         continuation?.finish()
         continuation = nil
     }
+
+    func forceRebuild() {}
 }
 
 /// Fake system-audio source, same shape as `FakeMicSource`.

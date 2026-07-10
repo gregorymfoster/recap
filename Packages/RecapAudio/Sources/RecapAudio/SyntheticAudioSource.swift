@@ -42,6 +42,10 @@ public final class SyntheticMicSource: MicCapturing {
         continuation?.finish()
         continuation = nil
     }
+
+    /// No-op: the synthetic soak source never actually goes silent (it's a
+    /// timer pumping zero-filled buffers), so there's nothing to recover.
+    public func forceRebuild() {}
 }
 
 /// Synthetic `SystemAudioCapturing` conformer: yields zero-filled buffers on
