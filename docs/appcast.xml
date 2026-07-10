@@ -3,12 +3,12 @@
     <channel>
         <title>Recap</title>
         <item>
-            <title>0.16.4</title>
-            <pubDate>Thu, 09 Jul 2026 15:41:51 -0400</pubDate>
-            <sparkle:version>156</sparkle:version>
-            <sparkle:shortVersionString>0.16.4</sparkle:shortVersionString>
+            <title>0.17.0</title>
+            <pubDate>Fri, 10 Jul 2026 12:00:42 -0400</pubDate>
+            <sparkle:version>184</sparkle:version>
+            <sparkle:shortVersionString>0.17.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/gregorymfoster/recap/releases/download/v0.16.4/Recap-0.16.4.dmg" length="9948249" type="application/octet-stream" sparkle:edSignature="UfLWOtAfEWnWP8tXyeCg3JAf2eUMJu/XaqWXyesUEBW1nZ8H9XJa/vhP1E1iNs2tbIG72mMN+dsPC/zRigulDg=="/>
+            <enclosure url="https://github.com/gregorymfoster/recap/releases/download/v0.17.0/Recap-0.17.0.dmg" length="9819976" type="application/octet-stream" sparkle:edSignature="95TYG/vm3Yr1a/+9uYMY+SNXD7JJFRigk/bOYFB0Uw34Gq2gs8M8eHQfIggkbt3WB7YwCETCbdp6C/4za9jTDA=="/>
         </item>
     </channel>
 </rss>
