@@ -1,300 +1,116 @@
-import CoreAudio
-import Foundation
-import RecapAudio
 import RecapCore
-import RecapTranscription
 import SwiftUI
 
-/// The meeting editor (design mocks 1a/1b): notes-first, with a toggleable
-/// transcript pane — live while recording, saved afterwards.
+/// The meeting detail page (design mock 10b/11d): "the transcript IS the
+/// page" — a single centered column with the title, a collapsed-by-default
+/// summary/notes disclosure, and the full transcript rendered inline below
+/// it. Recording now routes to its own screen, so this view only ever shows
+/// a saved (or still-processing) meeting — there is no live-recording branch
+/// here anymore.
 struct MeetingDetailView: View {
     var record: MeetingRecord
     @Environment(LibraryStore.self) private var library
-    @Environment(MeetingSessionStore.self) private var session
-    @Environment(WhisperModelManager.self) private var models
-    @Environment(SettingsStore.self) private var settings
+    @Environment(AppStores.self) private var stores: AppStores?
     @Environment(QueueStore.self) private var queue: QueueStore?
     @State private var notes = ""
-    @State private var showTranscript = false
     @State private var savedTranscript: Transcript?
     @State private var enhancedNotes: String?
     @State private var speakerNames: [String: String] = [:]
-    @State private var showingOriginal = false
-    @State private var inputDevices: [AudioInputDevice] = []
-    @State private var deviceListListener: AudioObjectPropertyListenerBlock?
+    @State private var timedNotes: [TimedNote] = []
     @State private var isEditingTitle = false
     @State private var editedTitle = ""
     @FocusState private var titleFieldFocused: Bool
 
-    private var isLiveMeeting: Bool {
-        session.activeRecord?.meeting.id == record.meeting.id
-    }
+    /// Column width for the whole page — title, summary disclosure, and
+    /// transcript all share this single centered column (design mock 10b/11d).
+    private static let columnWidth: CGFloat = 620
 
     var body: some View {
-        VStack(spacing: 0) {
-            HSplitView {
-                editor
-                    .frame(minWidth: 320)
-                // Right-side inspector per design handoff v2 §6b.
-                if showTranscript {
-                    TranscriptPane(
-                        utterances: isLiveMeeting ? session.liveUtterances : savedTranscript?.utterances ?? [],
-                        partial: isLiveMeeting ? session.partialUtterance : nil,
-                        isLive: isLiveMeeting,
-                        liveState: isLiveMeeting ? session.liveState : nil,
-                        onDownloadStreamingModel: nil,
-                        speakerNames: speakerNames,
-                        attendees: record.meeting.attendees,
-                        onRenameSpeaker: isLiveMeeting ? nil : { speakerID, name in
-                            library.renameSpeaker(speakerID, to: name, in: record)
-                            speakerNames[speakerID] = name
-                        }
-                    )
-                    .frame(minWidth: 260, idealWidth: 340)
-                    .axID(.transcriptPane)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                header
+                if !record.meeting.processingIssues.isEmpty {
+                    issuesSection
+                }
+                SummaryDisclosure(enhancedNotes: enhancedNotes, notes: $notes, isEnhancing: isEnhancing)
+                transcriptSection
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
+            .padding(.bottom, 40)
+            .frame(maxWidth: Self.columnWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Tokens.surface)
+        .accessibilityElement(children: .contain)
+        .axID(.detailPane)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                HStack(spacing: 12) {
+                    backedUpStatus
+                    copyTranscriptButton
                 }
             }
-            bottomBar
         }
-        .navigationTitle(record.meeting.title)
         .task(id: record.meeting.id) {
             notes = library.loadNotes(for: record)
             savedTranscript = library.loadTranscript(for: record)
             enhancedNotes = library.loadEnhancedNotes(for: record)
             speakerNames = library.loadSpeakerNames(for: record)
-            showingOriginal = record.meeting.preferredNotesView == .original
-            // Default to the split view whenever there's a transcript to show —
-            // live meetings (text appears as it's spoken) and finished ones
-            // (transcript lands next to the summary without hunting for the
-            // toggle). The toolbar toggle still hides it.
-            showTranscript = isLiveMeeting || savedTranscript?.utterances.isEmpty == false
+            timedNotes = library.timedNotes(for: record)
         }
         .task(id: record.meeting.status) {
-            // Refresh once the pipeline lands results (status flips to ready).
+            // Refresh once the pipeline lands results (status flips to ready)
+            // so the pretranscript skeleton swaps for the real transcript in
+            // place without a manual reload.
             if case .ready = record.meeting.status {
-                if savedTranscript == nil {
+                if savedTranscript?.utterances.isEmpty != false {
                     savedTranscript = library.loadTranscript(for: record)
                 }
                 if enhancedNotes == nil {
                     enhancedNotes = library.loadEnhancedNotes(for: record)
                 }
-                if savedTranscript?.utterances.isEmpty == false {
-                    showTranscript = true
-                }
+                timedNotes = library.timedNotes(for: record)
             }
         }
         .onChange(of: notes) {
             library.notesChanged(notes, in: record)
         }
-        .onAppear {
-            inputDevices = AudioInputDevices.inputDevices()
-            deviceListListener = AudioInputDevices.addDeviceListListener(queue: .main) {
-                Task { @MainActor in inputDevices = AudioInputDevices.inputDevices() }
-            }
-        }
-        .onDisappear {
-            if let deviceListListener {
-                AudioInputDevices.removeDeviceListListener(deviceListListener)
-            }
-            deviceListListener = nil
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            titleText
+            Text(metaLine)
+                .font(.system(size: 12))
+                .foregroundStyle(Tokens.textPrimary.opacity(0.45))
+                .lineLimit(1)
         }
     }
 
-    private var editor: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            detailControls
-            detailPaneContent
+    /// "Thu, Jul 9 · 9:29 AM · 15 min · 3 speakers · on-device" — date,
+    /// start time, duration, speaker count (once known from the transcript),
+    /// and a plain "on-device" badge-as-text (design mock 10b/11d).
+    private var metaLine: String {
+        var parts = [
+            record.meeting.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()),
+            record.meeting.date.formatted(.dateTime.hour().minute()),
+        ]
+        if record.meeting.duration > 0 {
+            parts.append(Duration.seconds(record.meeting.duration).formatted(.units(allowed: [.hours, .minutes], width: .narrow)))
         }
-        .background(Tokens.surface)
+        if let speakerCount, speakerCount > 0 {
+            parts.append(speakerCount == 1 ? "1 speaker" : "\(speakerCount) speakers")
+        }
+        parts.append("on-device")
+        return parts.joined(separator: " · ")
     }
 
-    /// Copy + transcript-toggle chips on their own top row, right-aligned so
-    /// they never compete for width with the date/badge row (which matters when
-    /// the transcript pane is open and this editor pane is narrow). Kept OUTSIDE
-    /// `detailPaneContent`'s `.axID(.detailPane)` subtree so each chip retains
-    /// its own AXID (`detail-copy-notes-button` / `transcript-toggle-button`)
-    /// instead of being absorbed into `library-detail-pane`. They used to sit in
-    /// the window `.toolbar`, but macOS 26 wraps toolbar items in a shared Liquid
-    /// Glass capsule — the outer "bubble" the design doesn't want behind these
-    /// already-styled chips.
-    private var detailControls: some View {
-        HStack(spacing: 8) {
-            Spacer(minLength: 0)
-            copyNotesButton
-            transcriptToggle
-        }
-        .padding(.horizontal, 40)
-        .padding(.top, 18)
-    }
-
-    private var detailPaneContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-                .padding(.horizontal, 40)
-                .padding(.top, 10)
-            if !record.meeting.processingIssues.isEmpty {
-                VStack(spacing: 8) {
-                    ForEach(record.meeting.processingIssues) { issue in
-                        ProcessingIssueCard(issue: issue) { retry(issue) }
-                    }
-                }
-                .padding(.horizontal, 40)
-                .padding(.top, 14)
-            }
-            if case .enhancing = record.meeting.status {
-                enhancingBanner
-                    .padding(.horizontal, 40)
-                    .padding(.top, 16)
-            }
-            if let enhancedNotes, !showingOriginal {
-                EnhancedNotesView(markdown: enhancedNotes)
-                    .axID(.enhancedNotesView)
-                    .padding(.top, 8)
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        enhancedCaption
-                            .padding(.horizontal, 40)
-                            .padding(.top, 10)
-                            .padding(.bottom, 16)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Tokens.surface)
-                    }
-            } else {
-                TextEditor(text: $notes)
-                    .accessibilityLabel("Meeting notes")
-                    .overlay(alignment: .topLeading) {
-                        if notes.isEmpty {
-                            Text("Type rough notes, decisions, or follow-ups…")
-                                .font(Tokens.body)
-                                .foregroundStyle(Tokens.textTertiary)
-                                .padding(.top, 8)
-                                .padding(.leading, 5)
-                                .allowsHitTesting(false)
-                        }
-                    }
-                    .font(Tokens.body)
-                    .foregroundStyle(enhancedNotes != nil ? Tokens.textSecondary : Tokens.textBody)
-                    .lineSpacing(7)
-                    .scrollContentBackground(.hidden)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 34)
-                    .padding(.top, 16)
-                    .padding(.bottom, 12)
-                    .axID(.notesEditor)
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .axID(.detailPane)
-    }
-
-    /// True when the editor pane is currently showing the enhanced summary
-    /// rather than the user's raw notes.
-    private var isShowingEnhanced: Bool {
-        enhancedNotes != nil && !showingOriginal
-    }
-
-    /// Copies whatever the editor pane is showing right now: the enhanced
-    /// summary markdown, or the raw notes. Lives in the window toolbar next
-    /// to the transcript toggle (design handoff v2 §6b).
-    @ViewBuilder
-    private var copyNotesButton: some View {
-        let displayed = isShowingEnhanced ? (enhancedNotes ?? "") : notes
-        if !displayed.isEmpty {
-            CopyButton(help: isShowingEnhanced ? "Copy summary" : "Copy notes", toolbarStyle: true) {
-                isShowingEnhanced ? (enhancedNotes ?? "") : notes
-            }
-            .axID(.detailCopyNotesButton)
-        }
-    }
-
-    /// Circular toolbar bubble matching the Library toolbar family; filled
-    /// with the accent color while the transcript inspector is visible.
-    private var transcriptToggle: some View {
-        Button {
-            showTranscript.toggle()
-        } label: {
-            Image(systemName: "text.quote")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(showTranscript ? Color.white : Tokens.textSecondary)
-                .frame(width: 28, height: 28)
-                .background(
-                    showTranscript ? AnyShapeStyle(Tokens.accentBlue) : AnyShapeStyle(Tokens.chipBackground),
-                    in: Circle()
-                )
-                .overlay {
-                    if !showTranscript {
-                        Circle().stroke(Tokens.hairline, lineWidth: 1)
-                    }
-                }
-        }
-        .buttonStyle(.plain)
-        .help(showTranscript ? "Hide transcript" : "Show transcript")
-        .axID(.transcriptToggleButton)
-    }
-
-    /// Blue-tinted banner shown while this meeting's notes are being
-    /// enhanced on-device; raw notes remain visible/editable below at
-    /// reduced emphasis. Design handoff v2 §8c.
-    private var enhancingBanner: some View {
-        HStack(spacing: 9) {
-            ProgressView()
-                .controlSize(.small)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Enhancing your notes from the transcript")
-                    .font(Tokens.caption.weight(.semibold))
-                    .foregroundStyle(Tokens.accentBlue)
-                Text("On-device · your notes stay untouched below")
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(Tokens.textSecondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 10)
-        .background(Tokens.accentBlue.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
-        .overlay {
-            RoundedRectangle(cornerRadius: 9)
-                .strokeBorder(Tokens.accentBlue.opacity(0.2))
-        }
-    }
-
-    /// "✨ Enhanced from the transcript" + Undo, shown under the enhanced
-    /// content. Undo is non-destructive — it only switches the active view
-    /// back to My notes; the enhanced notes stay one click away.
-    private var enhancedCaption: some View {
-        HStack(spacing: 6) {
-            Text("✨ Enhanced from the transcript")
-                .font(.system(size: 10.5))
-                .foregroundStyle(Tokens.textTertiary)
-                .fixedSize(horizontal: true, vertical: false)
-            Button {
-                setNotesView(.original)
-            } label: {
-                Text("Undo")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(Tokens.accentBlue)
-            }
-            .buttonStyle(.plain)
-            .axID(.enhancedNotesUndoButton)
-        }
-    }
-
-    /// "✨ Enhanced / My notes" native segmented control, top-right of the
-    /// notes column once enhanced notes exist. Design handoff v2 §8c.
-    @ViewBuilder
-    private var notesModeToggle: some View {
-        if enhancedNotes != nil {
-            Picker("", selection: Binding(
-                get: { showingOriginal ? NotesViewPreference.original : .enhanced },
-                set: { setNotesView($0) }
-            )) {
-                Text("✨ Enhanced").tag(NotesViewPreference.enhanced)
-                Text("My notes").tag(NotesViewPreference.original)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .axID(.notesModeToggle)
-        }
+    private var speakerCount: Int? {
+        guard let utterances = savedTranscript?.utterances, !utterances.isEmpty else { return nil }
+        return Set(utterances.compactMap(\.speakerID)).count
     }
 
     /// Click-to-edit title (Granola-like): a double-click on the read-only
@@ -352,14 +168,14 @@ struct MeetingDetailView: View {
         isEditingTitle = false
     }
 
-    /// Switches the active notes view and persists the choice per meeting
-    /// (nil default means "prefer Enhanced whenever available" — selecting
-    /// Enhanced explicitly stores nil rather than `.enhanced` so a later
-    /// meeting without enhancement doesn't inherit a stale "original" habit
-    /// while still recording today's explicit choice).
-    private func setNotesView(_ preference: NotesViewPreference) {
-        showingOriginal = preference == .original
-        library.setPreferredNotesView(preference == .original ? .original : nil, for: record.meeting.id)
+    // MARK: Processing issues
+
+    private var issuesSection: some View {
+        VStack(spacing: 8) {
+            ForEach(record.meeting.processingIssues) { issue in
+                ProcessingIssueCard(issue: issue) { retry(issue) }
+            }
+        }
     }
 
     private func retry(_ issue: ProcessingIssue) {
@@ -373,139 +189,141 @@ struct MeetingDetailView: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text(record.meeting.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
-                    .font(.system(size: 11))
-                    .foregroundStyle(Tokens.textSecondary)
-                    .lineLimit(1)
-                    .fixedSize()
-                OnDeviceBadge()
-                    .fixedSize()
-                if session.systemAudioUnavailable, isLiveMeeting {
-                    Text(RecapCopy.systemAudioUnavailableMessage)
-                        .font(Tokens.microLabel)
-                        .foregroundStyle(Tokens.warningAmberText)
-                }
-            }
-            // Title and mode toggle share a row only when the title actually
-            // fits beside it; in a narrow editor pane the toggle drops below
-            // instead of squeezing the title into letter-per-line wrapping.
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    titleText
-                    Spacer(minLength: 12)
-                    notesModeToggle
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    titleText
-                    notesModeToggle
-                }
-            }
-            if let subtitle = record.meeting.subtitle, !subtitle.isEmpty {
-                Text(subtitle)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Tokens.textSecondary)
-                    .lineLimit(2)
-            }
-            if !record.meeting.attendees.isEmpty {
-                HStack(spacing: 6) {
-                    ForEach(record.meeting.attendees, id: \.self) { attendee in
-                        Text(attendee)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Tokens.textSecondary)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 3)
-                            .background(Tokens.chipBackground, in: Capsule())
-                    }
-                }
-                .padding(.top, 4)
-            }
-            if isLiveMeeting {
-                liveInputRow
-            }
-        }
+    private var isEnhancing: Bool {
+        if case .enhancing = record.meeting.status { return true }
+        return false
     }
 
-    /// Input-device selector, shown only in the live meeting's header. The
-    /// transient input-switch note is routed to a toast via `onInputRebuilt`
-    /// instead of being rendered here.
-    private var liveInputRow: some View {
-        @Bindable var settings = settings
-        return ViewThatFits(in: .horizontal) {
-            inputPickerRow(settings: $settings, showsName: true)
-            inputPickerRow(settings: $settings, showsName: false)
-        }
-    }
+    // MARK: Transcript
 
-    private func inputPickerRow(settings: Bindable<SettingsStore>, showsName: Bool) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "mic.fill")
-                .font(.system(size: 10))
-                .foregroundStyle(Tokens.textTertiary)
-            Picker("Input device", selection: settings.preferredInputUID) {
-                Text("System default").tag(String?.none)
-                ForEach(inputDevices) { device in
-                    Text(device.name).tag(String?.some(device.uid))
-                }
-            }
-            .labelsHidden()
-            .controlSize(.small)
-            .frame(maxWidth: 250)
-            .axID(.liveInputDevicePicker)
-            .onChange(of: settings.wrappedValue.preferredInputUID) {
-                session.setPreferredInputUID(settings.wrappedValue.preferredInputUID)
-            }
-            if showsName, let name = session.activeInputDeviceName {
-                Text(name)
-                    .font(Tokens.caption)
-                    .foregroundStyle(Tokens.textTertiary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-        }
-        .padding(.top, 2)
-    }
-
-    /// Shows the quiet status bar for a finished meeting; hides entirely
-    /// while this meeting is actively recording — the in-window recording
-    /// pill overlays that area.
+    /// The transcript, or — before one exists yet — the pretranscript state
+    /// (design mock 11d): status copy, a progress bar when known, and
+    /// skeleton lines.
     @ViewBuilder
-    private var bottomBar: some View {
-        if isLiveMeeting { EmptyView() } else { statusBar }
+    private var transcriptSection: some View {
+        if let savedTranscript, !savedTranscript.utterances.isEmpty {
+            TranscriptPane(
+                items: TranscriptMerge.merged(utterances: savedTranscript.utterances, notes: timedNotes),
+                speakerNames: speakerNames,
+                attendees: record.meeting.attendees,
+                onRenameSpeaker: { speakerID, name in
+                    library.renameSpeaker(speakerID, to: name, in: record)
+                    speakerNames[speakerID] = name
+                }
+            )
+            .axID(.transcriptPane)
+        } else {
+            pretranscriptState
+        }
     }
 
-    /// Quiet single-line status bar (global decision #5): active model name
-    /// + priority on the left, save location on the right. No status chips.
-    private var statusBar: some View {
-        HStack(spacing: 14) {
-            Text(models.activeModel.map { "\($0.displayName) · low priority" } ?? "No model installed")
-            Spacer()
-            if case .ready = record.meeting.status {
-                Text("Saved · \(library.saveLocationLabel)")
-            } else {
-                Text("Saving to \(library.saveLocationLabel)")
+    private var pretranscriptState: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                if case .transcribing = record.meeting.status {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+                Text(pretranscriptStatusLabel)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(pretranscriptStatusColor)
             }
+            if let transcribingProgress {
+                ProgressView(value: transcribingProgress)
+                    .progressViewStyle(.linear)
+                    .tint(Tokens.accentBlue)
+                    .frame(height: 4)
+            }
+            skeletonLines
         }
-        .font(.system(size: 10.5))
-        .foregroundStyle(Tokens.textSecondary)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-        .background(Tokens.subtleBackground.opacity(0.9))
-        .overlay(alignment: .top) { Divider() }
+        .padding(.top, 4)
+        .axID(.detailSkeleton)
+    }
+
+    private var pretranscriptStatusLabel: String {
+        switch record.meeting.status {
+        case .transcribing(let progress):
+            "Transcribing · \(Int((progress * 100).rounded()))%"
+        case .needsModel:
+            "Waiting for setup"
+        case .recovered:
+            "Recovered — press Transcribe in the Library"
+        case .error:
+            "Transcription needs another try"
+        default:
+            "Waiting to transcribe"
+        }
+    }
+
+    private var pretranscriptStatusColor: Color {
+        if case .error = record.meeting.status { return Tokens.warningAmberText }
+        return Tokens.accentBlue
+    }
+
+    private var transcribingProgress: Double? {
+        if case .transcribing(let progress) = record.meeting.status { return progress }
+        return nil
+    }
+
+    private var skeletonLines: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            skeletonLine(widthFraction: 0.88)
+            skeletonLine(widthFraction: 0.72)
+            skeletonLine(widthFraction: 0.80)
+        }
+    }
+
+    private func skeletonLine(widthFraction: CGFloat) -> some View {
+        GeometryReader { proxy in
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Tokens.chipBackground)
+                .frame(width: proxy.size.width * widthFraction, height: 9)
+        }
+        .frame(height: 9)
+    }
+
+    // MARK: Toolbar
+
+    /// Quiet "✓ Backed up" status, hidden while the mirror backup for this
+    /// meeting is still pending — `stores` is optional (previews/tests) so
+    /// this simply doesn't show without a real backup store.
+    @ViewBuilder
+    private var backedUpStatus: some View {
+        if case .backedUp = stores?.backup.backupStatus(for: record.meeting.id) {
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Tokens.successGreenText)
+                Text("Backed up")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Tokens.textPrimary.opacity(0.45))
+            }
+            .axID(.detailBackedUpStatus)
+        }
+    }
+
+    /// The page's one copy affordance — copies the full transcript, since
+    /// the transcript is the page's primary content now.
+    @ViewBuilder
+    private var copyTranscriptButton: some View {
+        if let savedTranscript, !savedTranscript.utterances.isEmpty {
+            CopyButton(help: "Copy transcript", toolbarStyle: true) {
+                TranscriptFormatter.plainText(utterances: savedTranscript.utterances, speakerNames: speakerNames)
+            }
+            .axID(.transcriptCopyButton)
+        }
     }
 }
 
 #if DEBUG
-private func previewRecord() -> MeetingRecord {
+private func previewRecord(status: MeetingStatus = .ready) -> MeetingRecord {
     MeetingRecord(
         meeting: Meeting(
             title: "Design sync — Q3 roadmap",
             date: .now.addingTimeInterval(-3600),
             duration: 1_453,
             attendees: ["Maya", "Sam", "Priya"],
-            status: .ready
+            status: status
         ),
         folderURL: URL(filePath: "/dev/null")
     )
@@ -514,19 +332,19 @@ private func previewRecord() -> MeetingRecord {
 #Preview("Light") {
     MeetingDetailView(record: previewRecord())
         .environment(LibraryStore.fixture())
-        .environment(MeetingSessionStore())
-        .environment(WhisperModelManager())
-        .environment(SettingsStore())
         .frame(width: 900, height: 640)
 }
 
 #Preview("Dark") {
     MeetingDetailView(record: previewRecord())
         .environment(LibraryStore.fixture())
-        .environment(MeetingSessionStore())
-        .environment(WhisperModelManager())
-        .environment(SettingsStore())
         .frame(width: 900, height: 640)
         .preferredColorScheme(.dark)
+}
+
+#Preview("Pretranscript") {
+    MeetingDetailView(record: previewRecord(status: .transcribing(progress: 0.42)))
+        .environment(LibraryStore.fixture())
+        .frame(width: 900, height: 640)
 }
 #endif

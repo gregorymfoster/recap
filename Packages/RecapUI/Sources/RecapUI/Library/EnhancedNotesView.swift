@@ -8,37 +8,40 @@ import SwiftUI
 struct EnhancedNotesView: View {
     var markdown: String
 
+    // No longer wraps itself in a `ScrollView` (chunk 3B, meeting-detail
+    // redesign): the whole meeting-detail page is one outer `ScrollView`
+    // now ("the transcript IS the page"), and this view is laid out inline
+    // inside it — nesting a second `ScrollView` here would either break
+    // scrolling or clip to an arbitrary height. Callers that still want a
+    // bounded, independently-scrolling region can wrap this view in their
+    // own `ScrollView`.
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(Array(markdown.components(separatedBy: .newlines).enumerated()), id: \.offset) { _, rawLine in
-                    let line = rawLine.trimmingCharacters(in: .whitespaces)
-                    if line.isEmpty {
-                        EmptyView()
-                    } else if let heading = strippedPrefix(line, prefixes: ["### ", "## ", "# "]) {
-                        Text(inline(heading))
-                            .font(.system(size: 13.5, weight: .bold))
-                            .foregroundStyle(Tokens.textPrimary)
-                            .tint(Tokens.accentBlue)
-                            .padding(.top, 8)
-                    } else if let item = strippedPrefix(line, prefixes: ["- [ ] ", "- [x] ", "* [ ] ", "* [x] "]) {
-                        checkboxRow(checked: line.contains("[x]"), text: item)
-                    } else if let bullet = strippedPrefix(line, prefixes: ["- ", "* ", "• "]) {
-                        bulletRow(bullet)
-                    } else {
-                        Text(inline(line))
-                            .font(Tokens.body)
-                            .lineSpacing(6)
-                            .foregroundStyle(Tokens.textBody)
-                            .tint(Tokens.accentBlue)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(markdown.components(separatedBy: .newlines).enumerated()), id: \.offset) { _, rawLine in
+                let line = rawLine.trimmingCharacters(in: .whitespaces)
+                if line.isEmpty {
+                    EmptyView()
+                } else if let heading = strippedPrefix(line, prefixes: ["### ", "## ", "# "]) {
+                    Text(inline(heading))
+                        .font(.system(size: 13.5, weight: .bold))
+                        .foregroundStyle(Tokens.textPrimary)
+                        .tint(Tokens.accentBlue)
+                        .padding(.top, 8)
+                } else if let item = strippedPrefix(line, prefixes: ["- [ ] ", "- [x] ", "* [ ] ", "* [x] "]) {
+                    checkboxRow(checked: line.contains("[x]"), text: item)
+                } else if let bullet = strippedPrefix(line, prefixes: ["- ", "* ", "• "]) {
+                    bulletRow(bullet)
+                } else {
+                    Text(inline(line))
+                        .font(Tokens.body)
+                        .lineSpacing(6)
+                        .foregroundStyle(Tokens.textBody)
+                        .tint(Tokens.accentBlue)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .padding(.horizontal, 40)
-            .padding(.vertical, 16)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func bulletRow(_ text: String) -> some View {
@@ -90,29 +93,35 @@ struct EnhancedNotesView: View {
 }
 
 #Preview {
-    EnhancedNotesView(markdown: """
-    ## Updates
-    - Maya shipped the Q3 roadmap draft — feedback due **Friday**.
-    - Performance regressions on older laptops — Sam follows up with numbers next week.
+    ScrollView {
+        EnhancedNotesView(markdown: """
+        ## Updates
+        - Maya shipped the Q3 roadmap draft — feedback due **Friday**.
+        - Performance regressions on older laptops — Sam follows up with numbers next week.
 
-    ## Action items
-    - [ ] Sam pings IT for API access **by EOD**
-    - [x] Maya escalates if no response by tomorrow standup
-    """)
+        ## Action items
+        - [ ] Sam pings IT for API access **by EOD**
+        - [x] Maya escalates if no response by tomorrow standup
+        """)
+        .padding(20)
+    }
     .frame(width: 560, height: 400)
     .background(Tokens.surface)
 }
 
 #Preview("Dark") {
-    EnhancedNotesView(markdown: """
-    ## Updates
-    - Maya shipped the Q3 roadmap draft — feedback due **Friday**.
-    - Performance regressions on older laptops — Sam follows up with numbers next week.
+    ScrollView {
+        EnhancedNotesView(markdown: """
+        ## Updates
+        - Maya shipped the Q3 roadmap draft — feedback due **Friday**.
+        - Performance regressions on older laptops — Sam follows up with numbers next week.
 
-    ## Action items
-    - [ ] Sam pings IT for API access **by EOD**
-    - [x] Maya escalates if no response by tomorrow standup
-    """)
+        ## Action items
+        - [ ] Sam pings IT for API access **by EOD**
+        - [x] Maya escalates if no response by tomorrow standup
+        """)
+        .padding(20)
+    }
     .frame(width: 560, height: 400)
     .background(Tokens.surface)
     .preferredColorScheme(.dark)
