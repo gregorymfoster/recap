@@ -213,6 +213,7 @@ public struct RootView: View {
                             }
                             .axID(.libraryBackButton)
                         }
+                        .sharedBackgroundVisibility(.hidden)
                     }
             } else {
                 LibraryView(showSearch: $showSearch)

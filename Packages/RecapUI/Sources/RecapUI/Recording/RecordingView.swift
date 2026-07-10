@@ -49,9 +49,11 @@ struct RecordingView: View {
                 }
                 .axID(.libraryBackButton)
             }
+            .sharedBackgroundVisibility(.hidden)
             ToolbarItem(placement: .primaryAction) {
                 savingStatus
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .overlay(alignment: .bottom) {
             if session.activeRecord != nil, let clock = session.clock {

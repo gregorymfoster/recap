@@ -53,6 +53,7 @@ struct MeetingDetailView: View {
                     copyTranscriptButton
                 }
             }
+            .sharedBackgroundVisibility(.hidden)
         }
         .task(id: record.meeting.id) {
             notes = library.loadNotes(for: record)
