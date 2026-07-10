@@ -78,6 +78,15 @@ struct MeetingDetailView: View {
         .onChange(of: notes) {
             library.notesChanged(notes, in: record)
         }
+        // Catches every in-app screen swap away from this detail page
+        // (library back button already flushes explicitly, but a window
+        // close, launch-route jump, or direct `router.screen` change all
+        // tear this view down without going through that button) — without
+        // this, a note edit still sitting inside the 1s autosave debounce
+        // is lost.
+        .onDisappear {
+            library.flushNotes(for: record)
+        }
     }
 
     // MARK: Header

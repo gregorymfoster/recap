@@ -162,8 +162,9 @@ public final class QueueStore {
 
     /// Meetings that died mid-pipeline (app quit or crash) resume from where
     /// their files left off: with a transcript on disk only enhancement is
-    /// missing; otherwise transcription restarts. A `.recovered` meeting
-    /// (crash-salvaged audio) is the one exception — it stays `.recovered`
+    /// missing; otherwise transcription restarts. A meeting still
+    /// `.recording` at launch (Recap crashed mid-recording) or already
+    /// `.recovered` is the one exception — it's parked/kept as `.recovered`
     /// until the user explicitly presses Transcribe (`transcribeRecovered`),
     /// rather than silently auto-requeuing. Decision logic lives in the pure
     /// `LaunchRecovery.action(for:)`.
@@ -177,8 +178,12 @@ public final class QueueStore {
                 library.updateStatus(record.meeting.id, to: .queued)
                 Task { await queue.enqueue(ProcessingJob(kind: .enhance, meetingID: record.meeting.id)) }
             case .markRecovered:
-                // Already `.recovered` — nothing to do until the user acts.
-                break
+                // A meeting still `.recording` at launch means Recap crashed
+                // mid-recording; park the salvaged audio as `.recovered`
+                // instead of auto-requeuing (no-op if it's already
+                // `.recovered`). Never enqueued — the user explicitly presses
+                // Transcribe (`transcribeRecovered`) to pick it back up.
+                library.updateStatus(record.meeting.id, to: .recovered)
             case .migrateToNeedsModel:
                 // Migrate meetings saved before `.needsModel` existed so they
                 // become retryable instead of a permanent dead end.

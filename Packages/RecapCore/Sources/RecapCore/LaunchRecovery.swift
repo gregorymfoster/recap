@@ -25,9 +25,9 @@ public enum LaunchRecovery {
 
     public static func action(for status: MeetingStatus) -> Action {
         switch status {
-        case .queued, .transcribing, .recording:
+        case .queued, .transcribing:
             return .requeueTranscribe
-        case .recovered:
+        case .recording, .recovered:
             return .markRecovered
         case .enhancing:
             return .requeueEnhance
