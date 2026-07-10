@@ -1,7 +1,10 @@
 import Foundation
+import os
 #if canImport(Darwin)
 import Darwin
 #endif
+
+private let modelSelectionLog = Logger(subsystem: "com.gregfoster.recap", category: "ModelSelection")
 
 /// Hardware facts `ModelSelection` picks a model against — Apple Silicon vs.
 /// Intel, and installed RAM (models scale down on lower-memory machines).
@@ -56,12 +59,15 @@ public enum ModelSelection {
         case (false, .faster): id = "base"
         }
         // Every branch above names a real `ModelCatalog.all` id; a missing
-        // entry would be a catalog/selection drift bug, not a runtime state
-        // to degrade through silently.
-        guard let info = ModelCatalog.info(for: id) else {
-            fatalError("ModelSelection: '\(id)' is missing from ModelCatalog.all")
+        // entry is a catalog/selection drift bug (e.g. a catalog rename that
+        // forgot to update this switch). Rather than crash every user on
+        // that hardware/quality combo, log it as a fault and fall back to
+        // the catalog's recommended model so transcription still works.
+        if let info = ModelCatalog.info(for: id) {
+            return info
         }
-        return info
+        modelSelectionLog.fault("ModelSelection: '\(id, privacy: .public)' is missing from ModelCatalog.all; falling back to recommended model")
+        return ModelCatalog.recommended
     }
 
     /// Infers the quality tier an already-installed model id represents:

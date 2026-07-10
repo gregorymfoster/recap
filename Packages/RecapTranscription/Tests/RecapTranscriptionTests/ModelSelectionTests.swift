@@ -23,6 +23,25 @@ import Testing
         #expect(ModelSelection.model(for: .faster, hardware: intel).id == "base")
     }
 
+    // MARK: catalog-drift contract
+
+    /// Guards against the `model(for:hardware:)` switch naming a model id
+    /// that no longer exists in `ModelCatalog.all` (e.g. after a catalog
+    /// rename) — every combo must resolve to a real catalog entry, not just
+    /// fall back silently at runtime.
+    @Test func everyHardwareQualityComboResolvesToACatalogEntry() {
+        let hardwareProfiles = [appleSilicon, intel]
+        for hardware in hardwareProfiles {
+            for quality in TranscriptionQuality.allCases {
+                let resolved = ModelSelection.model(for: quality, hardware: hardware)
+                #expect(
+                    ModelCatalog.all.contains(where: { $0.id == resolved.id }),
+                    "\(hardware) / \(quality) resolved to '\(resolved.id)', which is missing from ModelCatalog.all"
+                )
+            }
+        }
+    }
+
     // MARK: quality(inferredFrom:)
 
     @Test func inferredQualityForEveryCatalogID() {
