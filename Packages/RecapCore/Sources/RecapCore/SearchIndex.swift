@@ -1,5 +1,8 @@
 import Foundation
 import GRDB
+import os
+
+private let searchIndexLog = Logger(subsystem: "com.gregfoster.recap", category: "SearchIndex")
 
 public struct SearchHit: Equatable, Sendable, Identifiable {
     public var meetingID: UUID
@@ -38,6 +41,40 @@ public final class SearchIndex: Sendable {
 
     public static var defaultDatabaseURL: URL {
         defaultDatabaseURL(isDevBuild: AppIdentity.isDevBuild)
+    }
+
+    /// Opens the on-disk index at `databaseURL`, recovering from a corrupt or
+    /// otherwise unreadable database instead of crashing at launch: a failed
+    /// open deletes the file and retries once — `reindex(from:)` rebuilds
+    /// everything from the folder tree anyway, so losing the file costs
+    /// nothing but a rebuild — and a second failure falls back to an
+    /// in-memory index so the app can still launch, just without a persisted
+    /// index for this run.
+    public static func openOrRecover(databaseURL: URL) -> SearchIndex {
+        if let index = try? SearchIndex(databaseURL: databaseURL) {
+            return index
+        }
+        searchIndexLog.error("failed to open search index at \(databaseURL.path, privacy: .public); deleting and retrying")
+        try? FileManager.default.removeItem(at: databaseURL)
+        if let index = try? SearchIndex(databaseURL: databaseURL) {
+            searchIndexLog.info("recovered search index after deleting corrupt database")
+            return index
+        }
+        searchIndexLog.fault("search index recovery failed; falling back to an in-memory index")
+        return openInMemoryOrRecover()
+    }
+
+    /// In-memory index that never throws in practice — the last-resort
+    /// fallback when the on-disk index can't be opened even after deleting
+    /// it. Still logs loudly (rather than silently swallowing) if GRDB's
+    /// in-memory database construction itself somehow fails, since at that
+    /// point there's nothing left to recover from.
+    public static func openInMemoryOrRecover() -> SearchIndex {
+        if let index = try? SearchIndex() {
+            return index
+        }
+        searchIndexLog.fault("in-memory search index construction failed")
+        return try! SearchIndex()
     }
 
     /// Pure, testable core: dev builds get their own `Recap Dev/index.db` so a
@@ -105,6 +142,17 @@ public final class SearchIndex: Sendable {
             try db.execute(sql: "DELETE FROM meeting WHERE id = ?", arguments: [id])
             try db.execute(sql: "DELETE FROM meeting_fts WHERE meetingID = ?", arguments: [id])
             try Self.insert(entry, in: db)
+        }
+    }
+
+    /// Drops a single meeting's rows from both the metadata and FTS tables —
+    /// used when a meeting is trashed, so it stops appearing in search
+    /// immediately instead of waiting for the next full `reindex(from:)`.
+    public func remove(meetingID: UUID) throws {
+        try dbQueue.write { db in
+            let id = meetingID.uuidString
+            try db.execute(sql: "DELETE FROM meeting WHERE id = ?", arguments: [id])
+            try db.execute(sql: "DELETE FROM meeting_fts WHERE meetingID = ?", arguments: [id])
         }
     }
 

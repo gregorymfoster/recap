@@ -48,6 +48,10 @@ extension AXID {
     /// The rename alert's confirm button.
     public static let libraryRenameConfirm = AXID("library-rename-confirm")
 
+    /// The "Move to Trash" confirmation dialog's destructive confirm button
+    /// (`TrashConfirmationModifier`).
+    public static let libraryTrashConfirm = AXID("library-trash-confirm")
+
     // MARK: Meeting detail
 
     /// The meeting detail editor pane container (notes/enhanced notes),

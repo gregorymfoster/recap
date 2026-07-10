@@ -127,6 +127,14 @@ public final class AppStores {
             // render — every other scenario stays onboarded so it can show
             // its own surface underneath.
             settings = .ephemeral(onboarded: scenario != .firstRun)
+            // Every fixture scenario shows the Settings window's Calendar
+            // group with a real, non-"Off" selection — the ephemeral store
+            // otherwise defaults to `.off`, which would render the group but
+            // leave it looking inert for screenshots (`-fixtures -open
+            // settings/calendar`). Harmless: this store never touches real
+            // `UserDefaults` and no fixture scenario runs the processing
+            // queue or a real calendar watcher against it.
+            settings.calendarAutoRecord = .prompt
             library = scenario.library
             models = WhisperModelManager()
             setup = TranscriptionSetupStore(models: models, settings: settings)
@@ -160,7 +168,7 @@ public final class AppStores {
             settings = .ephemeralOnboarded()
             let root = FileManager.default.temporaryDirectory.appendingPathComponent("RecapSoak-\(UUID().uuidString)")
             let storage = LibraryStorage(rootURL: root)
-            let index = (try? SearchIndex()) ?? (try! SearchIndex())
+            let index = SearchIndex.openInMemoryOrRecover()
             let changeBus = LibraryChangeBus()
             let library = LibraryStore(storage: storage, index: index, changeBus: changeBus)
             self.library = library
@@ -197,7 +205,7 @@ public final class AppStores {
             let storageRoot = seededRoot ?? settings.saveRootURL
             let storage = LibraryStorage(rootURL: storageRoot)
             let indexDatabaseURL = seededRoot?.appendingPathComponent("index.db") ?? SearchIndex.defaultDatabaseURL
-            let index = (try? SearchIndex(databaseURL: indexDatabaseURL)) ?? (try! SearchIndex())
+            let index = SearchIndex.openOrRecover(databaseURL: indexDatabaseURL)
             let changeBus = LibraryChangeBus()
             let library = LibraryStore(storage: storage, index: index, changeBus: changeBus)
             let models = WhisperModelManager()

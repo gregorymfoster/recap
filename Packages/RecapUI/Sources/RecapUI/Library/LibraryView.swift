@@ -24,6 +24,7 @@ struct LibraryView: View {
 
     @State private var dropTargeted = false
     @State private var renameTarget: MeetingRecord?
+    @State private var trashTarget: MeetingRecord?
     /// Drives the next-meeting banner's countdown/visibility without a
     /// `.timer` Text or periodic `TimelineView` (both peg the CPU inside
     /// long-lived SwiftUI hierarchies — see `MenuBarLabel`). A plain 30s
@@ -72,6 +73,9 @@ struct LibraryView: View {
         .toolbar { toolbarContent }
         .renameSheet(target: $renameTarget) { record, newTitle in
             library.rename(record, to: newTitle)
+        }
+        .trashConfirmation(target: $trashTarget) { record in
+            stores?.moveToTrash(record)
         }
         .onAppear {
             stores?.upcoming.refresh()
@@ -338,7 +342,7 @@ struct LibraryView: View {
         .axID(.libraryRowRetranscribe)
         Divider()
         Button("Move to Trash", role: .destructive) {
-            stores?.moveToTrash(record)
+            trashTarget = record
         }
         .disabled(!isOnDisk(record) || isActivelyRecording(record))
         .axID(.libraryRowTrash)
@@ -538,6 +542,38 @@ extension View {
         target: Binding<MeetingRecord?>, onRename: @escaping (MeetingRecord, String) -> Void
     ) -> some View {
         modifier(RenameSheetModifier(target: target, onRename: onRename))
+    }
+}
+
+/// Native `.confirmationDialog` guard in front of `moveToTrash` — trashing is
+/// recoverable (folder moves to the system Trash) but still irreversible
+/// enough from inside the app that a context-menu click shouldn't act
+/// immediately.
+private struct TrashConfirmationModifier: ViewModifier {
+    @Binding var target: MeetingRecord?
+    var onConfirm: (MeetingRecord) -> Void
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(
+            "Move \"\(target?.meeting.title ?? "")\" to Trash?",
+            isPresented: Binding(get: { target != nil }, set: { if !$0 { target = nil } }),
+            presenting: target
+        ) { record in
+            Button("Move to Trash", role: .destructive) {
+                onConfirm(record)
+                target = nil
+            }
+            .axID(.libraryTrashConfirm)
+            Button("Cancel", role: .cancel) { target = nil }
+        }
+    }
+}
+
+extension View {
+    fileprivate func trashConfirmation(
+        target: Binding<MeetingRecord?>, onConfirm: @escaping (MeetingRecord) -> Void
+    ) -> some View {
+        modifier(TrashConfirmationModifier(target: target, onConfirm: onConfirm))
     }
 }
 

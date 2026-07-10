@@ -16,6 +16,15 @@ enum SummaryPreview {
         return firstMeaningfulLine(in: notes)
     }
 
+    /// Same line as `line(enhancedNotes:notes:)`, rendered as inline markdown
+    /// (`**bold**`, `_italic_`, etc.) so the collapsed preview never shows
+    /// raw emphasis markers — matches `EnhancedNotesView.inline(_:)`, the
+    /// house pattern for one-line markdown rendering.
+    static func attributedLine(enhancedNotes: String?, notes: String) -> AttributedString? {
+        guard let line = line(enhancedNotes: enhancedNotes, notes: notes) else { return nil }
+        return (try? AttributedString(markdown: line)) ?? AttributedString(line)
+    }
+
     /// The first non-blank, non-heading line of `markdown`, with leading
     /// bullet/checkbox markers stripped so the preview reads as plain text.
     static func firstMeaningfulLine(in markdown: String) -> String? {
@@ -113,8 +122,8 @@ struct SummaryDisclosure: View {
         }
     }
 
-    private var preview: String? {
-        SummaryPreview.line(enhancedNotes: enhancedNotes, notes: notes)
+    private var preview: AttributedString? {
+        SummaryPreview.attributedLine(enhancedNotes: enhancedNotes, notes: notes)
     }
 
     @ViewBuilder

@@ -382,6 +382,44 @@ private actor ChangeCollector {
         #expect(store.record(for: record.meeting.id)?.meeting.title == "Renamed fixture meeting")
     }
 
+    // MARK: moveToTrash
+
+    @Test func moveToTrashDropsFromSearchAndPostsMeetingDeleted() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LibraryStoreMutationTests-\(UUID().uuidString)")
+        let storage = LibraryStorage(rootURL: root)
+        let changeBus = LibraryChangeBus()
+        let index = try! SearchIndex()
+        let store = LibraryStore(storage: storage, index: index, changeBus: changeBus)
+        let record = try #require(store.startNewMeeting(title: "Gets trashed"))
+        try storage.saveNotes("pineapple discussion", in: record)
+        try index.update(record, from: storage)
+        #expect(try index.search("pineapple").map(\.meetingID) == [record.meeting.id])
+        let collector = ChangeCollector.make(changeBus)
+
+        store.moveToTrash(record)
+
+        #expect(store.record(for: record.meeting.id) == nil)
+        #expect(try index.search("pineapple").isEmpty)
+
+        let changes = await collector.waitForCount(1)
+        #expect(changes == [.meetingDeleted(record.meeting.id)])
+    }
+
+    @Test func moveToTrashOnFixtureStoreIsANoOp() {
+        // Fixture stores have no `storage`/`index`/`changeBus` — trashing
+        // must no-op rather than crash for a `/dev/null` fixture record.
+        let record = MeetingRecord(
+            meeting: Meeting(title: "Fixture meeting", date: .now),
+            folderURL: URL(filePath: "/dev/null")
+        )
+        let store = LibraryStore(fixtures: [record])
+
+        store.moveToTrash(record)
+
+        #expect(store.record(for: record.meeting.id) != nil)
+    }
+
     // MARK: insertImported
 
     @Test func insertImportedAddsRecordAtSortedPositionAndPostsChange() async throws {

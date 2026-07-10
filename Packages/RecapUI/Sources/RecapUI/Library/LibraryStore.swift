@@ -57,20 +57,40 @@ public final class LibraryStore {
         self.fixtureNotes = notes
         self.fixtureEnhancedNotes = enhancedNotes
         self.fixtureTimedNotes = timedNotes
+        rebuildDisplayMeetings()
     }
 
     /// `meetings`, newest-first — the source of truth (`meetings`) never
-    /// changes order itself; this is recomputed on demand. The redesign
-    /// (design mock 10a/11c) dropped the user-facing sort/filter UI in favor
-    /// of a single fixed ordering.
-    public var displayMeetings: [MeetingRecord] {
-        meetings.sorted { $0.meeting.date > $1.meeting.date }
+    /// changes order itself. Cached instead of resorted on every access: the
+    /// redesign (design mock 10a/11c) dropped the user-facing sort/filter UI
+    /// in favor of a single fixed ordering, but transcription-progress ticks
+    /// touch `meetings` far more often than membership or dates change, and
+    /// re-sorting + re-grouping the whole library on every tick was showing
+    /// up as an O(n log n) hitch while a recording was transcribing. Rebuilt
+    /// (`rebuildDisplayMeetings`) only when membership or sort keys (date)
+    /// change; status/progress-only updates patch the cached element in
+    /// place via `updateDisplayElement`.
+    public private(set) var displayMeetings: [MeetingRecord] = []
+
+    private func rebuildDisplayMeetings() {
+        displayMeetings = meetings.sorted { $0.meeting.date > $1.meeting.date }
+    }
+
+    /// Patches one element of the cached `displayMeetings` in place, for
+    /// mutations that don't change membership or sort order (status,
+    /// progress, subtitle, backup timestamp, rename). No-op if the record
+    /// isn't present (shouldn't happen, but keeps this defensive).
+    private func updateDisplayElement(_ record: MeetingRecord) {
+        if let i = displayMeetings.firstIndex(where: { $0.meeting.id == record.meeting.id }) {
+            displayMeetings[i] = record
+        }
     }
 
     public func reload() {
         guard let storage, let index else { return }
         meetings = (try? storage.loadAll()) ?? []
         try? index.reindex(from: storage)
+        rebuildDisplayMeetings()
     }
 
     /// Creates a new meeting on disk and selects it. Calendar auto-record
@@ -82,12 +102,14 @@ public final class LibraryStore {
             let record = MeetingRecord(meeting: meeting, folderURL: URL(filePath: "/dev/null"))
             meetings.insert(record, at: 0)
             selectedMeetingID = meeting.id
+            rebuildDisplayMeetings()
             return record
         }
         guard let record = try? storage.create(meeting) else { return nil }
         meetings.insert(record, at: 0)
         selectedMeetingID = meeting.id
         if let index { try? index.update(record, from: storage) }
+        rebuildDisplayMeetings()
         return record
     }
 
@@ -108,6 +130,7 @@ public final class LibraryStore {
         let i = meetings.firstIndex { $0.meeting.date < record.meeting.date } ?? meetings.endIndex
         meetings.insert(record, at: i)
         if let storage, let index { try? index.update(record, from: storage) }
+        rebuildDisplayMeetings()
         changeBus?.post(.meetingChanged(record.meeting.id))
     }
 
@@ -126,9 +149,13 @@ public final class LibraryStore {
         guard MeetingStatusTransition.accepts(status, after: previous) else { return }
         record.meeting.status = status
         if case .transcribing = status, case .transcribing = previous {
+            // Progress-only tick within the same status: patch both the
+            // source array and the cached display order in place. Doesn't
+            // touch sort keys, so no rebuild of displayMeetings.
             if let i = meetings.firstIndex(where: { $0.meeting.id == id }) {
                 meetings[i] = record
             }
+            updateDisplayElement(record)
         } else {
             replace(record)
         }
@@ -163,6 +190,7 @@ public final class LibraryStore {
         if let i = meetings.firstIndex(where: { $0.meeting.id == id }) {
             meetings[i] = record
         }
+        updateDisplayElement(record)
         guard let storage else { return }
         try? storage.saveMetadata(record)
     }
@@ -188,6 +216,10 @@ public final class LibraryStore {
         if let i = meetings.firstIndex(where: { $0.meeting.id == record.meeting.id }) {
             meetings[i] = record
         }
+        // None of `replace`'s callers change `meeting.date` (the sort key),
+        // so the cached display order stays valid — patch the element
+        // in place rather than re-sorting the whole library.
+        updateDisplayElement(record)
         guard let storage else { return }
         try? storage.saveMetadata(record)
         if let index { try? index.update(record, from: storage) }
@@ -219,8 +251,9 @@ public final class LibraryStore {
         guard (try? storage.trash(record)) != nil else { return }
         meetings.removeAll { $0.meeting.id == record.meeting.id }
         if selectedMeetingID == record.meeting.id { selectedMeetingID = nil }
-        if let index { try? index.reindex(from: storage) }
-        changeBus?.post(.meetingChanged(record.meeting.id))
+        if let index { try? index.remove(meetingID: record.meeting.id) }
+        rebuildDisplayMeetings()
+        changeBus?.post(.meetingDeleted(record.meeting.id))
     }
 
     /// Fixture-only path for `rename` — mirrors `replace` minus disk I/O.
@@ -230,6 +263,7 @@ public final class LibraryStore {
         if let i = meetings.firstIndex(where: { $0.meeting.id == record.meeting.id }) {
             meetings[i] = record
         }
+        updateDisplayElement(record)
     }
 
     /// "~/Recap"-style label for the status bar.

@@ -20,6 +20,10 @@ struct RecordingView: View {
 
     @State private var noteText = ""
     @State private var notes: [TimedNote] = []
+    /// Bumped once a second (see `noteInput`) purely to force
+    /// `notePlaceholder` to recompute — the note `TextField` itself lives
+    /// outside this tick so it isn't rebuilt (and doesn't lose focus).
+    @State private var placeholderTick = 0
     @State private var inputDevices: [AudioInputDevice] = []
     @State private var deviceListListener: AudioObjectPropertyListenerBlock?
     @FocusState private var noteFieldFocused: Bool
@@ -152,27 +156,39 @@ struct RecordingView: View {
     }
 
     private func noteInput(for record: MeetingRecord) -> some View {
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
-            TextField("", text: $noteText, prompt: Text(notePlaceholder))
-                .textFieldStyle(.plain)
-                .font(.system(size: 13.5))
-                .foregroundStyle(Tokens.textPrimary)
-                .focused($noteFieldFocused)
-                .onSubmit { commitNote(for: record) }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: Tokens.radiusRow))
-                .frame(maxWidth: 620)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, 40)
-                .padding(.top, 10)
-                .padding(.bottom, 96)
-                .background(Tokens.surface)
-                .axID(.recordingNotesField)
-        }
+        // Only the placeholder string needs to tick with elapsed time; the
+        // field itself must stay outside any per-second-rebuilt view so a
+        // focused TextField (and its cursor/selection) survives every tick.
+        // `placeholderTick` is a plain @State counter bumped once a second by
+        // the `.task` below, which only forces `notePlaceholder` to
+        // recompute — it doesn't touch the TextField's identity.
+        TextField("", text: $noteText, prompt: Text(notePlaceholder))
+            .textFieldStyle(.plain)
+            .font(.system(size: 13.5))
+            .foregroundStyle(Tokens.textPrimary)
+            .focused($noteFieldFocused)
+            .onSubmit { commitNote(for: record) }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: Tokens.radiusRow))
+            .frame(maxWidth: 620)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, 40)
+            .padding(.top, 10)
+            .padding(.bottom, 96)
+            .background(Tokens.surface)
+            .axID(.recordingNotesField)
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(1))
+                    guard !Task.isCancelled else { return }
+                    placeholderTick &+= 1
+                }
+            }
     }
 
     private var notePlaceholder: String {
+        _ = placeholderTick // dependency only — forces recompute once a second
         let offset = session.currentOffset ?? 0
         return "Type a note — it lands at \(ElapsedLabel.format(seconds: Int(offset))) in the transcript…"
     }

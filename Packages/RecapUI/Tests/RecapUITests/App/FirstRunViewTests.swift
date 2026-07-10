@@ -61,3 +61,22 @@ import Testing
         #expect(second.mirrorBackupEnabled == false)
     }
 }
+
+/// First-run's system-audio row previously dead-ended after a denied tap: the
+/// "Allow" button just re-ran the probe forever with no way to reach System
+/// Settings. `FirstRunSystemAudioCopy.probeLabel(for:)` is the pure mapping
+/// that now also drives showing an "Open System Settings…" fix-it alongside
+/// the probe once `PermissionStatus.action(for: .systemAudio)` says so.
+@Suite struct FirstRunSystemAudioCopyTests {
+    @Test(arguments: [
+        (PermissionStatus.notDetermined, "Allow"),
+        (.granted, "Allow"),
+        (.workedLastTime, "Allow"),
+        (.checking, "Allow"),
+        (.denied, "Allow"),
+        (.unavailable, "Test Again"),
+    ])
+    func probeLabelIsAllowExceptAfterAFailedTap(status: PermissionStatus, expected: String) {
+        #expect(FirstRunSystemAudioCopy.probeLabel(for: status) == expected)
+    }
+}

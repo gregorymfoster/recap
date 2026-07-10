@@ -98,7 +98,10 @@ public struct MenuBarContent: View {
                     microHeader("Up next · Calendar")
                     upNextRow(upNext)
                 }
-                let recent = stores.library.meetings.prefix(2)
+                // `displayMeetings` (not raw `meetings`, which is storage
+                // order) so "Recent" matches the main window's date-sorted
+                // ordering — the two most recently dated meetings.
+                let recent = stores.library.displayMeetings.prefix(2)
                 if !recent.isEmpty {
                     Divider().padding(.vertical, 5)
                     microHeader("Recent")

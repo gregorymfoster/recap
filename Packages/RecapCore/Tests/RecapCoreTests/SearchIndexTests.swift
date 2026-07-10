@@ -70,6 +70,22 @@ import Testing
         #expect(try index.indexedMeetingCount() == 2)
     }
 
+    @Test func removeDropsMeetingFromSearch() throws {
+        let (storage, index) = try makeLibrary()
+        let kept = try storage.create(Meeting(title: "Kept meeting", date: .now))
+        let trashed = try storage.create(Meeting(title: "Trashed meeting", date: .now))
+        try storage.saveNotes("pineapple discussion", in: trashed)
+        try index.reindex(from: storage)
+        #expect(try index.search("trashed").map(\.meetingID) == [trashed.meeting.id])
+
+        try index.remove(meetingID: trashed.meeting.id)
+
+        #expect(try index.search("trashed").isEmpty)
+        #expect(try index.search("pineapple").isEmpty)
+        #expect(try index.search("kept").map(\.meetingID) == [kept.meeting.id])
+        #expect(try index.indexedMeetingCount() == 1)
+    }
+
     @Test func updateRefreshesSingleMeeting() throws {
         let (storage, index) = try makeLibrary()
         let a = try storage.create(Meeting(title: "Alpha", date: .now))

@@ -42,50 +42,56 @@ struct SearchOverlay: View {
 
             if !hits.isEmpty {
                 Divider()
-                ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(Array(hits.enumerated()), id: \.element.id) { index, hit in
-                            Button {
-                                open(hitAt: index)
-                            } label: {
-                                HStack(alignment: .top, spacing: 8) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(hit.title)
-                                            .font(Tokens.rowTitle)
-                                            .foregroundStyle(Tokens.textPrimary)
-                                        if !hit.snippet.isEmpty {
-                                            Text(SearchHitPresentation.highlighted(
-                                                hit.snippet, matching: query, highlight: Self.matchHighlight
-                                            ))
-                                            .font(Tokens.meta)
-                                            .foregroundStyle(Tokens.textSecondary)
-                                            .lineLimit(2)
+                ScrollViewReader { scrollProxy in
+                    ScrollView {
+                        LazyVStack(spacing: 2) {
+                            ForEach(Array(hits.enumerated()), id: \.element.id) { index, hit in
+                                Button {
+                                    open(hitAt: index)
+                                } label: {
+                                    HStack(alignment: .top, spacing: 8) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(hit.title)
+                                                .font(Tokens.rowTitle)
+                                                .foregroundStyle(Tokens.textPrimary)
+                                            if !hit.snippet.isEmpty {
+                                                Text(SearchHitPresentation.highlighted(
+                                                    hit.snippet, matching: query, highlight: Self.matchHighlight
+                                                ))
+                                                .font(Tokens.meta)
+                                                .foregroundStyle(Tokens.textSecondary)
+                                                .lineLimit(2)
+                                            }
                                         }
+                                        Spacer(minLength: 8)
+                                        Text(SearchHitPresentation.sourceTag(for: hit, query: query))
+                                            .font(Tokens.microLabel)
+                                            .foregroundStyle(Tokens.textTertiary)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: Tokens.radiusChip))
                                     }
-                                    Spacer(minLength: 8)
-                                    Text(SearchHitPresentation.sourceTag(for: hit, query: query))
-                                        .font(Tokens.microLabel)
-                                        .foregroundStyle(Tokens.textTertiary)
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: Tokens.radiusChip))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .background(
+                                        index == highlighted ? Tokens.chipBackground : .clear,
+                                        in: RoundedRectangle(cornerRadius: Tokens.radiusRow)
+                                    )
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                                .background(
-                                    index == highlighted ? Tokens.chipBackground : .clear,
-                                    in: RoundedRectangle(cornerRadius: Tokens.radiusRow)
-                                )
+                                .buttonStyle(.plain)
+                                .onHover { if $0 { highlighted = index } }
+                                .axID(.searchHitRow(hit.id.uuidString))
+                                .id(index)
                             }
-                            .buttonStyle(.plain)
-                            .onHover { if $0 { highlighted = index } }
-                            .axID(.searchHitRow(hit.id.uuidString))
                         }
+                        .padding(8)
                     }
-                    .padding(8)
+                    .frame(maxHeight: 320)
+                    .onChange(of: highlighted) {
+                        scrollProxy.scrollTo(highlighted, anchor: .center)
+                    }
                 }
-                .frame(maxHeight: 320)
             } else if !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 Divider()
                 VStack(spacing: 4) {
@@ -104,7 +110,17 @@ struct SearchOverlay: View {
         .shadow(color: .black.opacity(0.25), radius: 24, y: 10)
         .accessibilityElement(children: .contain)
         .axID(.searchOverlay)
-        .onChange(of: query) {
+        .task(id: query) {
+            // Debounce: wait ~150ms of typing stillness before running the FTS
+            // query, so fast typists don't trigger a synchronous query per
+            // keystroke on large libraries. Cancelled (via task(id:))
+            // whenever `query` changes again before the sleep completes.
+            do {
+                try await Task.sleep(for: .milliseconds(150))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
             hits = library.search(query)
             highlighted = 0
         }

@@ -204,6 +204,13 @@ public final class MeetingSessionStore {
         } catch MeetingRecorder.RecorderError.alreadyStarting {
             activeRecord = nil
             startFailureMessage = "Already starting a recording"
+        } catch MeetingRecorder.RecorderError.startCancelled {
+            // A `stop()` arrived mid-start: the recorder tore everything back
+            // down itself, and the user asked to stop, not a failure — clean
+            // reset with no error message (unlike the catches above, which
+            // all set `startFailureMessage` for `RecordingController` to
+            // surface as a toast).
+            activeRecord = nil
         } catch {
             activeRecord = nil
             startFailureMessage = "Couldn't start recording"

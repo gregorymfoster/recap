@@ -1,9 +1,12 @@
 import Foundation
 import Observation
+import os
 import RecapAudio
 import RecapCore
 import RecapEnhancement
 import RecapTranscription
+
+private let queueStoreLog = Logger(subsystem: "com.gregfoster.recap", category: "QueueStore")
 
 /// Owns the background queue: feeds it power state and re-enqueues unfinished
 /// work at launch.
@@ -24,12 +27,18 @@ public final class QueueStore {
     ///   all three end here) — the one completion signal, whatever the exact
     ///   path through the pipeline. `CompletionNotifier` hooks this to post
     ///   the "‹meeting› is ready" notification.
+    /// - Parameter executorOverride: Test seam only — when non-nil, this
+    ///   `JobExecutor` runs jobs instead of the production `MeetingProcessor`,
+    ///   so tests can force a job to fail deterministically (no WhisperKit/
+    ///   Apple Intelligence needed) and assert on the `setOnJobFailed` wiring
+    ///   below. Always nil in every real graph.
     public init(
         library: LibraryStore, storage: LibraryStorage, models: WhisperModelManager,
         changeBus: LibraryChangeBus, settings: SettingsStore, backup: BackupStatusStore,
         enhancer: NoteEnhancer = FoundationModelEnhancer(),
         onError: (@MainActor (String) -> Void)? = nil,
-        onMeetingReady: (@MainActor (UUID) -> Void)? = nil
+        onMeetingReady: (@MainActor (UUID) -> Void)? = nil,
+        executorOverride: JobExecutor? = nil
     ) {
         // Two-phase init: the processor's chain closure needs the queue.
         let queueBox = QueueBox()
@@ -87,13 +96,51 @@ public final class QueueStore {
                 }
             }
         )
-        let queue = ProcessingQueue(executor: processor)
+        let queue = ProcessingQueue(executor: executorOverride ?? processor)
         self.queue = queue
         Task { await queueBox.set(queue) }
 
         monitorTask = Task { [monitor] in
             for await state in monitor.updates() {
                 await queue.powerStateChanged(state)
+            }
+        }
+
+        // A job that fails twice (initial attempt + one automatic retry) is
+        // dropped by `ProcessingQueue` and left in whichever status the
+        // failed stage started in — without this, that meeting is stuck
+        // silently at `.transcribing`/`.enhancing` forever. Surface it the
+        // same way the library already knows how to show a failure: a
+        // `.transcribe` failure becomes a plain `.error` status (the
+        // existing "Transcription failed · Retry" row), matching the
+        // `errorLibrary()` fixture scenario exactly. A `.enhance` failure
+        // must not blank out an already-finished transcript, so the meeting
+        // still completes as `.ready` with `.enhancementFailed` recorded as
+        // a `ProcessingIssue` — the same recoverable-issue path a normal
+        // in-band enhancement failure already takes in `MeetingProcessor`.
+        // `.export` failures are logged only; export retries are already
+        // covered by `.mirrorBackupFailed`.
+        Task {
+            await queue.setOnJobFailed { job, error in
+                Task { @MainActor in
+                    switch job.kind {
+                    case .transcribe:
+                        queueStoreLog.error(
+                            "transcription job failed after retry: meetingID=\(job.meetingID.uuidString, privacy: .private) error=\(String(describing: error), privacy: .private)"
+                        )
+                        library.updateStatus(job.meetingID, to: .error(message: "Transcription failed"))
+                    case .enhance:
+                        queueStoreLog.error(
+                            "enhancement job failed after retry: meetingID=\(job.meetingID.uuidString, privacy: .private) error=\(String(describing: error), privacy: .private)"
+                        )
+                        library.updateStatus(job.meetingID, to: .ready)
+                        library.addProcessingIssue(.enhancementFailed, for: job.meetingID)
+                    case .export:
+                        queueStoreLog.error(
+                            "export job failed after retry: meetingID=\(job.meetingID.uuidString, privacy: .private) error=\(String(describing: error), privacy: .private)"
+                        )
+                    }
+                }
             }
         }
         recoverUnfinishedWork(in: library)

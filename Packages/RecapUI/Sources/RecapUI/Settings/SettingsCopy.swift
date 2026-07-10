@@ -52,3 +52,26 @@ enum SettingsBackupCopy {
         return "\(leading) · \(figuresLabel(meetingCount: meetingCount, totalBytes: totalBytes))"
     }
 }
+
+/// Pure copy for the Calendar group's auto-record picker
+/// (`SettingsWindowView.calendarSection`) — framework-free so the label
+/// mapping is directly unit-testable without a live view.
+enum SettingsCalendarCopy {
+    /// Picker option label for a `CalendarAutoRecordMode` case.
+    static func modeLabel(_ mode: CalendarAutoRecordMode) -> String {
+        switch mode {
+        case .off: "Off"
+        case .prompt: "Ask before recording"
+        case .auto: "Record automatically"
+        }
+    }
+
+    /// One-line footnote under the picker, describing the selected mode.
+    static func modeFootnote(_ mode: CalendarAutoRecordMode) -> String {
+        switch mode {
+        case .off: "Recap won't watch your calendar for meetings"
+        case .prompt: "Recap asks before recording a calendar meeting"
+        case .auto: "Recap starts recording calendar meetings automatically"
+        }
+    }
+}

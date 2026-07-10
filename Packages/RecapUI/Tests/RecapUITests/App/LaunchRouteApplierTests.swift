@@ -46,7 +46,7 @@ struct LaunchRouteActionTests {
         let expected: [String: AppRouter.SettingsSection] = [
             "general": .audio,
             "recording": .audio,
-            "calendar": .audio,
+            "calendar": .calendar,
             "privacy": .audio,
             "sync": .storage,
         ]
@@ -96,7 +96,7 @@ struct SettingsSectionRouteTabNameTests {
     @Test func legacyTabNamesMapToSections() {
         #expect(AppRouter.SettingsSection(routeTabName: "general") == .audio)
         #expect(AppRouter.SettingsSection(routeTabName: "recording") == .audio)
-        #expect(AppRouter.SettingsSection(routeTabName: "calendar") == .audio)
+        #expect(AppRouter.SettingsSection(routeTabName: "calendar") == .calendar)
         #expect(AppRouter.SettingsSection(routeTabName: "privacy") == .audio)
         #expect(AppRouter.SettingsSection(routeTabName: "sync") == .storage)
     }

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import RecapUI
 
@@ -45,5 +46,23 @@ import Testing
     @Test func returnsNilWhenNeitherSourceHasContent() {
         #expect(SummaryPreview.line(enhancedNotes: nil, notes: "") == nil)
         #expect(SummaryPreview.line(enhancedNotes: "## Just a heading", notes: "   ") == nil)
+    }
+
+    /// The collapsed preview must render inline markdown, not show raw
+    /// `**bold**` markers literally (verified visually against the expanded
+    /// view, which already renders bold via `EnhancedNotesView`).
+    @Test func attributedLineStripsEmphasisMarkersToBoldRuns() {
+        let enhanced = "Feedback due **Friday**, thanks!"
+        let attributed = SummaryPreview.attributedLine(enhancedNotes: enhanced, notes: "")
+        #expect(attributed != nil)
+        #expect(String((attributed ?? AttributedString()).characters) == "Feedback due Friday, thanks!")
+        let hasBoldRun = attributed?.runs.contains {
+            $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true
+        } ?? false
+        #expect(hasBoldRun)
+    }
+
+    @Test func attributedLineReturnsNilWhenLineIsNil() {
+        #expect(SummaryPreview.attributedLine(enhancedNotes: nil, notes: "") == nil)
     }
 }

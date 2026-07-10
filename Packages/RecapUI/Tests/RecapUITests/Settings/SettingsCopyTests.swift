@@ -63,3 +63,27 @@ import Testing
         #expect(line.contains("6 meetings"))
     }
 }
+
+/// Pure copy-helper tests for the Settings page's Calendar group
+/// (`SettingsWindowView.calendarSection`) — the auto-record picker that was
+/// previously missing entirely (calendar auto-record had no UI at all).
+@Suite struct SettingsCalendarCopyTests {
+    @Test(arguments: [
+        (CalendarAutoRecordMode.off, "Off"),
+        (.prompt, "Ask before recording"),
+        (.auto, "Record automatically"),
+    ])
+    func modeLabelIsExhaustiveAndUserFacing(mode: CalendarAutoRecordMode, expected: String) {
+        #expect(SettingsCalendarCopy.modeLabel(mode) == expected)
+    }
+
+    @Test(arguments: CalendarAutoRecordMode.allCases)
+    func modeFootnoteIsNonEmptyForEveryMode(mode: CalendarAutoRecordMode) {
+        #expect(!SettingsCalendarCopy.modeFootnote(mode).isEmpty)
+    }
+
+    @Test func modeFootnoteDistinguishesEveryMode() {
+        let footnotes = Set(CalendarAutoRecordMode.allCases.map(SettingsCalendarCopy.modeFootnote))
+        #expect(footnotes.count == CalendarAutoRecordMode.allCases.count)
+    }
+}

@@ -34,6 +34,8 @@ public struct SettingsWindowView: View {
                 Form {
                     audioSection
                         .id(AppRouter.SettingsSection.audio)
+                    calendarSection(settings: $settings)
+                        .id(AppRouter.SettingsSection.calendar)
                     transcriptionSection(settings: $settings)
                         .id(AppRouter.SettingsSection.transcription)
                     storageSection(settings: $settings)
@@ -85,6 +87,39 @@ public struct SettingsWindowView: View {
                     .padding(.horizontal, 9)
                     .padding(.vertical, 2)
                     .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: Tokens.radiusButton))
+            }
+        }
+    }
+
+    // MARK: - Calendar
+
+    /// Auto-record picker for calendar-shaped meetings (the "Meeting
+    /// started?" nudge, design mock 9b): off / ask-before-recording /
+    /// record-automatically, backed by `SettingsStore.calendarAutoRecord`.
+    /// This was previously a dead setting — `AutoRecordCoordinator` only
+    /// ever applied it once at launch, so there was no UI and no live
+    /// effect from a change — the picker's `set` now calls
+    /// `stores?.applyCalendarAutoRecordSetting()` to restart the watcher
+    /// immediately, matching how `disabledCallAppIDs` already reapplies.
+    @ViewBuilder
+    private func calendarSection(settings: Bindable<SettingsStore>) -> some View {
+        Section {
+            Picker("Auto-record from Calendar", selection: Binding(
+                get: { settings.wrappedValue.calendarAutoRecord },
+                set: { newValue in
+                    settings.wrappedValue.calendarAutoRecord = newValue
+                    stores?.applyCalendarAutoRecordSetting()
+                }
+            )) {
+                ForEach(CalendarAutoRecordMode.allCases, id: \.self) { mode in
+                    Text(SettingsCalendarCopy.modeLabel(mode)).tag(mode)
+                }
+            }
+            .axID(.settingsCalendarModePicker)
+            SettingsFootnote(SettingsCalendarCopy.modeFootnote(settings.wrappedValue.calendarAutoRecord))
+
+            if settings.wrappedValue.calendarAutoRecord != .off, stores?.calendarAccessDenied == true {
+                CalendarAccessDeniedRow()
             }
         }
     }
@@ -159,12 +194,25 @@ public struct SettingsWindowView: View {
             Toggle("Back up automatically", isOn: Binding(
                 get: { settings.wrappedValue.mirrorBackupEnabled },
                 set: { newValue in
-                    settings.wrappedValue.mirrorBackupEnabled = newValue
-                    if newValue {
-                        if settings.wrappedValue.mirrorFolderPath.isEmpty {
-                            pickMirrorFolder(settings: settings.wrappedValue)
-                        }
+                    guard newValue else {
+                        settings.wrappedValue.mirrorBackupEnabled = false
+                        return
+                    }
+                    guard settings.wrappedValue.mirrorFolderPath.isEmpty else {
+                        // A folder is already configured — nothing to pick,
+                        // just (re-)enable and backfill.
+                        settings.wrappedValue.mirrorBackupEnabled = true
                         stores?.backfillMirrorBackup()
+                        return
+                    }
+                    // Don't flip the toggle on until a folder is actually
+                    // chosen — cancelling the picker must leave the setting
+                    // untouched, not stuck "on" with no folder (and a
+                    // misleadingly OK-looking status). `pickMirrorFolder`
+                    // already runs `backfillMirrorBackup()` on success, so
+                    // there's no second call here.
+                    if pickMirrorFolder(settings: settings.wrappedValue) {
+                        settings.wrappedValue.mirrorBackupEnabled = true
                     }
                 }
             ))
@@ -248,17 +296,21 @@ public struct SettingsWindowView: View {
         }
     }
 
-    private func pickMirrorFolder(settings: SettingsStore) {
+    /// Returns whether a folder was actually chosen — `false` on cancel, so
+    /// the toggle above can stay off rather than committing to "on" with no
+    /// folder configured.
+    @discardableResult
+    private func pickMirrorFolder(settings: SettingsStore) -> Bool {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Use Folder"
         panel.message = "Choose a backup destination folder"
-        if panel.runModal() == .OK, let url = panel.url {
-            settings.mirrorFolderPath = url.path
-            stores?.backfillMirrorBackup()
-        }
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
+        settings.mirrorFolderPath = url.path
+        stores?.backfillMirrorBackup()
+        return true
     }
 
     private func tildePath(_ path: String) -> String {
@@ -350,6 +402,32 @@ private struct MicrophonePermissionAwareRow: View {
 
     private func refreshMicStatus() {
         micStatus = AVAudioApplication.shared.recordPermission
+    }
+}
+
+/// Inline warning row shown under the Calendar picker when auto-record is on
+/// but macOS calendar access was denied (`AppStores.calendarAccessDenied`,
+/// surfaced via `AutoRecordCoordinator`) — otherwise the denial was
+/// completely silent (bug: calendar auto-record had no UI at all). Mirrors
+/// `MicrophonePermissionAwareRow`'s fix-it shape: a deep link to System
+/// Settings, refreshed on `didBecomeActive` by re-applying the setting (which
+/// re-derives `calendarAccessDenied` from a fresh `CalendarWatcher.start()`).
+private struct CalendarAccessDeniedRow: View {
+    @Environment(AppStores.self) private var stores: AppStores?
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Label("No access to Calendar", systemImage: "xmark.circle.fill")
+                .font(Tokens.caption)
+                .foregroundStyle(Tokens.recordRed)
+            Spacer()
+            Button("Open System Settings…") { PrivacyPane.open(PrivacyPane.calendars) }
+                .axID(.settingsCalendarPermissionButton)
+                .controlSize(.small)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            stores?.applyCalendarAutoRecordSetting()
+        }
     }
 }
 

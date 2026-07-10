@@ -24,6 +24,7 @@ public final class AppRouter {
     /// Settings groupings on the one-page Settings surface (`SettingsWindowView`).
     public enum SettingsSection: String, Sendable {
         case audio
+        case calendar
         case transcription
         case storage
 
@@ -33,7 +34,8 @@ public final class AppRouter {
         /// route didn't name a tab, or named one with no section mapping.
         public init?(routeTabName: String?) {
             switch routeTabName {
-            case "general", "recording", "calendar", "privacy": self = .audio
+            case "general", "recording", "privacy": self = .audio
+            case "calendar": self = .calendar
             case "sync": self = .storage
             default: return nil
             }

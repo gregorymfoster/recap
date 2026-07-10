@@ -226,6 +226,40 @@ private struct FakeError: Error {}
         _ = await first
         _ = await store.stop()
     }
+
+    /// `stop()` arriving while `start()` is still suspended (e.g. awaiting
+    /// the system-audio TCC prompt) makes the recorder tear itself down and
+    /// throw `.startCancelled` — a clean user-requested stop, not a failure.
+    /// `MeetingSessionStore` must reset quietly (no `startFailureMessage`,
+    /// no `permissionDenied`) instead of reporting a generic start error.
+    @Test func startCancelledMidStartResetsCleanlyWithNoErrorMessage() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let gate = SuspendGate()
+        let tap = FakeSystemAudioSource()
+        let recorder = MeetingRecorder(
+            mic: FakeMicSource(),
+            makeSystemTap: { SuspendingSystemAudioSource(gate: gate, wrapped: tap) }
+        )
+        let store = MeetingSessionStore(
+            makeRecorder: { recorder },
+            requestMicPermission: { true },
+            probeSystemAudio: { .captured }
+        )
+        let record = makeRecord(in: dir)
+
+        async let started: Void = store.start(record: record, includeSystemAudio: true, includeMic: true)
+        // Give start() a moment to enter the recorder (set `isStarting`) and
+        // suspend on the gated system-audio tap before racing it with stop().
+        try await Task.sleep(for: .milliseconds(20))
+        _ = await recorder.stop()
+        gate.release()
+        await started
+
+        #expect(!store.isRecording)
+        #expect(store.startFailureMessage == nil)
+        #expect(!store.permissionDenied)
+    }
 }
 
 /// Lets a test hold a fake system-audio source's `start()` suspended until

@@ -4,8 +4,8 @@ import os
 /// A change to the on-disk library worth telling other subsystems about.
 public enum LibraryChange: Sendable {
     case meetingChanged(UUID)
-    /// Not posted anywhere yet — there's no delete affordance until
-    /// Milestone C. Defined now so consumers can handle it from day one.
+    /// Posted by `LibraryStore.moveToTrash` once a meeting's folder has
+    /// moved to the Trash.
     case meetingDeleted(UUID)
 }
 
