@@ -46,6 +46,22 @@ public final class WhisperModelManager {
     /// so a stale value doesn't linger in defaults forever.
     private static let legacyStreamingModelKey = "streamingModelID"
 
+    /// Written into a model's snapshot folder the moment its download
+    /// completes successfully. `installedFolder` requires this marker (or
+    /// the backward-compat file check below) before calling a folder
+    /// installed — a folder containing only *some* of a model's compiled
+    /// bundles (a download interrupted partway through) must never look
+    /// installed, or `WhisperKit(config)` fails at record time instead of
+    /// at download time.
+    static let completionMarkerName = ".recap-complete"
+
+    /// Models the user has explicitly paused mid-download. `pauseDownload`
+    /// inserts before cancelling; `finishDownload` consults (and clears) it
+    /// so the cancelled task's own `catch` — which still runs after the
+    /// state has already been reset to `.available`/`.installed` — doesn't
+    /// clobber that with `.failed`.
+    private var pausedModelIDs: Set<String> = []
+
     public static var defaultModelsRoot: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Recap/Models")
@@ -83,14 +99,49 @@ public final class WhisperModelManager {
     /// Local folder of an installed model, or nil if not fully downloaded.
     public func installedFolder(for model: ModelInfo) -> URL? {
         let folder = snapshotFolder(for: model)
+        return Self.isCompleteInstall(at: folder) ? folder : nil
+    }
+
+    /// Disk-touching half of the completeness check: reads the folder's
+    /// contents and the presence of the completion marker, then defers to
+    /// the pure `isCompleteInstall(contents:hasCompletionMarker:)` below.
+    static func isCompleteInstall(at folder: URL) -> Bool {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory),
               isDirectory.boolValue,
-              // A usable WhisperKit model folder contains compiled CoreML bundles.
-              let contents = try? FileManager.default.contentsOfDirectory(atPath: folder.path),
-              contents.contains(where: { $0.hasSuffix(".mlmodelc") })
-        else { return nil }
-        return folder
+              let contents = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
+        else { return false }
+        let contentSet = Set(contents)
+        return isCompleteInstall(
+            contents: contentSet,
+            hasCompletionMarker: contentSet.contains(completionMarkerName)
+        )
+    }
+
+    /// Pure logic: does a snapshot folder's contents amount to a complete,
+    /// loadable WhisperKit model?
+    ///
+    /// - Preferred path: the `.recap-complete` marker, written only once a
+    ///   download finishes successfully. A folder with the marker is
+    ///   installed no matter what else is (or isn't) in it.
+    /// - Backward-compat path: models downloaded before the marker existed
+    ///   have no marker but are otherwise complete. `WhisperKit.loadModels`
+    ///   (see `WhisperKit.swift`) requires exactly three named CoreML
+    ///   bundles at the folder's top level — `MelSpectrogram`,
+    ///   `AudioEncoder`, `TextDecoder`, each either compiled (`.mlmodelc`)
+    ///   or a source package (`.mlpackage`) — plus a tokenizer, which
+    ///   WhisperKit resolves separately at load time. Treating "all three
+    ///   model bundles present" as "fully downloaded" is a heuristic, not a
+    ///   guarantee (a download could in principle be interrupted after all
+    ///   three land but before some other file), but it's a much tighter
+    ///   bar than "any one `.mlmodelc`" and matches what WhisperKit itself
+    ///   requires to load.
+    static func isCompleteInstall(contents: Set<String>, hasCompletionMarker: Bool) -> Bool {
+        if hasCompletionMarker { return true }
+        let requiredBaseNames = ["MelSpectrogram", "AudioEncoder", "TextDecoder"]
+        return requiredBaseNames.allSatisfy { name in
+            contents.contains("\(name).mlmodelc") || contents.contains("\(name).mlpackage")
+        }
     }
 
     /// Re-derives every model's state from disk. Leaves `.downloading` and
@@ -120,6 +171,7 @@ public final class WhisperModelManager {
                         self.setDownloadProgress(fraction, for: model)
                     }
                 }
+                self.markInstallComplete(for: model)
                 self.finishDownload(of: model, failed: false)
             } catch {
                 self.finishDownload(of: model, failed: true)
@@ -136,6 +188,7 @@ public final class WhisperModelManager {
     /// Cancels an in-flight download. Already-fetched files stay on disk, so
     /// a later `download` resumes from there.
     public func pauseDownload(of model: ModelInfo) {
+        pausedModelIDs.insert(model.id)
         downloadTasks[model.id]?.cancel()
         downloadTasks[model.id] = nil
         refreshState(of: model)
@@ -179,7 +232,18 @@ public final class WhisperModelManager {
 
     private func finishDownload(of model: ModelInfo, failed: Bool) {
         downloadTasks[model.id] = nil
+        // Cancelling a task for a deliberate pause still runs the
+        // downloader's `catch` (it observes cancellation as a thrown
+        // error), which would otherwise land here with `failed: true` and
+        // stomp the `.available`/`.installed` state `pauseDownload` already
+        // set. A pause isn't a failure, so skip straight to re-deriving
+        // from disk instead of forcing `.failed`.
+        let wasPaused = pausedModelIDs.remove(model.id) != nil
         if failed {
+            if wasPaused {
+                refreshState(of: model)
+                return
+            }
             // A failed attempt may still have left a complete snapshot from
             // an earlier successful download — trust disk over the network
             // outcome.
@@ -195,6 +259,14 @@ public final class WhisperModelManager {
 
     private func refreshState(of model: ModelInfo) {
         states[model.id] = installedFolder(for: model) != nil ? .installed : .available
+    }
+
+    /// Marks a snapshot folder as a fully, successfully downloaded model.
+    /// Called once, right after the downloader returns without throwing.
+    private func markInstallComplete(for model: ModelInfo) {
+        let markerPath = snapshotFolder(for: model)
+            .appendingPathComponent(Self.completionMarkerName).path
+        FileManager.default.createFile(atPath: markerPath, contents: Data())
     }
 
     private func snapshotFolder(for model: ModelInfo) -> URL {

@@ -26,6 +26,72 @@ private actor FakeExecutor: JobExecutor {
     }
 }
 
+/// Fails every attempt at a given job — used to exercise the queue's
+/// retry-once-then-report-failure path.
+private actor AlwaysFailingExecutor: JobExecutor {
+    enum Failure: Error { case boom }
+
+    private var attempts: [String: Int] = [:]
+
+    func execute(_ job: ProcessingJob, progress: @escaping @Sendable (Double) -> Void) async throws {
+        attempts[job.id, default: 0] += 1
+        throw Failure.boom
+    }
+
+    func attemptCount(for job: ProcessingJob) -> Int {
+        attempts[job.id] ?? 0
+    }
+}
+
+/// Sleeps until cancelled, so `Task.cancel()` propagates as a real
+/// `CancellationError` from `execute` — mirrors how a real executor observes
+/// cancellation via `Task.checkCancellation()`/`Task.sleep`.
+private actor CancellableExecutor: JobExecutor {
+    private(set) var executed: [ProcessingJob] = []
+    private(set) var completed: [ProcessingJob] = []
+
+    func execute(_ job: ProcessingJob, progress: @escaping @Sendable (Double) -> Void) async throws {
+        executed.append(job)
+        try await Task.sleep(for: .seconds(30))
+        completed.append(job)
+    }
+}
+
+/// Records `execute` calls and hands back each job's progress closure so a
+/// test can invoke it "late," after the queue has moved on to another job.
+private actor CapturingExecutor: JobExecutor {
+    private(set) var executed: [ProcessingJob] = []
+    private var progressCallbacks: [String: @Sendable (Double) -> Void] = [:]
+    private var gates: [CheckedContinuation<Void, Never>] = []
+
+    func execute(_ job: ProcessingJob, progress: @escaping @Sendable (Double) -> Void) async throws {
+        executed.append(job)
+        progressCallbacks[job.id] = progress
+        progress(0.5)
+        await withCheckedContinuation { gates.append($0) }
+    }
+
+    func progressCallback(for job: ProcessingJob) -> (@Sendable (Double) -> Void)? {
+        progressCallbacks[job.id]
+    }
+
+    /// Releases whichever job is currently held — FIFO, mirrors `FakeExecutor`.
+    func releaseHeldJob() {
+        guard !gates.isEmpty else { return }
+        gates.removeFirst().resume()
+    }
+}
+
+private actor FailureLog {
+    private(set) var jobs: [ProcessingJob] = []
+
+    func record(_ job: ProcessingJob) {
+        jobs.append(job)
+    }
+
+    var count: Int { jobs.count }
+}
+
 private func waitUntil(
     timeout: Duration = .seconds(2), _ condition: @escaping @Sendable () async -> Bool
 ) async -> Bool {
@@ -108,7 +174,11 @@ private func waitUntil(
         let queue = ProcessingQueue(executor: executor)
         let targetID = UUID()
         let otherID = UUID()
-        let running = ProcessingJob(kind: .transcribe, meetingID: targetID)
+        // Running job belongs to a DIFFERENT meeting (and a different kind,
+        // so its `id` doesn't collide with `pendingOtherMeeting`) so this
+        // test stays focused on pending-job pruning; running-job
+        // cancellation is covered separately below.
+        let running = ProcessingJob(kind: .export, meetingID: otherID)
         let pendingSameMeeting = ProcessingJob(kind: .enhance, meetingID: targetID)
         let pendingOtherMeeting = ProcessingJob(kind: .transcribe, meetingID: otherID)
         await queue.enqueue(running)
@@ -120,10 +190,8 @@ private func waitUntil(
         await queue.cancel(meetingID: targetID)
 
         // The pending job for the trashed meeting is gone; the other
-        // meeting's pending job survives untouched.
+        // meeting's pending job and running job survive untouched.
         #expect(await queue.snapshot.pending == [pendingOtherMeeting])
-        // The already-running job for the trashed meeting isn't interrupted —
-        // cancel only prunes PENDING work.
         #expect(await queue.snapshot.running == running)
 
         await executor.setHoldsJobs(false)
@@ -138,6 +206,35 @@ private func waitUntil(
         await queue.cancel(meetingID: UUID())
         #expect(await queue.snapshot.pending.isEmpty)
         #expect(await queue.snapshot.running == nil)
+    }
+
+    /// Fix: cancel(meetingID:) now stops an in-flight job for that meeting
+    /// too (not just pending jobs) — the underlying task is cancelled, the
+    /// job isn't retried or reported as failed, and the queue advances to
+    /// the next pending job.
+    @Test func cancelMeetingIDStopsRunningJobAndAdvancesQueue() async {
+        let executor = CancellableExecutor()
+        let queue = ProcessingQueue(executor: executor)
+        let meetingID = UUID()
+        let running = ProcessingJob(kind: .transcribe, meetingID: meetingID)
+        let next = ProcessingJob(kind: .enhance, meetingID: UUID())
+
+        let failures = FailureLog()
+        await queue.setOnJobFailed { job, _ in
+            Task { await failures.record(job) }
+        }
+
+        await queue.enqueue(running)
+        #expect(await waitUntil { await executor.executed.contains(running) })
+        await queue.enqueue(next)
+
+        await queue.cancel(meetingID: meetingID)
+
+        #expect(await waitUntil { await executor.executed.contains(next) })
+        // The cancelled job never reaches "completed" (its Task.sleep threw).
+        #expect(await executor.completed.isEmpty)
+        // Cancellation is a clean stop, not a reported failure.
+        #expect(await failures.count == 0)
     }
 
     @Test func observerSeesProgressAndCompletion() async {
@@ -156,6 +253,70 @@ private func waitUntil(
         await executor.releaseHeldJob()
         #expect(await waitUntil { await queue.snapshot.jobCount == 0 })
         #expect(await waitUntil { await seen.sawIdle() })
+    }
+
+    /// Fix: a throwing executor no longer silently drops the job — it's
+    /// retried once, and only reported via `onJobFailed` (and removed from
+    /// `running`) after the retry also fails. The queue must then advance to
+    /// the next job instead of stalling.
+    @Test func throwingExecutorRetriesOnceThenReportsFailureAndAdvances() async {
+        let executor = AlwaysFailingExecutor()
+        let queue = ProcessingQueue(executor: executor)
+        let failing = ProcessingJob(kind: .transcribe, meetingID: UUID())
+        let next = ProcessingJob(kind: .enhance, meetingID: UUID())
+
+        let failures = FailureLog()
+        await queue.setOnJobFailed { job, _ in
+            Task { await failures.record(job) }
+        }
+
+        await queue.enqueue(failing)
+        await queue.enqueue(next)
+
+        // Both jobs fail every attempt, so the queue eventually reports both
+        // (proving it advanced past the first failure instead of stalling)
+        // — without asserting on the exact moment the first is reported,
+        // since both may resolve within the same poll tick.
+        #expect(await waitUntil { await failures.count == 2 })
+        #expect(await failures.jobs == [failing, next])
+        #expect(await executor.attemptCount(for: failing) == 2)
+        #expect(await executor.attemptCount(for: next) == 2)
+        #expect(await queue.snapshot.running == nil)
+        #expect(await queue.snapshot.pending.isEmpty)
+    }
+
+    /// Fix: `updateProgress` is now guarded by job identity, not just
+    /// "something is running" — a stale progress callback from a job that's
+    /// already finished must not paint the *next* running job's progress.
+    @Test func lateProgressCallbackFromFinishedJobDoesNotPaintNextJob() async {
+        let executor = CapturingExecutor()
+        let queue = ProcessingQueue(executor: executor)
+        let jobA = ProcessingJob(kind: .transcribe, meetingID: UUID())
+        let jobB = ProcessingJob(kind: .enhance, meetingID: UUID())
+
+        await queue.enqueue(jobA)
+        #expect(await waitUntil { await queue.snapshot.running == jobA })
+        // `running` flips synchronously in `pump()` before the executor's
+        // Task actually starts, so poll for the callback rather than
+        // fetching it once — otherwise this occasionally races ahead of
+        // `execute(jobA:)` registering it.
+        #expect(await waitUntil { await executor.progressCallback(for: jobA) != nil })
+        let staleProgress = await executor.progressCallback(for: jobA)
+        #expect(staleProgress != nil)
+
+        await queue.enqueue(jobB)
+        await executor.releaseHeldJob()
+        #expect(await waitUntil { await queue.snapshot.running == jobB })
+        #expect(await waitUntil { await queue.snapshot.runningProgress == 0.5 })
+
+        // Job A's stale progress closure fires after B has taken over.
+        staleProgress?(0.9)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(await queue.snapshot.running == jobB)
+        #expect(await queue.snapshot.runningProgress == 0.5)
+
+        await executor.releaseHeldJob()
+        #expect(await waitUntil { await queue.snapshot.jobCount == 0 })
     }
 }
 

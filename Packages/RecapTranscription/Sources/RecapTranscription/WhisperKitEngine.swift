@@ -69,7 +69,9 @@ public struct WhisperKitEngine: TranscriptionEngine {
         }
 
         let options = Self.decodingOptions(language: language)
+        try Task.checkCancellation()
         let results = try await pipe.transcribe(audioPath: file.path, decodeOptions: options)
+        try Task.checkCancellation()
 
         let utterances = results
             .flatMap(\.segments)
@@ -144,9 +146,11 @@ public struct WhisperKitEngine: TranscriptionEngine {
                 }
                 return
             }
+            guard !Task.isCancelled else { return }
             let options = Self.decodingOptions(language: language)
             guard let results = try? await pipe.transcribe(audioArray: buffer, decodeOptions: options)
             else { return }
+            guard !Task.isCancelled else { return }
             let segments = results.flatMap(\.segments).map {
                 StreamingPass.Segment(
                     start: TimeInterval($0.start), end: TimeInterval($0.end), text: $0.text
@@ -181,6 +185,7 @@ public struct WhisperKitEngine: TranscriptionEngine {
             newSamples = 0
             await runPass(final: false)
         }
+        guard !Task.isCancelled else { return }
         await runPass(final: true)
     }
 }

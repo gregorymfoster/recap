@@ -64,6 +64,7 @@ public actor ProcessingQueue {
 
     private let executor: JobExecutor
     private var observer: (@Sendable (QueueSnapshot) -> Void)?
+    private var onJobFailed: (@Sendable (ProcessingJob, Error) -> Void)?
     private var lastLoggedPauseReason: String??
 
     public init(executor: JobExecutor) {
@@ -79,6 +80,14 @@ public actor ProcessingQueue {
         notify()
     }
 
+    /// Called once a job has failed twice (initial attempt + one automatic
+    /// retry) and been dropped from the queue. The meeting is left in
+    /// whichever status the failed stage started in — the UI layer decides
+    /// how to surface that.
+    public func setOnJobFailed(_ callback: @escaping @Sendable (ProcessingJob, Error) -> Void) {
+        self.onJobFailed = callback
+    }
+
     public func enqueue(_ job: ProcessingJob) {
         guard job != running, !pending.contains(job) else { return }
         pending.append(job)
@@ -86,16 +95,23 @@ public actor ProcessingQueue {
     }
 
     /// Drops every PENDING job for `meetingID` (e.g. the meeting was just
-    /// moved to Trash). An already-running job for this meeting is left to
-    /// finish/fail on its own — this queue doesn't interrupt in-flight work,
-    /// it just makes sure nothing new is dispatched for a meeting that no
-    /// longer exists.
+    /// moved to Trash), and cancels an in-flight job for the same meeting so
+    /// work doesn't keep running against a meeting that no longer exists. A
+    /// cancelled running job is treated as a clean stop, not a failure — it
+    /// isn't retried and doesn't invoke `onJobFailed`.
     public func cancel(meetingID: UUID) {
         let before = pending.count
         pending.removeAll { $0.meetingID == meetingID }
-        let removed = before - pending.count
-        guard removed > 0 else { return }
-        queueLog.info("jobs canceled: meetingID=\(meetingID.uuidString, privacy: .private) count=\(removed, privacy: .public)")
+        let removedPending = before - pending.count
+
+        var cancelledRunning = false
+        if running?.meetingID == meetingID {
+            runningTask?.cancel()
+            cancelledRunning = true
+        }
+
+        guard removedPending > 0 || cancelledRunning else { return }
+        queueLog.info("jobs canceled: meetingID=\(meetingID.uuidString, privacy: .private) pending=\(removedPending, privacy: .public) running=\(cancelledRunning, privacy: .public)")
         notify()
     }
 
@@ -147,21 +163,38 @@ public actor ProcessingQueue {
         notify()
         queueLog.info("job started: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private)")
         runningTask = Task(priority: .utility) {
-            do {
-                try await executor.execute(job) { [weak self] fraction in
-                    guard let self else { return }
-                    Task { await self.updateProgress(fraction) }
-                }
-                queueLog.info("job finished: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private)")
-            } catch {
-                queueLog.error("job failed: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private) error=\(String(describing: error), privacy: .private)")
-            }
-            self.jobFinished()
+            await self.runJob(job, isRetry: false)
         }
     }
 
-    private func updateProgress(_ fraction: Double) {
-        guard running != nil else { return }
+    /// Runs one attempt of `job`. A throw other than cancellation is retried
+    /// once automatically; a second failure is reported via `onJobFailed` and
+    /// the job is dropped so the queue can move on instead of stalling.
+    private func runJob(_ job: ProcessingJob, isRetry: Bool) async {
+        do {
+            try await executor.execute(job) { [weak self] fraction in
+                guard let self else { return }
+                Task { await self.updateProgress(fraction, for: job) }
+            }
+            queueLog.info("job finished: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private)")
+            jobFinished()
+        } catch is CancellationError {
+            queueLog.info("job canceled: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private)")
+            jobFinished()
+        } catch {
+            guard !isRetry else {
+                queueLog.error("job failed after retry: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private) error=\(String(describing: error), privacy: .private)")
+                onJobFailed?(job, error)
+                jobFinished()
+                return
+            }
+            queueLog.error("job failed, retrying once: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private) error=\(String(describing: error), privacy: .private)")
+            await runJob(job, isRetry: true)
+        }
+    }
+
+    private func updateProgress(_ fraction: Double, for job: ProcessingJob) {
+        guard running == job else { return }
         runningProgress = fraction
         notify()
     }

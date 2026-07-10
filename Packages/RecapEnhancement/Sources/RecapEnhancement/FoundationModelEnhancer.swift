@@ -73,6 +73,7 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         // Map: digest each chunk.
         var digests: [ChunkDigest] = []
         for (index, chunk) in chunks.enumerated() {
+            try Task.checkCancellation()
             enhancementLog.info("digest \(index + 1, privacy: .public)/\(chunks.count, privacy: .public)")
             digests.append(DigestSanitizer.sanitize(try await digest(chunkText: chunk.text)))
         }
@@ -80,6 +81,7 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         // Merge layer: keep the reduce prompt inside the context window.
         var mergeRound = 0
         while digests.count > 6 {
+            try Task.checkCancellation()
             mergeRound += 1
             enhancementLog.info("merge round \(mergeRound, privacy: .public): \(digests.count, privacy: .public) digests")
             digests = try await mergeInPairs(digests)
@@ -135,6 +137,7 @@ public struct FoundationModelEnhancer: NoteEnhancer {
     private func mergeInPairs(_ digests: [ChunkDigest]) async throws -> [ChunkDigest] {
         var merged: [ChunkDigest] = []
         for pair in stride(from: 0, to: digests.count, by: 2) {
+            try Task.checkCancellation()
             if pair + 1 < digests.count {
                 let combined = render([digests[pair], digests[pair + 1]])
                 merged.append(
@@ -176,6 +179,7 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         // be dropped or reordered — the model only ever rewrites one line.
         var bullets: [String] = []
         for line in noteLines {
+            try Task.checkCancellation()
             bullets.append("- " + (try await rewrite(line: line, digestText: digestText)))
         }
 
@@ -252,10 +256,14 @@ public struct FoundationModelEnhancer: NoteEnhancer {
     private func respondWithRetry<T>(_ attempt: () async throws -> T) async throws -> T {
         do {
             return try await attempt()
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             enhancementLog.info("retrying after generation failure")
             do {
                 return try await attempt()
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 enhancementLog.error("generation failed after retry")
                 throw EnhancementError.generationFailed

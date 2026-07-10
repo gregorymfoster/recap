@@ -77,6 +77,12 @@ public final class MeetingRecorder {
         /// A `start()` call arrived while a previous one was still
         /// suspended (e.g. awaiting the system-audio TCC prompt).
         case alreadyStarting
+        /// `stop()` was called while `start()` was still suspended (e.g.
+        /// awaiting the system-audio TCC prompt or `mic.start()`). `start()`
+        /// noticed the pending stop once it resumed, tore down everything it
+        /// had built, and threw this instead of returning a live `Output` —
+        /// there is nothing to observe from the cancelled recording.
+        case startCancelled
     }
 
     /// Refuse to start with less than this much free space — a meeting can
@@ -136,6 +142,13 @@ public final class MeetingRecorder {
     /// still suspended awaiting `tap.start()` (e.g. a user double-triggering
     /// record while the TCC prompt is up). Set for the duration of `start()`.
     private var isStarting = false
+
+    /// Set by `stop()` when it's called while `isStarting` is true — there is
+    /// nothing live yet to tear down (the tap/engine are only ever mutated by
+    /// `start()` itself, so `stop()` touching them concurrently would race).
+    /// `start()` checks this flag once it resumes past its awaits and, if
+    /// set, tears down everything it just built instead of returning it.
+    private var stopRequestedDuringStart = false
 
     /// - Parameters:
     ///   - mic: Mic capture source; defaults to the real `MicSource`. Tests
@@ -225,6 +238,7 @@ public final class MeetingRecorder {
             throw RecorderError.alreadyStarting
         }
         isStarting = true
+        stopRequestedDuringStart = false
         defer { isStarting = false }
 
         let folder = url.deletingLastPathComponent()
@@ -309,10 +323,26 @@ public final class MeetingRecorder {
                     task.cancel()
                 }
                 pumpTasks = []
+                // The engine was already built (and its files opened) before
+                // the mic failed to start — finish/nil it too, or the open
+                // m4a/CAF handles leak and a zero-byte pair is left on disk.
+                await engine.finish()
+                self.engine = nil
                 throw error
             }
         } else {
             micActive = false
+        }
+
+        // A stop() that arrived while we were suspended above (e.g. awaiting
+        // the system-audio TCC prompt or `mic.start()`) couldn't tear down a
+        // recording that didn't exist yet — do it now, before ever handing
+        // back a live `Output` nobody will stop.
+        guard !stopRequestedDuringStart else {
+            stopRequestedDuringStart = false
+            recorderLog.info("start() cancelled: stop() arrived while still starting")
+            _ = await teardownActive()
+            throw RecorderError.startCancelled
         }
 
         clock = RecordingClock(startedAt: .now)
@@ -343,6 +373,24 @@ public final class MeetingRecorder {
 
     @discardableResult
     public func stop() async -> TimeInterval {
+        // A start() is still suspended (e.g. awaiting the system-audio TCC
+        // prompt or `mic.start()`) — `systemTap`/`engine` may still be nil or
+        // only half-built, and start() itself is the only thing safe to
+        // mutate them right now. Flag the request; start() checks this once
+        // it resumes and tears everything down itself before returning.
+        guard !isStarting else {
+            stopRequestedDuringStart = true
+            recorderLog.info("stop() deferred: a start() is still in flight")
+            return 0
+        }
+        return await teardownActive()
+    }
+
+    /// Tears down whatever a (possibly now-cancelled) recording built:
+    /// stops the mic/tap, cancels the pump tasks, finishes the mixer engine,
+    /// and returns the elapsed active time (0 if nothing was ever recording).
+    /// Shared by `stop()` and by `start()`'s own cancellation path.
+    private func teardownActive() async -> TimeInterval {
         mic.stop()
         systemTap?.stop()
         systemTap = nil

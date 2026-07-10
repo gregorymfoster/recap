@@ -220,6 +220,39 @@ private struct FakeError: Error {}
         #expect(tap.stopCalled)
     }
 
+    /// The mixer engine (and its m4a/CAF file handles) is already built by
+    /// the time mic.start() fails — before the fix it was never finished or
+    /// nil'd on this path, leaking open file handles and leaving a
+    /// zero-byte/unreadable m4a with no moov atom. `finish()` must run here
+    /// too, same as a normal `stop()`.
+    @Test func micStartFailureFinishesAndClearsTheEngine() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("audio.m4a")
+        let mic = FakeMicSource()
+        mic.startError = FakeError()
+        let tap = FakeSystemAudioSource()
+        let recorder = MeetingRecorder(mic: mic, makeSystemTap: { tap })
+
+        await #expect(throws: FakeError.self) {
+            _ = try await recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
+        }
+
+        // The m4a must be readable (moov atom written) — only true if
+        // `finish()` actually ran and closed the file.
+        let fileDuration = try #require(AudioTranscoder.duration(of: url))
+        #expect(fileDuration >= 0)
+        // A clean finish() with no write failures deletes the spool.
+        let spoolURL = url.deletingPathExtension().appendingPathExtension("caf")
+        #expect(!FileManager.default.fileExists(atPath: spoolURL.path))
+
+        // A subsequent start() must succeed against a fresh engine — no
+        // stale engine left retained from the failed attempt.
+        mic.startError = nil
+        _ = try await recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
+        _ = await recorder.stop()
+    }
+
     // MARK: 5. System tap fails -> mic-only fallback
 
     @Test func systemTapFailureFallsBackToMicOnly() async throws {
@@ -271,6 +304,67 @@ private struct FakeError: Error {}
         releaseContinuation.finish()
         try await firstStart.value
 
+        _ = await recorder.stop()
+    }
+
+    // MARK: 5c. stop() racing an in-flight start()
+
+    /// Reproduces the reported bug: `stop()` arrives while `start()` is
+    /// still suspended inside `tap.start()` (e.g. the system-audio TCC
+    /// prompt is up). Before the fix, `stop()` found `systemTap`/`engine`
+    /// still nil and tore down nothing; `start()` then resumed, built a live
+    /// recording, and nothing was ever listening to stop it. `stop()` must
+    /// instead defer to the in-flight `start()`, which tears everything down
+    /// itself and throws `.startCancelled` rather than handing back a live
+    /// `Output`.
+    @Test func stopDuringStartTearsDownAndThrowsStartCancelled() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("audio.m4a")
+        let mic = FakeMicSource()
+        let tap = FakeSystemAudioSource()
+        let (releaseSignal, releaseContinuation) = AsyncStream.makeStream(of: Void.self)
+        tap.suspendUntil = {
+            var iterator = releaseSignal.makeAsyncIterator()
+            _ = await iterator.next()
+        }
+        let recorder = MeetingRecorder(mic: mic, makeSystemTap: { tap })
+
+        let startTask = Task {
+            _ = try await recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
+        }
+        // Give start() a chance to reach and suspend inside tap.start().
+        try? await Task.sleep(for: .milliseconds(20))
+
+        // stop() must return immediately (nothing built yet to tear down)
+        // rather than blocking on the suspended start().
+        let stopDuration = await recorder.stop()
+        #expect(stopDuration == 0)
+
+        releaseContinuation.yield(())
+        releaseContinuation.finish()
+
+        do {
+            _ = try await startTask.value
+            Issue.record("expected start() to throw .startCancelled")
+        } catch MeetingRecorder.RecorderError.startCancelled {
+            // Expected.
+        } catch {
+            Issue.record("expected .startCancelled, got \(error)")
+        }
+
+        // start() must have torn down everything it built before throwing —
+        // no orphaned tap, mic capture, or live recording left running.
+        #expect(tap.stopCalled)
+        #expect(mic.stopCalled)
+        #expect(recorder.systemAudioActive == false)
+        #expect(recorder.micActive == false)
+        #expect(recorder.clock == nil)
+
+        // A fresh start() afterward must succeed normally — isStarting and
+        // the pending-stop flag aren't left in a stuck state.
+        tap.suspendUntil = nil
+        _ = try await recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
         _ = await recorder.stop()
     }
 
