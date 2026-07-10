@@ -85,10 +85,10 @@ public final class TranscriptionSetupStore {
     }
 
     /// Fixtures-only hook: forces `phase` directly, without a real
-    /// `ModelInstalling` driving it, so the `firstRun` fixture scenario can
-    /// render a downloading/failed/done "setting up transcription" card
+    /// `ModelInstalling` driving it, so fixture scenarios (`firstRun`,
+    /// `waitingForSetup`) can render a downloading/failed/done setup state
     /// deterministically for screenshots. Never called from `start()`/the
-    /// normal graph.
+    /// normal graph — mirrors `BackupStatusStore.setStateForFixtures`.
     public func setPhaseForFixtures(_ newPhase: SetupPhase) {
         phase = newPhase
     }

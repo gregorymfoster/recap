@@ -74,11 +74,13 @@ public enum FixtureScenario: String, CaseIterable, Sendable {
     @MainActor
     public var library: LibraryStore {
         switch self {
-        case .default, .noMeetingsToday, .recording, .recovered, .nextMeetingSoon: FixtureScenarios.defaultLibrary()
+        case .default, .noMeetingsToday, .recording, .nextMeetingSoon: FixtureScenarios.defaultLibrary()
         case .empty, .firstRunWithAgenda, .firstRun: FixtureScenarios.emptyLibrary()
         case .busy: FixtureScenarios.busyLibrary()
-        case .processing, .waitingForSetup: FixtureScenarios.processingLibrary()
+        case .processing: FixtureScenarios.processingLibrary()
         case .error, .backupStuck: FixtureScenarios.errorLibrary()
+        case .recovered: FixtureScenarios.recoveredLibrary()
+        case .waitingForSetup: FixtureScenarios.waitingForSetupLibrary()
         }
     }
 
@@ -299,6 +301,50 @@ enum FixtureScenarios {
             record("Design sync — Q3 roadmap", now: now, hoursAgo: 3, duration: 1_453, attendees: ["Maya", "Sam"], status: .needsModel),
             record(
                 "1:1 with Sam", now: now, hoursAgo: 26, duration: 1_680, attendees: ["Sam"], status: .ready,
+                subtitle: "Promotion timeline agreed, mentorship pairing starts next sprint"
+            ),
+        ]
+        return LibraryStore(fixtures: meetings)
+    }
+
+    // MARK: recovered
+
+    /// A meeting recovered from a crash spool (`MeetingStatus.recovered`),
+    /// alongside a couple of ordinary ready meetings today — proves the
+    /// recovered row's special layout AND `MeetingGrouping`'s "recovered
+    /// sorts to the top of Today" ordering render together correctly.
+    @MainActor
+    static func recoveredLibrary() -> LibraryStore {
+        let now = Date.now
+        let meetings = [
+            record("Weekly standup", now: now, hoursAgo: 2, duration: 0, attendees: ["Maya", "Sam"], status: .recovered),
+            record(
+                "Design sync — Q3 roadmap", now: now, hoursAgo: 5, duration: 1_453, attendees: ["Maya", "Sam", "Priya"],
+                status: .ready, subtitle: "Q3 draft shipped, onboarding usability pass assigned"
+            ),
+            record(
+                "1:1 with Sam", now: now, hoursAgo: 26, duration: 1_680, attendees: ["Sam"], status: .ready,
+                subtitle: "Promotion timeline agreed, mentorship pairing starts next sprint"
+            ),
+        ]
+        return LibraryStore(fixtures: meetings)
+    }
+
+    // MARK: waitingForSetup
+
+    /// Transcription setup (model download) in progress: meetings parked on
+    /// `.needsModel` whose row copy is derived from
+    /// `TranscriptionSetupStore.phase` — `AppStores` overrides that store's
+    /// phase to `.downloading` for this scenario (there's no real download
+    /// happening in fixture mode).
+    @MainActor
+    static func waitingForSetupLibrary() -> LibraryStore {
+        let now = Date.now
+        let meetings = [
+            record("Design sync — Q3 roadmap", now: now, hoursAgo: 0.2, duration: 1_453, attendees: ["Maya", "Sam"], status: .needsModel),
+            record("Customer call — Meridian", now: now, hoursAgo: 0.5, duration: 1_800, attendees: ["Alex"], status: .needsModel),
+            record(
+                "1:1 with Sam", now: now, hoursAgo: 24, duration: 1_680, attendees: ["Sam"], status: .ready,
                 subtitle: "Promotion timeline agreed, mentorship pairing starts next sprint"
             ),
         ]

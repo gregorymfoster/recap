@@ -31,19 +31,27 @@ open <path>/Recap.app --args -fixtures busy
 - `default` (bare `-fixtures`) — today's small sample library: a handful of meetings spanning
   every status, one ready meeting with playable audio, a canned transcript, and notes.
 - `empty` — first-run/empty library: no meetings, no queue activity, calendar not connected
-  (the Library's Upcoming agenda renders its "Connect your calendar" affordance).
+  (`UpcomingStore.isAvailable` is `false`, so `NextMeetingBanner` never renders).
 - `firstRunWithAgenda` — first-run/empty library, but calendar access IS granted with events
-  today: the Upcoming agenda renders above the otherwise-empty library, proving the
-  Granola-style always-available agenda isn't gated on having recorded a meeting yet.
+  today (the standard fixture events, one ~19 minutes out) — exercises `UpcomingStore` above an
+  otherwise-empty library.
 - `noMeetingsToday` — the `default` library, but calendar access is granted with zero events
-  today: the agenda's explicit "No meetings on your calendar today" quiet state, distinct from
-  `empty`'s unauthorized affordance.
+  today — `UpcomingStore` authorized-but-empty, distinct from `empty`'s unauthorized state.
 - `busy` — 20+ meetings spread across many weeks with every status represented, several with
   canned transcripts/notes — exercises list grouping and scroll performance.
 - `processing` — several meetings actively transcribing/queued/enhancing, so the sidebar queue
   widget renders real in-flight work.
 - `error` — failed and recoverable job states: meetings with `.error` statuses, one
   `.needsModel`, and a paused queue summary with a pause reason.
+- `backupStuck` — the `error` library, with `BackupStatusStore.state` overridden to `.stuck` so
+  the Library footer renders its amber "Backup paused" + "Fix…" treatment.
+- `recovered` — a meeting parked at `.recovered` (crash-salvaged audio) sorted to the top of
+  Today, alongside a couple of ordinary ready meetings — exercises the row's "Recap quit
+  unexpectedly" layout and the ghost "Transcribe" action.
+- `waitingForSetup` — meetings parked at `.needsModel` with `TranscriptionSetupStore.phase`
+  overridden to `.downloading` — exercises the row's "Waiting for setup · N%" copy.
+- `nextMeetingSoon` — the `default` library with the standard fixture calendar events (one
+  ~19 minutes out), so `NextMeetingBanner` renders above the list.
 
 Unit tests for each scenario's invariants live in
 `Packages/RecapUI/Tests/RecapUITests/Fixtures/FixtureScenariosTests.swift`.

@@ -4,10 +4,11 @@ import RecapTranscription
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Library home screen (design mock 6a): unified window toolbar with
-/// title/search/filter/Record, date-grouped rows in inset containers, quiet
-/// status system, and a row context menu (open/copy/reveal/rename/
-/// re-transcribe/trash).
+/// The Library home screen (design mock 10a/11c): unified window toolbar
+/// with title/search/Record, an optional "next meeting soon" banner,
+/// date-grouped rows in inset containers, a quiet status system, a pinned
+/// footer, and a row context menu (open/copy/reveal/rename/re-transcribe/
+/// trash).
 struct LibraryView: View {
     @Environment(AppStores.self) private var stores: AppStores?
     @Environment(LibraryStore.self) private var library
@@ -16,10 +17,6 @@ struct LibraryView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(QueueStore.self) private var queue: QueueStore?
     @Environment(AppRouter.self) private var router
-    /// Native Settings-window opener, used by the Upcoming agenda's
-    /// "Connect your calendar" affordance to deep-link to Settings →
-    /// Privacy (mirrors `RootView`'s `-open settings/<tab>` handling).
-    @Environment(\.openSettings) private var openSettings
 
     /// Owned by `RootView`; the toolbar's search field opens the same ⌘K
     /// overlay the global shortcut does.
@@ -27,34 +24,32 @@ struct LibraryView: View {
 
     @State private var dropTargeted = false
     @State private var renameTarget: MeetingRecord?
-    /// Drives the Upcoming section's countdown/pruning without a `.timer`
-    /// Text or periodic `TimelineView` (both peg the CPU inside long-lived
-    /// SwiftUI hierarchies — see `MenuBarLabel`). A plain 30s sleep loop,
-    /// cancelled on disappear, calls `refresh()` directly instead.
+    /// Drives the next-meeting banner's countdown/visibility without a
+    /// `.timer` Text or periodic `TimelineView` (both peg the CPU inside
+    /// long-lived SwiftUI hierarchies — see `MenuBarLabel`). A plain 30s
+    /// sleep loop, cancelled on disappear, calls `refresh()` directly instead.
     @State private var upcomingRefreshTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if let agendaState {
-                    agendaView(for: agendaState)
-                        .padding(.horizontal, 24)
-                        .padding(.top, 16)
+                if let imminentEvent {
+                    NextMeetingBanner(event: imminentEvent, now: .now) {
+                        stores?.startRecording(title: imminentEvent.title, attendees: imminentEvent.otherAttendees)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 16)
                 }
                 if library.meetings.isEmpty {
                     emptyState
                         .padding(.horizontal, 24)
-                        .padding(.top, agendaState == nil ? 16 : 18)
-                } else if library.displayMeetings.isEmpty {
-                    filteredEmptyState
-                        .padding(.horizontal, 24)
-                        .padding(.top, agendaState == nil ? 16 : 18)
+                        .padding(.top, imminentEvent == nil ? 16 : 18)
                 } else {
                     content
                         .padding(.horizontal, 24)
-                        .padding(.top, agendaState == nil ? 16 : 18)
+                        .padding(.top, imminentEvent == nil ? 16 : 18)
                 }
-                Color.clear.frame(height: 24)
+                Color.clear.frame(height: 16)
             }
         }
         .background(Tokens.surface)
@@ -63,6 +58,16 @@ struct LibraryView: View {
             handleDrop(urls)
         } isTargeted: { dropTargeted = $0 }
         .overlay { if dropTargeted { dropHighlight } }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            LibraryFooter(
+                meetingCount: library.meetings.count,
+                backupState: stores?.backup.state ?? .disabled,
+                onFixBackup: {
+                    router.pendingSettingsSection = .storage
+                    SettingsOpener.open()
+                }
+            )
+        }
         .navigationTitle("Library")
         .toolbar { toolbarContent }
         .renameSheet(target: $renameTarget) { record, newTitle in
@@ -79,8 +84,8 @@ struct LibraryView: View {
     }
 
     /// Re-queries the calendar every 30s while the Library is visible, so the
-    /// countdown and today-remaining pruning stay fresh without a per-frame
-    /// timer.
+    /// banner's countdown and imminence window stay fresh without a
+    /// per-frame timer.
     private func startUpcomingRefreshLoop() {
         guard upcomingRefreshTask == nil else { return }
         upcomingRefreshTask = Task {
@@ -92,17 +97,20 @@ struct LibraryView: View {
         }
     }
 
+    /// The next calendar event starting within 30 minutes, if calendar
+    /// access is authorized — drives `NextMeetingBanner` (design mock
+    /// 10a/11c). Never an empty section: `nil` hides the banner entirely
+    /// rather than rendering something with nothing to show.
+    private var imminentEvent: CalendarEventSnapshot? {
+        stores?.upcoming.imminentEvent()
+    }
+
     // MARK: Toolbar (design global #3 — unified toolbar, not an in-content header)
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             searchField
-        }
-        if !library.meetings.isEmpty {
-            ToolbarItem(placement: .primaryAction) {
-                sortFilterMenu
-            }
         }
         ToolbarItem(placement: .primaryAction) {
             if session.isRecording {
@@ -115,36 +123,29 @@ struct LibraryView: View {
 
     /// Styled like a compact search field, but it's a button — clicking (or
     /// ⌘K) opens the existing full-screen search overlay rather than typing
-    /// inline. Deliberately no `Spacer()`/fixed-frame combination: SwiftUI
-    /// toolbar items size themselves from intrinsic content, and a
-    /// `Spacer()` inside a `.frame(width:)` here reliably produced a
-    /// zero-width `NSToolbarItem` that AppKit silently dropped from the
-    /// toolbar — fixed spacing avoids that failure mode.
+    /// inline.
     private var searchField: some View {
         Button {
             showSearch = true
         } label: {
-            HStack(spacing: 34) {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Tokens.textTertiary)
-                    Text("Search")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Tokens.textTertiary)
-                }
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Tokens.textTertiary)
+                Text("Search")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Tokens.textTertiary)
+                Spacer(minLength: 8)
                 Text("⌘K")
                     .font(.system(size: 9.5))
-                    .foregroundStyle(Tokens.textTertiary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: 4))
+                    .foregroundStyle(Tokens.textPrimary.opacity(0.3))
             }
-            .padding(.leading, 10)
-            .padding(.trailing, 8)
-            .frame(width: 220, height: 28)
-            .background(Tokens.chipBackground, in: Capsule())
-            .overlay(Capsule().stroke(Tokens.hairline, lineWidth: 1))
+            .padding(.horizontal, 10)
+            .frame(width: 180, height: 28)
+            // stays: fixed white tint per the design handoff — reads as a
+            // subtle field fill against both the light and dark toolbar.
+            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Tokens.hairline, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .help("Search titles, notes, and transcripts")
@@ -197,50 +198,6 @@ struct LibraryView: View {
         .axID(.libraryRecordingIndicatorButton)
     }
 
-    private var sortFilterMenu: some View {
-        @Bindable var library = library
-        return Menu {
-            Picker("Sort", selection: $library.sort) {
-                ForEach(LibrarySort.allCases, id: \.self) { option in
-                    Text(option.label).tag(option)
-                }
-            }
-            Divider()
-            Toggle("Ready only", isOn: $library.filter.readyOnly)
-            Toggle("Longer than 15 minutes", isOn: Binding(
-                get: { library.filter.minDuration != nil },
-                set: { library.filter.minDuration = $0 ? 900 : nil }
-            ))
-        } label: {
-            HStack(spacing: 4) {
-                ZStack(alignment: .topTrailing) {
-                    Circle()
-                        .fill(Tokens.chipBackground)
-                        .overlay(Circle().stroke(Tokens.hairline, lineWidth: 1))
-                        .frame(width: 28, height: 28)
-                        .overlay {
-                            Image(systemName: "line.3.horizontal.decrease.circle")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Tokens.textSecondary)
-                        }
-                    if library.filter.isActive {
-                        Circle()
-                            .fill(Tokens.accentBlue)
-                            .frame(width: 6, height: 6)
-                            .offset(x: 2, y: -2)
-                    }
-                }
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Tokens.textTertiary)
-            }
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .help("Sort and filter the library")
-        .axID(.librarySortFilterMenu)
-    }
-
     // MARK: Drag & drop import
 
     /// Files dragged from Finder: audio-conforming ones import; anything
@@ -275,78 +232,32 @@ struct LibraryView: View {
         .allowsHitTesting(false)
     }
 
-    // MARK: Upcoming agenda
-
-    /// The agenda is lifted above `content`/`emptyState`/`filteredEmptyState`
-    /// so it renders on a brand-new, zero-meeting library too (bug fix: it
-    /// used to live only inside `content`, which never mounts while
-    /// `library.meetings.isEmpty` — a new user who'd connected their
-    /// calendar saw nothing). `nil` while a filter/search is narrowing the
-    /// list or the sort is `.longest` (matches the old `showUpcomingSection`
-    /// behavior); otherwise always one of the three `UpcomingAgendaState`
-    /// cases, never silently absent.
-    private var agendaState: UpcomingAgendaState? {
-        guard let stores else { return nil }
-        return UpcomingAgendaState.resolve(
-            isAvailable: stores.upcoming.isAvailable,
-            events: stores.upcoming.events,
-            isFilterActive: library.filter.isActive,
-            isLongestSort: library.sort == .longest
-        )
-    }
-
-    @ViewBuilder
-    private func agendaView(for state: UpcomingAgendaState) -> some View {
-        switch state {
-        case .hasEvents(let events):
-            UpcomingSection(
-                events: events,
-                isRecording: session.isRecording,
-                now: .now,
-                onRecord: { event in
-                    stores?.startRecording(title: event.title, attendees: event.otherAttendees)
-                }
-            )
-        case .authorizedEmpty:
-            UpcomingEmptyTodayView()
-        case .unauthorized:
-            UpcomingConnectCalendarView {
-                router.pendingSettingsTab = .privacy
-                openSettings()
-            }
-        }
-    }
-
     // MARK: List content
 
-    /// Grouped-with-headers for date sorts, a flat list (single container)
-    /// for `.longest` (a duration ranking reads oddly split into date
-    /// buckets). The Upcoming agenda itself now lives in `body`, not here.
-    @ViewBuilder private var content: some View {
-        if library.sort == .longest {
-            groupCard(for: library.displayMeetings)
-        } else {
-            let sections = MeetingGrouping.sections(library.displayMeetings, now: .now, calendar: .current)
-            LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
-                ForEach(sections, id: \.id) { section in
-                    VStack(alignment: .leading, spacing: 7) {
-                        sectionHeader(section.title)
-                        groupCard(for: section.records)
-                    }
+    /// Grouped-with-headers date sections (Today, Yesterday, ...) —
+    /// `MeetingGrouping` sorts any `.recovered` meeting to the top of Today.
+    private var content: some View {
+        let sections = MeetingGrouping.sections(library.displayMeetings, now: .now, calendar: .current)
+        return LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
+            ForEach(sections, id: \.id) { section in
+                VStack(alignment: .leading, spacing: 7) {
+                    sectionHeader(section.title)
+                    groupCard(for: section.records)
                 }
             }
         }
     }
 
     /// One rounded, hairline-bordered container per date group (design mock
-    /// 6a): subtle fill, radius 10, row separators inset past the icon tile.
+    /// 10a/11c): subtle fill, radius 10, row separators inset past the
+    /// title (no more icon tile to clear).
     private func groupCard(for records: [MeetingRecord]) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(records.enumerated()), id: \.element.id) { index, record in
                 if index > 0 {
                     Divider()
                         .overlay(Tokens.hairline)
-                        .padding(.leading, 53)
+                        .padding(.leading, 14)
                 }
                 row(for: record)
             }
@@ -364,15 +275,20 @@ struct LibraryView: View {
     private func row(for record: MeetingRecord) -> some View {
         // The manual Models screen is gone — model install/selection is now
         // fully automatic (`TranscriptionSetupStore`, driven by the
-        // transcription-quality preference). Tapping the chip just re-kicks
+        // transcription-quality preference). Tapping "Retry" just re-kicks
         // setup rather than navigating anywhere.
-        MeetingRow(record: record, onInstallModel: { stores?.setup.retry() })
-            .contentShape(Rectangle())
-            .onTapGesture { openMeeting(record) }
-            .contextMenu {
-                rowContextMenu(for: record)
-            }
-            .axID(.meetingRow(record.meeting.id.uuidString))
+        MeetingRow(
+            record: record,
+            setupPhase: stores?.setup.phase,
+            onInstallModel: { stores?.setup.retry() },
+            onTranscribeRecovered: { queue?.transcribeRecovered(record, in: library) }
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { openMeeting(record) }
+        .contextMenu {
+            rowContextMenu(for: record)
+        }
+        .axID(.meetingRow(record.meeting.id.uuidString))
     }
 
     /// Routes to the meeting's screen: the `.recording` placeholder when it's
@@ -453,74 +369,87 @@ struct LibraryView: View {
             .padding(.horizontal, 4)
     }
 
+    /// No illustration, no button (design mock 10a/11c) — the toolbar's
+    /// Record button is already the call to action.
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("No meetings yet", systemImage: "waveform")
-                .font(Tokens.rowTitle)
+        VStack(spacing: 6) {
+            Text("No meetings yet")
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Tokens.textPrimary)
-        } description: {
-            Text("Hit Record when your next call starts. Recap captures the audio, transcribes it on this Mac, and turns your rough notes into a clean summary.")
-                .font(Tokens.meta)
-                .foregroundStyle(Tokens.textSecondary)
+            Text("Click Record, or press ⌥⌘R from any app.")
+                .font(.system(size: 12))
+                .foregroundStyle(Tokens.textPrimary.opacity(0.45))
         }
-        .padding(.top, 120)
-    }
-
-    private var filteredEmptyState: some View {
-        ContentUnavailableView {
-            Label("No matching meetings", systemImage: "line.3.horizontal.decrease.circle")
-                .font(Tokens.rowTitle)
-                .foregroundStyle(Tokens.textPrimary)
-        } description: {
-            Text("Try loosening the filter — fewer conditions or a shorter minimum length.")
-                .font(Tokens.meta)
-                .foregroundStyle(Tokens.textSecondary)
-        }
+        .frame(maxWidth: .infinity)
         .padding(.top, 120)
     }
 }
 
-/// A single Library row (design mock 6a): 28×28 neutral icon tile, title,
-/// meta line, trailing quiet status. Ready rows show only a chevron on
-/// hover; other statuses show their own indicator instead.
+/// A single Library row (design mock 10a/11c): title + trailing content that
+/// is EITHER a processing status OR — once `.ready` — a quiet
+/// start-time · duration line with a hover chevron. Never both.
+/// `.recovered` gets its own two-line layout with a ghost "Transcribe"
+/// action instead of a trailing status.
 private struct MeetingRow: View {
     var record: MeetingRecord
+    var setupPhase: TranscriptionSetupStore.SetupPhase?
     var onInstallModel: () -> Void
+    var onTranscribeRecovered: () -> Void
     @Environment(QueueStore.self) private var queue: QueueStore?
     @Environment(LibraryStore.self) private var library
     @State private var hovering = false
 
     var body: some View {
+        Group {
+            if record.meeting.status == .recovered {
+                recoveredRow
+            } else {
+                standardRow
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(hovering ? Tokens.chipBackground.opacity(0.6) : Color.clear)
+        .onHover { hovering = $0 }
+    }
+
+    private var standardRow: some View {
         HStack(spacing: 11) {
-            iconTile
+            Text(record.meeting.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Tokens.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 12)
+            trailing
+        }
+    }
+
+    /// Audio was salvaged from a crash spool: still the meeting's real
+    /// title, plus a reassuring sub-line and a one-tap way to kick off
+    /// transcription (`queue.transcribeRecovered`).
+    private var recoveredRow: some View {
+        HStack(spacing: 11) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(record.meeting.title)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Tokens.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                if let subtitle = record.meeting.subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Tokens.textSecondary)
-                        .lineLimit(1)
-                }
-                Text(record.meeting.metaLine)
+                Text("Recap quit unexpectedly — audio is safe")
                     .font(.system(size: 11))
                     .foregroundStyle(Tokens.textSecondary)
             }
             Spacer(minLength: 12)
-            trailing
+            Button("Transcribe", action: onTranscribeRecovered)
+                .buttonStyle(.quietBlueOutline)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(hovering ? Tokens.chipBackground.opacity(0.6) : Color.clear)
-        .onHover { hovering = $0 }
     }
 
-    /// Ready rows are silent (design global #4) except for a hover chevron —
-    /// no chip, no color. Every other status keeps its own indicator so
-    /// hovering doesn't hide information the user needs (progress, retry).
+    /// Ready rows are silent (design global #4) except for the start ·
+    /// duration line and a hover chevron — no chip, no color. Every other
+    /// status keeps its own indicator so hovering doesn't hide information
+    /// the user needs (progress, retry).
     @ViewBuilder private var trailing: some View {
         if !record.meeting.processingIssues.isEmpty {
             Text("Needs attention")
@@ -528,29 +457,39 @@ private struct MeetingRow: View {
                 .foregroundStyle(Tokens.warningAmberText)
                 .help("Open this meeting for recovery actions.")
         } else if record.meeting.status == .ready {
-            if hovering {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Tokens.textTertiary)
-            }
+            readyTrailing
         } else {
             MeetingStatusView(
                 status: record.meeting.status,
+                setupPhase: setupPhase,
                 onInstallModel: onInstallModel,
                 onRetry: { queue?.retranscribe(record, in: library) }
             )
         }
     }
 
-    private var iconTile: some View {
-        RoundedRectangle(cornerRadius: 7)
-            .fill(Tokens.chipBackground)
-            .frame(width: 28, height: 28)
-            .overlay {
-                Image(systemName: "waveform")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Tokens.textSecondary)
+    /// "9:29 AM · 15m" — start time · duration, tabular figures at reduced
+    /// opacity, plus a chevron shown only on hover.
+    @ViewBuilder private var readyTrailing: some View {
+        HStack(spacing: 6) {
+            Text(readySummary)
+                .font(.system(size: 11.5))
+                .monospacedDigit()
+                .foregroundStyle(Tokens.textPrimary.opacity(0.45))
+            if hovering {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Tokens.textTertiary)
             }
+        }
+    }
+
+    private var readySummary: String {
+        let time = record.meeting.date.formatted(.dateTime.hour().minute())
+        guard record.meeting.duration > 0 else { return time }
+        let duration = Duration.seconds(record.meeting.duration)
+            .formatted(.units(allowed: [.hours, .minutes], width: .narrow))
+        return "\(time) · \(duration)"
     }
 }
 

@@ -66,6 +66,20 @@ public enum MeetingGrouping {
             }
         }
 
+        // `.recovered` meetings (crash-salvaged audio, design mock 10a/11c)
+        // sort to the top of Today — they're the most actionable item in the
+        // list (one tap starts transcription) and shouldn't get buried below
+        // whatever else happened today. A stable partition: recovered
+        // records first, everything else keeping its existing relative order.
+        if var today = buckets["today"] {
+            let recovered = today.records.filter { $0.meeting.status == .recovered }
+            if !recovered.isEmpty {
+                let rest = today.records.filter { $0.meeting.status != .recovered }
+                today.records = recovered + rest
+                buckets["today"] = today
+            }
+        }
+
         return order.map { id in
             let bucket = buckets[id]!
             return Section(id: id, title: bucket.title, records: bucket.records)

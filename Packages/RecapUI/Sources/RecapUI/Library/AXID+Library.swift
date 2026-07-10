@@ -16,9 +16,6 @@ extension AXID {
     /// (`LibraryView.recordingIndicatorButton`).
     public static let libraryRecordingIndicatorButton = AXID("library-recording-indicator-button")
 
-    /// The Library toolbar's sort/filter menu (`LibraryView.sortFilterMenu`).
-    public static let librarySortFilterMenu = AXID("library-sort-filter-menu")
-
     // MARK: Library row context menu actions
 
     /// "Open" row context menu item (`LibraryView.rowContextMenu`).
@@ -130,23 +127,6 @@ extension AXID {
 
     /// A single search result row, keyed by the hit's stable id.
     public static func searchHitRow(_ id: String) -> AXID { AXID("library-search-hit-row-\(id)") }
-
-    // MARK: Upcoming section
-
-    /// A single Upcoming (calendar) row's Record button, keyed by the
-    /// event's stable id.
-    public static func upcomingRecordButton(_ id: String) -> AXID {
-        AXID("library-upcoming-record-button-\(id)")
-    }
-
-    /// The explicit "No meetings on your calendar today" quiet state —
-    /// calendar access granted, nothing meeting-shaped left today
-    /// (`UpcomingAgendaState.authorizedEmpty`).
-    public static let upcomingEmptyToday = AXID("library-upcoming-empty-today")
-
-    /// The "Connect your calendar" affordance shown when calendar access
-    /// isn't granted (`UpcomingAgendaState.unauthorized`).
-    public static let upcomingConnectCalendar = AXID("library-upcoming-connect-calendar")
 
     // MARK: Redesign (Phase 0 scaffolding)
 
