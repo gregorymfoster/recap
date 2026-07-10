@@ -104,10 +104,27 @@ public enum Tokens {
     /// Dimming scrim behind modal overlays (e.g. the search overlay).
     public static let scrim = dynamic(light: NSColor.black.withAlphaComponent(0.15), dark: NSColor.black.withAlphaComponent(0.45))
     /// Speaker-label colors for diarized transcripts, cycled by speaker index.
+    /// The first three (v3 design spec, 2026-07-10) are fixed dark-mode
+    /// values `#6db2ff`/`#5fd38a`/`#c792ea` paired with darker,
+    /// higher-contrast light-mode counterparts of the same hue, following
+    /// this file's usual dynamic-token pattern (e.g. `successGreenText`,
+    /// `warningAmberText`). The rest of the original palette follows as
+    /// overflow for a 4th+ speaker; entries whose hue duplicated one of the
+    /// new three (the old blue/green/purple) were dropped to avoid two
+    /// near-identical colors back to back.
     public static let speakerPalette: [Color] = [
-        accentBlue,
-        successGreenText,
-        Color(red: 0xAF / 255, green: 0x52 / 255, blue: 0xDE / 255),  // #af52de purple
+        dynamic(
+            light: NSColor(red: 0x0A / 255, green: 0x84 / 255, blue: 0xFF / 255, alpha: 1),  // #0a84ff
+            dark: NSColor(red: 0x6D / 255, green: 0xB2 / 255, blue: 0xFF / 255, alpha: 1)  // #6db2ff
+        ),
+        dynamic(
+            light: NSColor(red: 0x1E / 255, green: 0x8E / 255, blue: 0x4A / 255, alpha: 1),  // #1e8e4a
+            dark: NSColor(red: 0x5F / 255, green: 0xD3 / 255, blue: 0x8A / 255, alpha: 1)  // #5fd38a
+        ),
+        dynamic(
+            light: NSColor(red: 0x6E / 255, green: 0x22 / 255, blue: 0xA0 / 255, alpha: 1),  // #6e22a0
+            dark: NSColor(red: 0xC7 / 255, green: 0x92 / 255, blue: 0xEA / 255, alpha: 1)  // #c792ea
+        ),
         warningAmberText,
         dynamic(
             light: NSColor(red: 0x00 / 255, green: 0x7A / 255, blue: 0x8A / 255, alpha: 1),  // #007a8a teal
