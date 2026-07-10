@@ -72,6 +72,15 @@ private final class FakeSystemAudioSource: SystemAudioCapturing {
 
 private struct FakeError: Error {}
 
+/// Always-throwing `AudioFileWriting` double — proves the write-failure
+/// counters (moved off the actor onto `MixerEngine`'s background write task)
+/// still trip `.writeFailed` at the same threshold as before the move.
+private final class ThrowingFileWriter: AudioFileWriting {
+    func write(_ buffer: AVAudioPCMBuffer) throws {
+        throw FakeError()
+    }
+}
+
 @MainActor
 @Suite struct MeetingRecorderTests {
     private func tempDir() throws -> URL {
@@ -643,6 +652,42 @@ private struct FakeError: Error {}
 
         #expect(!collected.isEmpty)
         #expect(collected.contains { $0 > 0 })
+    }
+
+    // MARK: 8. Write failures still trip .writeFailed after moving off the actor
+
+    /// The m4a/spool writes now run on `MixerEngine`'s background write task
+    /// instead of inline in `emit()`, but the thrown-error threshold and
+    /// `.writeFailed` semantics must be unchanged. Both writers are swapped
+    /// for a double that always throws, so neither side can "reset" the
+    /// other's failure count back to zero.
+    @Test func writersThrowingRepeatedlyStillTripsWriteFailed() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("audio.m4a")
+        let mic = FakeMicSource()
+        let recorder = MeetingRecorder(mic: mic, makeSystemTap: { FakeSystemAudioSource() })
+        recorder.testFileWriterOverride = ThrowingFileWriter()
+        recorder.testSpoolWriterOverride = ThrowingFileWriter()
+
+        let output = try await recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
+        let micContinuation = try #require(mic.continuation)
+
+        var collected: [RecorderEvent] = []
+        let collectorTask = Task {
+            for await event in output.events {
+                collected.append(event)
+            }
+        }
+
+        // 10 blocks at the default 0.1s chunking — comfortably past the
+        // failure threshold (5) on both writers.
+        await push(micContinuation, seconds: 1.0)
+
+        _ = await recorder.stop()
+        await collectorTask.value
+
+        #expect(collected.contains(.writeFailed))
     }
 }
 

@@ -90,7 +90,13 @@ public final class MicSource {
     }
 
     public func start() throws -> AsyncStream<[Float]> {
-        let (stream, continuation) = AsyncStream.makeStream(of: [Float].self)
+        // Bounded: see `AudioPipeline.capturedStreamBufferedBlocks` — if the
+        // mixer actor stalls (slow disk), this stream must not grow without
+        // limit while the realtime tap callback keeps yielding into it.
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: [Float].self,
+            bufferingPolicy: .bufferingNewest(AudioPipeline.capturedStreamBufferedBlocks)
+        )
         self.continuation = continuation
         try attachTapAndStart()
         observeConfigurationChanges()

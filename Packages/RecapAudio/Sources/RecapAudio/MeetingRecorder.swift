@@ -103,6 +103,13 @@ public final class MeetingRecorder {
     private var engine: MixerEngine?
     private var pumpTasks: [Task<Void, Never>] = []
 
+    /// Test-only seam: when set, `start()` hands these to `MixerEngine`
+    /// instead of the default `AVAudioFile`-backed writers, so tests can
+    /// prove a writer that throws still trips `.writeFailed` through the
+    /// write path's moved failure counters. Never set in production.
+    var testFileWriterOverride: (any AudioFileWriting)?
+    var testSpoolWriterOverride: (any AudioFileWriting)?
+
     /// Active-time bookkeeping for the current recording; nil while stopped.
     /// `stop()` returns its elapsed active time, so paused stretches never
     /// count toward the meeting duration.
@@ -292,7 +299,9 @@ public final class MeetingRecorder {
                 chunks: chunkContinuation, levels: levelContinuation, events: eventContinuation,
                 attemptMicRecovery: { [weak self] in
                     self?.mic.forceRebuild()
-                }
+                },
+                fileWriterOverride: testFileWriterOverride,
+                spoolWriterOverride: testSpoolWriterOverride
             )
         } catch {
             systemTap?.stop()
@@ -423,8 +432,11 @@ public final class MeetingRecorder {
     }
 }
 
-/// Owns the mix buffer and the output files. All mixing, encoding, and
-/// downstream fan-out happens on this actor, off the capture queues.
+/// Owns the mix buffer and the output files. Mixing, RMS, and downsampling
+/// happen on this actor; the actual (potentially slow) disk writes run on a
+/// single serial background task fed through a small bounded queue, so a
+/// stalled disk suspends that task instead of this actor — see
+/// `emit(_:)` and `runWriteLoop`.
 private actor MixerEngine {
     private var buffer = MixBuffer()
     private var file: AVAudioFile?
@@ -435,9 +447,26 @@ private actor MixerEngine {
     private let chunks: AsyncStream<AudioChunk>.Continuation
     private let levels: AsyncStream<Float>.Continuation
     private let events: AsyncStream<RecorderEvent>.Continuation
-    private var fileWriteFailures = 0
-    private var spoolWriteFailures = 0
-    private var reportedWriteFailure = false
+
+    /// Feeds mixed blocks (raw mono samples, not yet a PCM buffer — building
+    /// that happens on the write task itself, since `AVAudioPCMBuffer` isn't
+    /// `Sendable`) to the background write task. Bounded to
+    /// `writeQueueDepth`; past that, the OLDEST queued block is dropped, same
+    /// dropping-newest... dropping-oldest policy as the capture-side streams
+    /// (`AudioPipeline.capturedStreamBufferedBlocks`), just much shallower —
+    /// this queue is only ever backed up by the disk itself, not a whole
+    /// capture pipeline.
+    private let writeQueue: AsyncStream<[Float]>.Continuation
+    private var writeTask: Task<MixerEngine.WriteOutcome, Never>?
+    /// ~700 ms of blocks at the mixer's typical ~85 ms block size.
+    private static let writeQueueDepth = 8
+
+    /// Shared between this actor's `emit(_:)` (which observes queue drops)
+    /// and the background write task (which observes write duration and
+    /// thrown errors) without either side needing to `await` a hop to the
+    /// other just to update a strike count.
+    private let writeHealth: WriteFailureLatch
+
     /// 0–2 samples carried between blocks so 3:1 decimation never drops audio.
     private var downsampleCarry: [Float] = []
     private var chunkPosition: TimeInterval = 0
@@ -474,7 +503,9 @@ private actor MixerEngine {
         chunks: AsyncStream<AudioChunk>.Continuation,
         levels: AsyncStream<Float>.Continuation,
         events: AsyncStream<RecorderEvent>.Continuation,
-        attemptMicRecovery: @MainActor @escaping () async -> Void = {}
+        attemptMicRecovery: @MainActor @escaping () async -> Void = {},
+        fileWriterOverride: (any AudioFileWriting)? = nil,
+        spoolWriterOverride: (any AudioFileWriting)? = nil
     ) throws {
         buffer.systemActive = systemActive
         buffer.micActive = micActive
@@ -496,10 +527,11 @@ private actor MixerEngine {
             AVNumberOfChannelsKey: 1,
             AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
         ]
-        file = try AVAudioFile(
+        let file = try AVAudioFile(
             forWriting: url, settings: aacSettings,
             commonFormat: .pcmFormatFloat32, interleaved: false
         )
+        self.file = file
         // Int16 LPCM: half the size of Float32, still lossless for speech.
         let spoolSettings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
@@ -511,13 +543,30 @@ private actor MixerEngine {
         ]
         // The spool is best-effort: if it can't be created the recording
         // still runs, just without crash protection.
-        spool = try? AVAudioFile(
+        let spool = try? AVAudioFile(
             forWriting: spoolURL, settings: spoolSettings,
             commonFormat: .pcmFormatFloat32, interleaved: false
         )
+        self.spool = spool
         self.chunks = chunks
         self.levels = levels
         self.events = events
+
+        let fileWriter = fileWriterOverride ?? AVAudioFileWriter(file: file)
+        let spoolWriter = spoolWriterOverride ?? spool.map { AVAudioFileWriter(file: $0) }
+        let (writeStream, writeContinuation) = AsyncStream.makeStream(
+            of: [Float].self, bufferingPolicy: .bufferingNewest(Self.writeQueueDepth)
+        )
+        self.writeQueue = writeContinuation
+        let writeHealth = WriteFailureLatch()
+        self.writeHealth = writeHealth
+        self.writeTask = Task.detached(priority: .utility) {
+            await Self.runWriteLoop(
+                queue: writeStream, format: format,
+                fileWriter: fileWriter, spoolWriter: spoolWriter,
+                events: events, health: writeHealth
+            )
+        }
     }
 
     /// Independent mic/system sample totals seen so far — see
@@ -596,14 +645,17 @@ private actor MixerEngine {
         paused = value
     }
 
-    /// Drains the tail, closes the files, and ends the output streams.
-    /// If the m4a writer had failed, the spool is transcoded to replace it;
-    /// otherwise the spool is deleted.
-    func finish() {
+    /// Drains the tail, stops accepting new write-queue blocks, awaits the
+    /// background write task's queued tail so nothing is lost, then closes
+    /// the files and ends the output streams. If the m4a writer had failed,
+    /// the spool is transcoded to replace it; otherwise the spool is deleted.
+    func finish() async {
         emit(buffer.flushRemainder())
+        writeQueue.finish()
+        let outcome = await writeTask?.value ?? WriteOutcome()
         file = nil
         spool = nil
-        if fileWriteFailures >= Self.failureThreshold || (try? AVAudioFile(forReading: fileURL)) == nil {
+        if outcome.fileWriteFailures >= Self.failureThreshold || (try? AVAudioFile(forReading: fileURL)) == nil {
             recorderLog.info("salvaging spool: m4a unreadable or write failures reached threshold")
             AudioTranscoder.salvageSpool(caf: spoolURL, m4a: fileURL)
         } else {
@@ -614,38 +666,19 @@ private actor MixerEngine {
         events.finish()
     }
 
+    /// Mixing/RMS/downsample stay here on the actor; the raw samples are
+    /// handed to the bounded write queue instead of being written inline —
+    /// the actual disk write is what a slow disk stalls on, and this actor
+    /// must keep draining `pushMic`/`pushSystem` regardless. If the write
+    /// queue is full (the background write task has fallen behind), the
+    /// oldest queued block is dropped — see `writeQueue`'s doc comment — and
+    /// that drop counts as a write-health strike.
     private func emit(_ mixed: [Float]) {
         guard !mixed.isEmpty else { return }
 
-        if let pcm = pcmBuffer(from: mixed) {
-            if let file {
-                do {
-                    try file.write(from: pcm)
-                    fileWriteFailures = 0
-                } catch {
-                    fileWriteFailures += 1
-                }
-            }
-            if let spool {
-                do {
-                    try spool.write(from: pcm)
-                    spoolWriteFailures = 0
-                } catch {
-                    spoolWriteFailures += 1
-                    if spoolWriteFailures >= Self.failureThreshold {
-                        // Give up on the spool; the m4a may still be healthy.
-                        self.spool = nil
-                    }
-                }
-            }
-            // Only unrecoverable when both writers are failing.
-            if !reportedWriteFailure,
-               fileWriteFailures >= Self.failureThreshold,
-               spool == nil || spoolWriteFailures >= Self.failureThreshold {
-                reportedWriteFailure = true
-                recorderLog.error("write-failure threshold tripped: fileFailures=\(self.fileWriteFailures, privacy: .public) spoolFailures=\(self.spoolWriteFailures, privacy: .public)")
-                events.yield(.writeFailed)
-            }
+        if case .dropped = writeQueue.yield(mixed), writeHealth.recordDropped() {
+            recorderLog.error("write queue dropped a block: disk write path unhealthy")
+            events.yield(.writeFailed)
         }
 
         var rms: Float = 0
@@ -663,10 +696,83 @@ private actor MixerEngine {
         }
     }
 
-    private func pcmBuffer(from samples: [Float]) -> AVAudioPCMBuffer? {
+    /// Final thrown-error counts from the background write task, read by
+    /// `finish()` once the task has drained — same numbers `emit()` used to
+    /// keep as instance state before the writes moved off the actor.
+    struct WriteOutcome: Sendable {
+        var fileWriteFailures = 0
+        var spoolWriteFailures = 0
+    }
+
+    /// Runs on its own detached task, never on this actor — the whole point
+    /// of moving writes here is that a stalled disk suspends this loop, not
+    /// `pushMic`/`pushSystem`. A single consumer means writes land in the
+    /// order `emit()` queued them, by construction, with no interleaving to
+    /// reason about.
+    ///
+    /// Builds the `AVAudioPCMBuffer` here (not on the actor) since
+    /// `AVAudioPCMBuffer` isn't `Sendable` — only the raw `[Float]` samples
+    /// cross from `emit()` through `writeQueue`.
+    private static func runWriteLoop(
+        queue: AsyncStream<[Float]>,
+        format: AVAudioFormat,
+        fileWriter: any AudioFileWriting,
+        spoolWriter initialSpoolWriter: (any AudioFileWriting)?,
+        events: AsyncStream<RecorderEvent>.Continuation,
+        health: WriteFailureLatch
+    ) async -> WriteOutcome {
+        var outcome = WriteOutcome()
+        var spoolWriter = initialSpoolWriter
+        let clock = ContinuousClock()
+
+        for await samples in queue {
+            guard let pcm = pcmBuffer(from: samples, format: format) else { continue }
+
+            let started = clock.now
+            health.recordWriteStarted(at: started)
+
+            do {
+                try fileWriter.write(pcm)
+                outcome.fileWriteFailures = 0
+            } catch {
+                outcome.fileWriteFailures += 1
+            }
+            if let writer = spoolWriter {
+                do {
+                    try writer.write(pcm)
+                    outcome.spoolWriteFailures = 0
+                } catch {
+                    outcome.spoolWriteFailures += 1
+                    if outcome.spoolWriteFailures >= Self.failureThreshold {
+                        // Give up on the spool; the m4a may still be healthy.
+                        spoolWriter = nil
+                    }
+                }
+            }
+
+            if health.recordWriteCompleted(at: clock.now) {
+                recorderLog.error("write duration exceeded threshold repeatedly: disk write path unhealthy")
+                events.yield(.writeFailed)
+            }
+
+            // Only unrecoverable when both writers are failing — mirrors the
+            // pre-move logic exactly, just relocated to where the writes now
+            // happen. Shares `health`'s one-shot latch with the drop/slow-
+            // write path above so a disk that trips both only reports once.
+            if outcome.fileWriteFailures >= Self.failureThreshold,
+               spoolWriter == nil || outcome.spoolWriteFailures >= Self.failureThreshold,
+               health.recordThrownErrorThresholdTripped() {
+                recorderLog.error("write-failure threshold tripped: fileFailures=\(outcome.fileWriteFailures, privacy: .public) spoolFailures=\(outcome.spoolWriteFailures, privacy: .public)")
+                events.yield(.writeFailed)
+            }
+        }
+        return outcome
+    }
+
+    private static func pcmBuffer(from samples: [Float], format: AVAudioFormat) -> AVAudioPCMBuffer? {
         guard
             let pcm = AVAudioPCMBuffer(
-                pcmFormat: writeFormat, frameCapacity: AVAudioFrameCount(samples.count)
+                pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)
             ),
             let channel = pcm.floatChannelData
         else { return nil }

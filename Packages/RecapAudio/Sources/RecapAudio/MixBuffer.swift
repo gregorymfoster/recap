@@ -5,6 +5,16 @@ public enum AudioPipeline {
     /// Common rate both sources are converted to before mixing. Must stay an
     /// integer multiple of 16 kHz for `Downsampler3x`.
     public static let mixerSampleRate: Double = 48_000
+
+    /// Bound for the two capture-side streams (mic tap, system-audio IOProc)
+    /// feeding `MeetingRecorder`'s pump tasks. ~2 s of ~85 ms capture blocks:
+    /// enough to ride out a brief consumer stall (e.g. a slow disk stalling
+    /// the mixer actor) without memory growing unbounded. When the consumer
+    /// falls behind, `.bufferingNewest` drops the OLDEST buffered audio —
+    /// stale audio matters less than what's being said right now, and a
+    /// slow-but-catching-up disk needs bounded, detectable loss instead of
+    /// unbounded growth toward an OOM.
+    public static let capturedStreamBufferedBlocks = 24
 }
 
 /// Alignment buffer for the two capture streams (mic + system audio).

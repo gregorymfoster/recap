@@ -128,7 +128,13 @@ public final class SystemAudioTap {
             throw TapError.formatUnsupported
         }
 
-        let (stream, continuation) = AsyncStream.makeStream(of: [Float].self)
+        // Bounded: see `AudioPipeline.capturedStreamBufferedBlocks` — if the
+        // mixer actor stalls (slow disk), this stream must not grow without
+        // limit while the realtime IOProc callback keeps yielding into it.
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: [Float].self,
+            bufferingPolicy: .bufferingNewest(AudioPipeline.capturedStreamBufferedBlocks)
+        )
 
         // The IO block must be @Sendable so it is nonisolated — it runs on the
         // HAL's realtime IO thread, and a MainActor-inherited closure would
