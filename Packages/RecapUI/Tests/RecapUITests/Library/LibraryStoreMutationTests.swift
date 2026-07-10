@@ -439,4 +439,37 @@ private actor ChangeCollector {
         let changes = await collector.waitForCount(1)
         #expect(changes == [.meetingChanged(newer.meeting.id)])
     }
+
+    // MARK: onSaveError
+
+    /// `FileManager.trashItem` fails when its target no longer exists —
+    /// removing the folder out from under the store simulates a disk write
+    /// failure without needing to touch permissions.
+    @Test func moveToTrashReportsSaveFailureWhenFolderMissing() throws {
+        let (store, _, _) = makeStore()
+        let record = try #require(store.startNewMeeting(title: "Doomed meeting"))
+        try FileManager.default.removeItem(at: record.folderURL)
+        var reported: [String] = []
+        store.onSaveError = { reported.append($0) }
+
+        store.moveToTrash(record)
+
+        #expect(reported.contains { $0.contains("Doomed meeting") })
+        // moveToTrash returned early on the failed trash — the record stays
+        // in memory rather than being dropped as if it had succeeded.
+        #expect(store.record(for: record.meeting.id) != nil)
+    }
+
+    @Test func renameReportsSaveFailureWhenFolderMissing() throws {
+        let (store, _, _) = makeStore()
+        let record = try #require(store.startNewMeeting(title: "Original title"))
+        try FileManager.default.removeItem(at: record.folderURL)
+        var reported: [String] = []
+        store.onSaveError = { reported.append($0) }
+
+        store.rename(record, to: "New title")
+
+        #expect(reported.contains { $0.contains("Original title") })
+        #expect(store.record(for: record.meeting.id)?.meeting.title == "Original title")
+    }
 }

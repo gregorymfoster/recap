@@ -34,6 +34,14 @@ struct LibraryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                if library.rootUnreachable {
+                    RootUnreachableBanner(path: library.saveLocationLabel) {
+                        router.pendingSettingsSection = .storage
+                        SettingsOpener.open()
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 16)
+                }
                 if let imminentEvent {
                     NextMeetingBanner(event: imminentEvent, now: .now) {
                         stores?.startRecording(title: imminentEvent.title, attendees: imminentEvent.otherAttendees)
@@ -394,6 +402,42 @@ struct LibraryView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 120)
+    }
+}
+
+/// Persistent (not a toast) banner shown above the Library list when
+/// `LibraryStore.rootUnreachable` is true — the library root folder is
+/// missing and that's a genuine error, not just a fresh install waiting on
+/// its first recording. Styled like `NextMeetingBanner` but in the warning
+/// palette (mirrors the stuck-backup styling in `LibraryFooter`), since
+/// unlike a toast this needs to stay visible until the user fixes it.
+private struct RootUnreachableBanner: View {
+    var path: String
+    var onOpenSettings: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Tokens.warningAmberText)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Your library folder can't be found")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(Tokens.textPrimary)
+                Text(path)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Tokens.textPrimary.opacity(0.5))
+            }
+            Spacer(minLength: 12)
+            Button("Open Settings…", action: onOpenSettings)
+                .buttonStyle(.quietBlueOutline)
+                .axID(.libraryOpenSettingsButton)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(Tokens.warningAmberText.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Tokens.warningAmberText.opacity(0.22), lineWidth: 1))
+        .axID(.libraryRootUnreachableBanner)
     }
 }
 

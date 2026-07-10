@@ -37,4 +37,20 @@ public enum LaunchRecovery {
             return .none
         }
     }
+
+    /// Pure predicate behind "recover pending exports at launch": true when a
+    /// meeting finished processing (`.ready`) with folder-mirror backup
+    /// turned on, and still needs a mirror per `BackupAggregate.isPending`
+    /// (never backed up, or edited after its last backup — e.g. Recap quit
+    /// between the pipeline completing and the debounced change-bus export
+    /// firing, or backup was enabled while the app wasn't running). Shared by
+    /// `BackupStatusStore.backfill()`'s filter and directly unit-tested here,
+    /// so the launch-recovery decision is exhaustively testable without a
+    /// real `LibraryStorage`/`BackupStatusStore` graph.
+    public static func needsExportRecovery(
+        mirrorBackupEnabled: Bool, status: MeetingStatus, lastBackupDate: Date?, updatedAt: Date?
+    ) -> Bool {
+        guard mirrorBackupEnabled, status == .ready else { return false }
+        return BackupAggregate.isPending(lastBackupDate: lastBackupDate, updatedAt: updatedAt)
+    }
 }

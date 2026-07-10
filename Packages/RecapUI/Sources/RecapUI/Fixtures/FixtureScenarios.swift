@@ -63,6 +63,11 @@ public enum FixtureScenario: String, CaseIterable, Sendable {
     /// A calendar meeting starting soon, for the "next meeting" banner.
     /// TODO(phase-3x): dedicated graph.
     case nextMeetingSoon
+    /// The Library's persistent "can't find your folder" banner
+    /// (`LibraryStore.rootUnreachable`) — reuses the `default` library;
+    /// `AppStores` overrides the flag directly for screenshots since there's
+    /// no real vanished folder behind this scenario.
+    case rootUnreachable
 
     /// Parses a raw `-fixtures <name>` scenario string. Unknown strings fall
     /// back to `.default` with a warning — a typo'd scenario name should
@@ -80,7 +85,7 @@ public enum FixtureScenario: String, CaseIterable, Sendable {
     @MainActor
     public var library: LibraryStore {
         switch self {
-        case .default, .noMeetingsToday, .recording, .nextMeetingSoon: FixtureScenarios.defaultLibrary()
+        case .default, .noMeetingsToday, .recording, .nextMeetingSoon, .rootUnreachable: FixtureScenarios.defaultLibrary()
         case .empty, .firstRunWithAgenda, .firstRun: FixtureScenarios.emptyLibrary()
         case .busy: FixtureScenarios.busyLibrary()
         case .processing: FixtureScenarios.processingLibrary()

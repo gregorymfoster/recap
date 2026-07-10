@@ -138,4 +138,12 @@ extension AXID {
 
     /// The meeting detail loading skeleton, shown before content is ready.
     public static let detailSkeleton = AXID("library-detail-skeleton")
+
+    /// The persistent "can't find your library folder" banner
+    /// (`LibraryView`'s `RootUnreachableBanner`), shown above the meeting
+    /// list when `LibraryStore.rootUnreachable` is true.
+    public static let libraryRootUnreachableBanner = AXID("library-root-unreachable-banner")
+
+    /// The root-unreachable banner's "Open Settings…" button.
+    public static let libraryOpenSettingsButton = AXID("library-open-settings-button")
 }

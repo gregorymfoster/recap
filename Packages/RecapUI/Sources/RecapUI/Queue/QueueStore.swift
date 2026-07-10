@@ -144,6 +144,21 @@ public final class QueueStore {
             }
         }
         recoverUnfinishedWork(in: library)
+
+        // A meeting can finish `.ready` with mirror backup already enabled
+        // but never get exported — Recap quit between the pipeline
+        // completing and `ChangeBusConsumer`'s debounced export firing, or
+        // backup was turned on while the app wasn't running. `backfill()`
+        // already knows how to find and mirror every meeting still pending
+        // per `LaunchRecovery.needsExportRecovery` (the same scan the
+        // Settings toggle's "back up existing meetings now" action runs),
+        // and no-ops instantly when backup is disabled, no folder is
+        // configured, or nothing is pending — safe to call unconditionally
+        // here, once, at construction. Calling it again later (the Settings
+        // toggle, a stuck-backup retry) is also safe: `backfill()` itself
+        // cancels/replaces any run already in flight rather than stacking a
+        // second one, so there's no double-export to guard against.
+        backup.backfill()
     }
 
     public func enqueueTranscription(for meetingID: UUID) {

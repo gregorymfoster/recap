@@ -46,4 +46,50 @@ import Testing
     @Test func readyIsANoOp() {
         #expect(LaunchRecovery.action(for: .ready) == .none)
     }
+
+    // MARK: needsExportRecovery
+
+    @Test func needsExportRecoveryIsTrueForReadyNeverBackedUpMeetingWithBackupEnabled() {
+        #expect(
+            LaunchRecovery.needsExportRecovery(
+                mirrorBackupEnabled: true, status: .ready, lastBackupDate: nil, updatedAt: nil
+            )
+        )
+    }
+
+    @Test func needsExportRecoveryIsTrueWhenBackedUpBeforeLastEdit() {
+        let backedUp = Date(timeIntervalSince1970: 1_000)
+        let editedAfter = Date(timeIntervalSince1970: 2_000)
+        #expect(
+            LaunchRecovery.needsExportRecovery(
+                mirrorBackupEnabled: true, status: .ready, lastBackupDate: backedUp, updatedAt: editedAfter
+            )
+        )
+    }
+
+    @Test func needsExportRecoveryIsFalseWhenAlreadyBackedUpAfterLastEdit() {
+        let editedBefore = Date(timeIntervalSince1970: 1_000)
+        let backedUpAfter = Date(timeIntervalSince1970: 2_000)
+        #expect(
+            !LaunchRecovery.needsExportRecovery(
+                mirrorBackupEnabled: true, status: .ready, lastBackupDate: backedUpAfter, updatedAt: editedBefore
+            )
+        )
+    }
+
+    @Test func needsExportRecoveryIsFalseWhenMirrorBackupDisabled() {
+        #expect(
+            !LaunchRecovery.needsExportRecovery(
+                mirrorBackupEnabled: false, status: .ready, lastBackupDate: nil, updatedAt: nil
+            )
+        )
+    }
+
+    @Test func needsExportRecoveryIsFalseForNonReadyStatus() {
+        #expect(
+            !LaunchRecovery.needsExportRecovery(
+                mirrorBackupEnabled: true, status: .queued, lastBackupDate: nil, updatedAt: nil
+            )
+        )
+    }
 }

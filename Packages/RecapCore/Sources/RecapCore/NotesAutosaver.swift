@@ -14,11 +14,25 @@ public actor NotesAutosaver {
     private var pending: (record: MeetingRecord, notes: String)?
     private var flushTask: Task<Void, Never>?
     private var retryAttempt = 0
+    /// Fired once when `scheduleRetry` gives up after `maxRetryAttempts` —
+    /// previously a silent give-up. Reset alongside `retryAttempt` on the
+    /// next successful flush, so a later failure after a recovery can fire
+    /// it again rather than staying permanently silenced.
+    private var onExhausted: (@Sendable () -> Void)?
+    private var hasFiredExhausted = false
 
     public init(storage: LibraryStorage, interval: Duration = .seconds(1), retryBackoff: Duration = .seconds(2)) {
         self.storage = storage
         self.interval = interval
         self.retryBackoff = retryBackoff
+    }
+
+    /// Wires the "gave up after the retry budget" signal. A settable method
+    /// rather than an init parameter so callers that need to capture `self`
+    /// in the handler (e.g. `LibraryStore`) can attach it after their own
+    /// `init` has fully assigned every stored property.
+    public func setOnExhausted(_ handler: (@Sendable () -> Void)?) {
+        onExhausted = handler
     }
 
     public func noteDidChange(_ notes: String, in record: MeetingRecord) {
@@ -42,6 +56,7 @@ public actor NotesAutosaver {
             try storage.saveNotes(notes, in: record)
             pending = nil
             retryAttempt = 0
+            hasFiredExhausted = false
             return true
         } catch {
             // Keep the content so the next change or flush retries the write —
@@ -53,7 +68,13 @@ public actor NotesAutosaver {
     }
 
     private func scheduleRetry() {
-        guard retryAttempt < Self.maxRetryAttempts else { return }
+        guard retryAttempt < Self.maxRetryAttempts else {
+            if !hasFiredExhausted {
+                hasFiredExhausted = true
+                onExhausted?()
+            }
+            return
+        }
         retryAttempt += 1
         flushTask = Task { [retryBackoff] in
             try? await Task.sleep(for: retryBackoff)

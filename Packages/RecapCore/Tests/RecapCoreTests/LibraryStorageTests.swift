@@ -175,6 +175,59 @@ import Testing
         #expect(try storage.loadTimedNotes(in: record) == updated)
     }
 
+    @Test func loadAllDetailedReportsSkippedFolderCount() throws {
+        let storage = try makeStorage()
+        _ = try storage.create(Meeting(title: "Valid A", date: .now))
+        _ = try storage.create(Meeting(title: "Valid B", date: .now))
+        // A folder with garbage instead of a real meeting.json.
+        let corrupt = storage.rootURL.appendingPathComponent("corrupt folder")
+        try FileManager.default.createDirectory(at: corrupt, withIntermediateDirectories: true)
+        try Data("not json".utf8).write(to: corrupt.appendingPathComponent("meeting.json"))
+
+        let result = try storage.loadAllDetailed()
+
+        #expect(result.records.count == 2)
+        #expect(result.skippedCount == 1)
+        // loadAll() itself is unaffected — still just the valid records.
+        #expect(try storage.loadAll().count == 2)
+    }
+
+    @Test func rootIsReachableTrueWhenDirectoryExists() throws {
+        let storage = try makeStorage()
+        #expect(!storage.rootIsReachable(), "root doesn't exist yet — no meeting created")
+        _ = try storage.create(Meeting(title: "First meeting", date: .now))
+        #expect(storage.rootIsReachable())
+    }
+
+    @Test func rootIsReachableFalseForAFileAtThatPathInsteadOfADirectory() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RecapTests-\(UUID().uuidString)")
+        try Data().write(to: root)
+        let storage = LibraryStorage(rootURL: root)
+        #expect(!storage.rootIsReachable())
+    }
+
+    // MARK: rootUnreachableIsError
+
+    @Test func rootUnreachableIsErrorFalseWhenReachable() {
+        #expect(!LibraryStorage.rootUnreachableIsError(reachable: true, isCustomRoot: true, wasReachableEarlierThisLaunch: true))
+    }
+
+    @Test func rootUnreachableIsErrorFalseForFreshDefaultInstall() {
+        // A default-location root that's never existed and was never
+        // reachable this launch — a fresh install waiting on its first
+        // recording — must not read as an error.
+        #expect(!LibraryStorage.rootUnreachableIsError(reachable: false, isCustomRoot: false, wasReachableEarlierThisLaunch: false))
+    }
+
+    @Test func rootUnreachableIsErrorTrueForMissingCustomizedRoot() {
+        #expect(LibraryStorage.rootUnreachableIsError(reachable: false, isCustomRoot: true, wasReachableEarlierThisLaunch: false))
+    }
+
+    @Test func rootUnreachableIsErrorTrueWhenReachableEarlierThisLaunchThenVanished() {
+        #expect(LibraryStorage.rootUnreachableIsError(reachable: false, isCustomRoot: false, wasReachableEarlierThisLaunch: true))
+    }
+
     @Test func trashMovesFolderAndRemovesItFromLoadAll() throws {
         let storage = try makeStorage()
         let keep = try storage.create(Meeting(title: "Keep me", date: .now))

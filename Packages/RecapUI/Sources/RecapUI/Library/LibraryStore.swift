@@ -1,6 +1,9 @@
 import Foundation
 import Observation
+import os
 import RecapCore
+
+private let libraryStoreLog = Logger(subsystem: "com.gregfoster.recap", category: "LibraryStore")
 
 @MainActor
 @Observable
@@ -12,6 +15,22 @@ public final class LibraryStore {
     let index: SearchIndex?
     let autosaver: NotesAutosaver?
     let changeBus: LibraryChangeBus?
+    /// Fired with a short, human-readable message whenever a disk write this
+    /// store attempts (metadata save, rename, trash, meeting creation, or
+    /// `NotesAutosaver` giving up after its retry budget) fails, or when
+    /// `reload()` finds meeting folders it couldn't read. `AppStores` routes
+    /// this to a toast (mirrors `QueueStore`'s `onError`). `nil` by default —
+    /// only ever fires when `storage` is non-nil, since fixture/preview
+    /// stores never touch disk.
+    public var onSaveError: ((String) -> Void)?
+    /// True when the library root folder is missing and that's considered a
+    /// genuine error (not just a fresh install that hasn't recorded its first
+    /// meeting yet — see `reload()`). Drives the Library's persistent
+    /// "can't find your folder" banner.
+    public internal(set) var rootUnreachable = false
+    /// Set the first time `reload()` observes the root as reachable this
+    /// launch — part of `rootUnreachable`'s gating rule (see `reload()`).
+    private var rootWasReachableThisLaunch = false
     /// Canned transcripts for fixture records (no disk in fixture mode), so
     /// -fixtures runs and screenshot dumps can show the transcript pane —
     /// avatars, rename affordance. Empty in disk-backed mode.
@@ -38,6 +57,26 @@ public final class LibraryStore {
         self.autosaver = NotesAutosaver(storage: storage)
         self.changeBus = changeBus
         reload()
+        wireAutosaverExhaustion()
+    }
+
+    /// Routes `NotesAutosaver`'s "gave up after its retry budget" signal to
+    /// the same `onSaveError` toast seam as every other silent-write failure
+    /// below. Wired post-init (actor calls are async; `init` isn't) via a
+    /// detached task rather than an init parameter — capturing `self` in the
+    /// handler would otherwise require `self` before every stored property
+    /// is assigned. Harmless if it lands a beat after construction: the
+    /// autosaver's own retry backoff (seconds by default) gives this plenty
+    /// of time to attach before a real write could ever exhaust it.
+    private func wireAutosaverExhaustion() {
+        guard let autosaver else { return }
+        Task {
+            await autosaver.setOnExhausted { [weak self] in
+                Task { @MainActor in
+                    self?.onSaveError?("Couldn't save your notes — check disk space or folder permissions.")
+                }
+            }
+        }
     }
 
     /// Fixture store for previews and early UI work.
@@ -86,11 +125,82 @@ public final class LibraryStore {
         }
     }
 
+    /// Reloads the library from disk. Also re-checks `rootUnreachable` and
+    /// (in the background) repairs the search index if it's drifted from
+    /// what's on disk.
+    ///
+    /// Root-reachability rule: a fresh default install has no `~/Recap`
+    /// folder until the first recording creates it (`LibraryStorage.create`),
+    /// so a missing root must NOT read as an error there. It's only treated
+    /// as a genuine error — surfaced via `rootUnreachable` rather than
+    /// silently showing an empty library — when the root is a folder the
+    /// user deliberately pointed at (a customized save location in Settings)
+    /// or one that was reachable earlier this launch and then vanished
+    /// (external drive unmounted, folder deleted/renamed underneath the app).
     public func reload() {
         guard let storage, let index else { return }
-        meetings = (try? storage.loadAll()) ?? []
-        try? index.reindex(from: storage)
+        let reachable = storage.rootIsReachable()
+        if reachable { rootWasReachableThisLaunch = true }
+        let isCustomRoot = storage.rootURL.path != LibraryStorage.defaultRootURL.path
+        rootUnreachable = LibraryStorage.rootUnreachableIsError(
+            reachable: reachable, isCustomRoot: isCustomRoot, wasReachableEarlierThisLaunch: rootWasReachableThisLaunch
+        )
+
+        guard reachable else {
+            // Keep the last-known `meetings` in memory rather than wiping the
+            // list to empty — losing the root shouldn't look like losing the
+            // meetings themselves, and `rootUnreachable` above is what
+            // actually drives the Library's banner for the genuine-error case.
+            return
+        }
+
+        let result = (try? storage.loadAllDetailed()) ?? LibraryStorage.LoadAllResult(records: [], skippedCount: 0)
+        meetings = result.records
         rebuildDisplayMeetings()
+        if result.skippedCount > 0 {
+            let plural = result.skippedCount == 1 ? "" : "s"
+            onSaveError?("\(result.skippedCount) meeting\(plural) couldn't be read and \(result.skippedCount == 1 ? "was" : "were") skipped.")
+        }
+        reindexInBackground(records: result.records, storage: storage, index: index)
+    }
+
+    /// Rebuilds the search index off the main actor. Per-mutation
+    /// `index.update` (see `replace`/`insertImported`/etc. below) already
+    /// keeps the index in sync for every live edit — this launch-time
+    /// rebuild only repairs external drift (files hand-edited or folders
+    /// hand-added outside the app, or an index that fell out of sync/was
+    /// deleted). Skips the rebuild entirely when the indexed row count
+    /// already matches the folder count, since that's the common case at
+    /// every ordinary launch. The previous launch's on-disk index keeps
+    /// serving search queries the whole time: `reindex(records:storage:)`
+    /// does its DELETE + re-insert inside one GRDB write transaction, so
+    /// search never sees a half-rebuilt table.
+    private func reindexInBackground(records: [MeetingRecord], storage: LibraryStorage, index: SearchIndex) {
+        Task.detached(priority: .utility) {
+            let indexedCount = (try? index.indexedMeetingCount()) ?? -1
+            guard indexedCount != records.count else { return }
+            try? index.reindex(records: records, storage: storage)
+        }
+    }
+
+    /// Routes an otherwise-silent disk-write failure to `onSaveError` with a
+    /// short, human message naming the meeting — the shared seam behind
+    /// every `try?` write below.
+    private func reportSaveFailure(for title: String) {
+        onSaveError?("Couldn't save changes to \"\(title)\" — check that your Recap folder is writable.")
+    }
+
+    /// Refreshes one meeting's search-index row, logging (not toasting) on
+    /// failure. Search staleness isn't worth alarming users over — the
+    /// meeting data itself is already safely on disk regardless — and the
+    /// next launch's `reindexInBackground` repairs any drift anyway.
+    private func indexUpdate(_ record: MeetingRecord, storage: LibraryStorage) {
+        guard let index else { return }
+        do {
+            try index.update(record, from: storage)
+        } catch {
+            libraryStoreLog.error("index update failed: \(String(describing: error), privacy: .private)")
+        }
     }
 
     /// Creates a new meeting on disk and selects it. Calendar auto-record
@@ -105,10 +215,13 @@ public final class LibraryStore {
             rebuildDisplayMeetings()
             return record
         }
-        guard let record = try? storage.create(meeting) else { return nil }
+        guard let record = try? storage.create(meeting) else {
+            reportSaveFailure(for: title)
+            return nil
+        }
         meetings.insert(record, at: 0)
         selectedMeetingID = meeting.id
-        if let index { try? index.update(record, from: storage) }
+        indexUpdate(record, storage: storage)
         rebuildDisplayMeetings()
         return record
     }
@@ -129,7 +242,7 @@ public final class LibraryStore {
     public func insertImported(_ record: MeetingRecord) {
         let i = meetings.firstIndex { $0.meeting.date < record.meeting.date } ?? meetings.endIndex
         meetings.insert(record, at: i)
-        if let storage, let index { try? index.update(record, from: storage) }
+        if let storage { indexUpdate(record, storage: storage) }
         rebuildDisplayMeetings()
         changeBus?.post(.meetingChanged(record.meeting.id))
     }
@@ -192,7 +305,11 @@ public final class LibraryStore {
         }
         updateDisplayElement(record)
         guard let storage else { return }
-        try? storage.saveMetadata(record)
+        do {
+            try storage.saveMetadata(record)
+        } catch {
+            reportSaveFailure(for: record.meeting.title)
+        }
     }
 
     /// Used by crash salvage: the recovered file is the only duration source.
@@ -221,8 +338,12 @@ public final class LibraryStore {
         // in place rather than re-sorting the whole library.
         updateDisplayElement(record)
         guard let storage else { return }
-        try? storage.saveMetadata(record)
-        if let index { try? index.update(record, from: storage) }
+        do {
+            try storage.saveMetadata(record)
+        } catch {
+            reportSaveFailure(for: record.meeting.title)
+        }
+        indexUpdate(record, storage: storage)
         changeBus?.post(.meetingChanged(record.meeting.id))
     }
 
@@ -239,7 +360,10 @@ public final class LibraryStore {
             replaceInMemoryOnly(updated)
             return
         }
-        guard let renamed = try? storage.rename(record, to: title) else { return }
+        guard let renamed = try? storage.rename(record, to: title) else {
+            reportSaveFailure(for: record.meeting.title)
+            return
+        }
         replace(renamed)
     }
 
@@ -248,10 +372,19 @@ public final class LibraryStore {
     /// real folder to trash for a `/dev/null` fixture record.
     public func moveToTrash(_ record: MeetingRecord) {
         guard let storage else { return }
-        guard (try? storage.trash(record)) != nil else { return }
+        guard (try? storage.trash(record)) != nil else {
+            reportSaveFailure(for: record.meeting.title)
+            return
+        }
         meetings.removeAll { $0.meeting.id == record.meeting.id }
         if selectedMeetingID == record.meeting.id { selectedMeetingID = nil }
-        if let index { try? index.remove(meetingID: record.meeting.id) }
+        if let index {
+            do {
+                try index.remove(meetingID: record.meeting.id)
+            } catch {
+                libraryStoreLog.error("index remove failed: \(String(describing: error), privacy: .private)")
+            }
+        }
         rebuildDisplayMeetings()
         changeBus?.post(.meetingDeleted(record.meeting.id))
     }

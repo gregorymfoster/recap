@@ -11,4 +11,13 @@ extension LibraryStore {
     public static func fixture() -> LibraryStore {
         FixtureScenarios.defaultLibrary()
     }
+
+    /// Fixture-only override for `rootUnreachable`, so the `rootUnreachable`
+    /// `-fixtures` scenario can render the Library's "can't find your
+    /// folder" banner without a real vanished folder behind it. Mirrors
+    /// `BackupStatusStore.setStateForFixtures(_:)`'s pattern. No production
+    /// graph calls this.
+    public func setRootUnreachableForFixtures(_ value: Bool) {
+        rootUnreachable = value
+    }
 }

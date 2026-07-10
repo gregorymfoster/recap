@@ -19,9 +19,9 @@ public struct SearchHit: Equatable, Sendable, Identifiable {
 }
 
 /// SQLite index over the meeting library, used for the meeting list and ⌘K
-/// full-text search. Disposable by design: `reindex(from:)` rebuilds it entirely
-/// from the folders on disk, so external edits (or a deleted database) heal on
-/// the next launch.
+/// full-text search. Disposable by design: `reindex(records:storage:)` rebuilds
+/// it entirely from the given records, so external edits (or a deleted
+/// database) heal on the next launch.
 public final class SearchIndex: Sendable {
     private let dbQueue: DatabaseQueue
 
@@ -109,9 +109,12 @@ public final class SearchIndex: Sendable {
 
     // MARK: Indexing
 
-    /// Drops everything and rebuilds from the library on disk.
-    public func reindex(from storage: LibraryStorage) throws {
-        let records = try storage.loadAll()
+    /// Drops everything and rebuilds from the given records — the caller
+    /// (`LibraryStore.reload()`) already loaded them via `storage.loadAll()`,
+    /// so this no longer re-walks the folder tree itself (that used to mean
+    /// every launch paid for `loadAll()` twice: once for `LibraryStore`,
+    /// once again inside this method).
+    public func reindex(records: [MeetingRecord], storage: LibraryStorage) throws {
         let entries = records.map { record in
             IndexEntry(
                 record: record,

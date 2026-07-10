@@ -99,11 +99,35 @@ public struct LibraryStorage: Sendable {
 
     /// Loads every meeting folder under the root. Folders without a readable
     /// `meeting.json` are skipped (never deleted); the skip count is logged
-    /// so a bad folder doesn't silently vanish from view.
+    /// so a bad folder doesn't silently vanish from view. See
+    /// `loadAllDetailed()` for a variant that also reports the skip count to
+    /// the caller.
     public func loadAll() throws -> [MeetingRecord] {
+        try loadAllDetailed().records
+    }
+
+    /// Result of `loadAllDetailed()`.
+    public struct LoadAllResult: Sendable {
+        public var records: [MeetingRecord]
+        /// Folders skipped because `meeting.json` was missing or unreadable —
+        /// `LibraryStore.reload()` surfaces this as a "N meeting(s) couldn't
+        /// be read" notice instead of letting a bad folder silently vanish.
+        public var skippedCount: Int
+
+        public init(records: [MeetingRecord], skippedCount: Int) {
+            self.records = records
+            self.skippedCount = skippedCount
+        }
+    }
+
+    /// Same as `loadAll()`, but also reports how many folders were skipped
+    /// due to unreadable metadata. Kept as a separate method (rather than
+    /// changing `loadAll()`'s signature) so every existing `loadAll()` call
+    /// site is untouched.
+    public func loadAllDetailed() throws -> LoadAllResult {
         try logOnFailure("loadAll") {
             let fm = FileManager.default
-            guard fm.fileExists(atPath: rootURL.path) else { return [] }
+            guard fm.fileExists(atPath: rootURL.path) else { return LoadAllResult(records: [], skippedCount: 0) }
             let folders = try fm.contentsOfDirectory(at: rootURL, includingPropertiesForKeys: [.isDirectoryKey])
             var skipped = 0
             let records = folders.compactMap { folderURL -> MeetingRecord? in
@@ -121,8 +145,37 @@ public struct LibraryStorage: Sendable {
             if skipped > 0 {
                 storageLog.error("loadAll skipped \(skipped, privacy: .public) folder(s) with unreadable metadata")
             }
-            return records
+            return LoadAllResult(records: records, skippedCount: skipped)
         }
+    }
+
+    /// True when the library root directory exists on disk. A fresh default
+    /// install has no root folder until the first recording creates it (see
+    /// `create(_:)`, whose `createDirectory(..., withIntermediateDirectories:
+    /// true)` call is what first materializes it) — this alone doesn't mean
+    /// "the library is in an error state"; see `LibraryStore.rootUnreachable`
+    /// for the rule that distinguishes a fresh install from a genuinely
+    /// missing library.
+    public func rootIsReachable() -> Bool {
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: rootURL.path, isDirectory: &isDirectory)
+        return exists && isDirectory.boolValue
+    }
+
+    /// Pure decision behind `LibraryStore.rootUnreachable`: whether a
+    /// missing library root should be treated as a genuine error, rather
+    /// than a fresh install that simply hasn't recorded its first meeting
+    /// yet (see `rootIsReachable()`'s doc comment). Only an error when the
+    /// root is a customized location (the user deliberately pointed the
+    /// library elsewhere in Settings) or one that was reachable earlier in
+    /// this launch and has since vanished (an external drive unmounted, or
+    /// the folder deleted/renamed underneath the app). Extracted as a pure
+    /// function of three booleans so this gating rule is directly testable
+    /// without touching the real filesystem default path.
+    public static func rootUnreachableIsError(
+        reachable: Bool, isCustomRoot: Bool, wasReachableEarlierThisLaunch: Bool
+    ) -> Bool {
+        !reachable && (isCustomRoot || wasReachableEarlierThisLaunch)
     }
 
     // MARK: Content files

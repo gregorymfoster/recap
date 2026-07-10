@@ -221,6 +221,7 @@ public final class AppStores {
             let calendarQuery = CalendarWatcher(onMeetingStarting: { _ in })
             todayEventsProvider = { calendarQuery.todayEvents(now: $0) }
             let toasts = toasts
+            library.onSaveError = { [weak toasts] message in toasts?.show(message) }
             let router = router
             notificationRouter.install()
             let notifier = CompletionNotifier(
@@ -296,6 +297,12 @@ public final class AppStores {
         // override above).
         if let fixtureScenarioValue, fixtureScenarioValue == .waitingForSetup {
             setup.setPhaseForFixtures(.downloading(progress: 0.34))
+        }
+        // The `rootUnreachable` fixture scenario has no real vanished folder
+        // behind it — override the flag directly so the Library's banner
+        // renders for screenshots.
+        if let fixtureScenarioValue, fixtureScenarioValue == .rootUnreachable {
+            library.setRootUnreachableForFixtures(true)
         }
         // `recording`: route straight to the full-window recording screen so
         // `-fixtures recording` renders `RecordingView` + the docked
@@ -385,6 +392,8 @@ public final class AppStores {
         self.queue = queue
         self.changeBus = changeBus
         self.upcoming = upcoming
+        let toasts = toasts
+        library.onSaveError = { [weak toasts] message in toasts?.show(message) }
         let backup = BackupStatusStore(settings: settings, library: library, storage: storage)
         self.backup = backup
 
@@ -433,6 +442,11 @@ public final class AppStores {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.upcoming.refresh()
+                // Re-checks `rootUnreachable` too (a customized library
+                // folder that was unmounted/unreachable might be back, or
+                // might have just gone away) — same "switched back to Recap"
+                // trigger as the calendar refresh above.
+                self?.library.reload()
             }
         }
     }

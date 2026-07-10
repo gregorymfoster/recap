@@ -125,8 +125,10 @@ public final class BackupStatusStore {
         let destinationRoot = URL(fileURLWithPath: mirrorPath)
 
         let pending = library.meetings.filter { record in
-            record.meeting.status == .ready
-                && BackupAggregate.isPending(lastBackupDate: record.meeting.lastBackupDate, updatedAt: record.meeting.updatedAt)
+            LaunchRecovery.needsExportRecovery(
+                mirrorBackupEnabled: settings.mirrorBackupEnabled, status: record.meeting.status,
+                lastBackupDate: record.meeting.lastBackupDate, updatedAt: record.meeting.updatedAt
+            )
         }
         guard !pending.isEmpty else { return }
 

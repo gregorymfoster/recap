@@ -32,7 +32,7 @@ import Testing
             ),
             in: record
         )
-        try index.reindex(from: storage)
+        try index.reindex(records: storage.loadAll(), storage: storage)
 
         #expect(try index.search("kubernetes").map(\.meetingID) == [record.meeting.id])
         #expect(try index.search("onboarding").map(\.meetingID) == [record.meeting.id])
@@ -45,7 +45,7 @@ import Testing
         let (storage, index) = try makeLibrary()
         let record = try storage.create(Meeting(title: "Budget", date: .now))
         try storage.saveNotes("discussed quarterly forecasting", in: record)
-        try index.reindex(from: storage)
+        try index.reindex(records: storage.loadAll(), storage: storage)
 
         #expect(try index.search("forecas").count == 1)
     }
@@ -54,7 +54,7 @@ import Testing
         let (storage, index) = try makeLibrary()
         let record = try storage.create(Meeting(title: "Sync", date: .now))
         try storage.saveNotes("original content", in: record)
-        try index.reindex(from: storage)
+        try index.reindex(records: storage.loadAll(), storage: storage)
         #expect(try index.search("original").count == 1)
 
         // User edits notes.md in another app, adds a meeting folder by hand,
@@ -63,7 +63,7 @@ import Testing
         let handMade = Meeting(title: "Hand-made meeting", date: .now)
         _ = try storage.create(handMade)
 
-        try index.reindex(from: storage)
+        try index.reindex(records: storage.loadAll(), storage: storage)
         #expect(try index.search("original").isEmpty)
         #expect(try index.search("vim").map(\.meetingID) == [record.meeting.id])
         #expect(try index.search("hand-made").count == 1)
@@ -75,7 +75,7 @@ import Testing
         let kept = try storage.create(Meeting(title: "Kept meeting", date: .now))
         let trashed = try storage.create(Meeting(title: "Trashed meeting", date: .now))
         try storage.saveNotes("pineapple discussion", in: trashed)
-        try index.reindex(from: storage)
+        try index.reindex(records: storage.loadAll(), storage: storage)
         #expect(try index.search("trashed").map(\.meetingID) == [trashed.meeting.id])
 
         try index.remove(meetingID: trashed.meeting.id)
@@ -90,7 +90,7 @@ import Testing
         let (storage, index) = try makeLibrary()
         let a = try storage.create(Meeting(title: "Alpha", date: .now))
         let b = try storage.create(Meeting(title: "Beta", date: .now))
-        try index.reindex(from: storage)
+        try index.reindex(records: storage.loadAll(), storage: storage)
 
         try storage.saveNotes("pineapple discussion", in: b)
         try index.update(b, from: storage)
