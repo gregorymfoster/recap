@@ -278,7 +278,11 @@ private func waitUntil(
         // — without asserting on the exact moment the first is reported,
         // since both may resolve within the same poll tick.
         #expect(await waitUntil { await failures.count == 2 })
-        #expect(await failures.jobs == [failing, next])
+        // Membership, not order: the failure callback hops through a detached
+        // Task per job, so the two records can land in either order even
+        // though the queue itself failed them strictly FIFO.
+        let reported = await failures.jobs
+        #expect(reported.contains(failing) && reported.contains(next))
         #expect(await executor.attemptCount(for: failing) == 2)
         #expect(await executor.attemptCount(for: next) == 2)
         #expect(await queue.snapshot.running == nil)
