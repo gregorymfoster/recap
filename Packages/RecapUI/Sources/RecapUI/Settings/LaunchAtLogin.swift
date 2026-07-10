@@ -48,7 +48,7 @@ public enum LaunchAtLoginStatus: Equatable, Sendable {
 }
 
 /// Registers/unregisters Recap as a login item via `SMAppService.mainApp`.
-/// A thin, mockable wrapper so `SettingsGeneralTab` never talks to
+/// A thin, mockable wrapper so `SettingsWindowView` never talks to
 /// `ServiceManagement` directly — errors (e.g. `SMAppServiceError`) are
 /// swallowed into `lastErrorMessage` rather than thrown, since there's no
 /// good in-line recovery for a Settings toggle beyond telling the user what
