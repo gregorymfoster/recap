@@ -61,12 +61,17 @@ private actor ChainCollector {
     }
 }
 
-/// Collects meetings reported as successfully mirror-backed-up.
+/// Collects mirror-backup lifecycle events reported via `onBackupEvent`.
 private actor BackupCollector {
-    private(set) var meetingIDs: [UUID] = []
+    private(set) var events: [(UUID, BackupEvent)] = []
 
-    func record(_ id: UUID) {
-        meetingIDs.append(id)
+    func record(_ id: UUID, _ event: BackupEvent) {
+        events.append((id, event))
+    }
+
+    /// Meeting IDs whose mirror succeeded, in order.
+    var succeededMeetingIDs: [UUID] {
+        events.compactMap { id, event in event == .succeeded ? id : nil }
     }
 }
 
@@ -129,7 +134,7 @@ private actor IssueCollector {
             settings: settings,
             onStatus: { @Sendable id, status in await statusCollector.record(id, status) },
             onDurationRecovered: { @Sendable _, _ in },
-            onBackedUp: { @Sendable id in await backupCollector?.record(id) },
+            onBackupEvent: { @Sendable id, event in await backupCollector?.record(id, event) },
             chain: { @Sendable job in await chainCollector.record(job) },
             changeBus: changeBus,
             onSubtitle: { @Sendable id, subtitle in await subtitleCollector?.record(id, subtitle) },
@@ -474,6 +479,10 @@ private actor IssueCollector {
 
         let mirrorDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MirrorBackup-\(UUID().uuidString)")
+        // The exporter now refuses to invent a missing destination root
+        // (that's the `destinationUnreachable` signal) — a real destination
+        // is a folder the user already picked, so create it.
+        try FileManager.default.createDirectory(at: mirrorDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: mirrorDir) }
 
         let statusCollector = StatusCollector()
@@ -498,10 +507,12 @@ private actor IssueCollector {
         #expect(statuses.last == .ready)
         let mirrored = try FileManager.default.contentsOfDirectory(atPath: mirrorDir.path)
         #expect(!mirrored.isEmpty)
-        // A successful mirror reports back so the meeting's lastBackupDate
-        // gets persisted (and the UI can show "Backed up").
-        let backedUp = await backupCollector.meetingIDs
-        #expect(backedUp == [record.meeting.id])
+        // A successful mirror reports .started then .succeeded so the
+        // meeting's lastBackupDate gets persisted (and the UI can show
+        // "Backed up" / the aggregate footer can show "working").
+        let events = await backupCollector.events
+        #expect(events.map(\.0) == [record.meeting.id, record.meeting.id])
+        #expect(events.map(\.1) == [.started, .succeeded])
     }
 
     @Test func doesNotExportWhenTogglesAreOff() async throws {
@@ -532,8 +543,8 @@ private actor IssueCollector {
         )
 
         #expect(!FileManager.default.fileExists(atPath: mirrorDir.path))
-        let backedUp = await backupCollector.meetingIDs
-        #expect(backedUp.isEmpty)
+        let events = await backupCollector.events
+        #expect(events.isEmpty)
     }
 
     @Test func missingAudioReportsPersistentRecoveryIssue() async throws {

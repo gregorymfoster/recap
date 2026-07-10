@@ -238,6 +238,7 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
     ) async throws {
         let canaryDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("Canary-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: canaryDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: canaryDir) }
         precondition(!settings.mirrorBackupEnabled, "warm-up uses the mirror toggle; caller must not also use it")
         settings.mirrorBackupEnabled = true
@@ -260,6 +261,10 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
     @Test func changeBusPostDebouncesThenExportsMirrorBackup() async throws {
         let mirrorDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MirrorBackup-\(UUID().uuidString)")
+        // The exporter refuses to invent a missing destination root (that's
+        // the `destinationUnreachable` signal), so create it like a user
+        // picking an existing folder would.
+        try FileManager.default.createDirectory(at: mirrorDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: mirrorDir) }
 
         let (stores, storage, settings, changeBus) = makeStores()
@@ -287,6 +292,10 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
     @Test func rapidChangeBusPostsCoalesceIntoOneExportWindow() async throws {
         let mirrorDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MirrorBackup-\(UUID().uuidString)")
+        // The exporter refuses to invent a missing destination root (that's
+        // the `destinationUnreachable` signal), so create it like a user
+        // picking an existing folder would.
+        try FileManager.default.createDirectory(at: mirrorDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: mirrorDir) }
 
         // A generous debounce (vs. the 50ms used elsewhere) gives wide
@@ -317,7 +326,7 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
         // Checked at roughly half the (restarted) window — comfortably
         // before it can have elapsed even under heavy scheduling jitter.
         try await Task.sleep(for: debounce / 2)
-        #expect(!FileManager.default.fileExists(atPath: mirrorDir.path))
+        #expect(((try? FileManager.default.contentsOfDirectory(atPath: mirrorDir.path)) ?? []).isEmpty)
 
         let exported = try await waitForNonEmptyDirectory(at: mirrorDir)
         #expect(exported.count == 1)
@@ -328,6 +337,10 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
     @Test func backfillMirrorBackupExportsOnlyReadyOnes() async throws {
         let mirrorDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MirrorBackup-\(UUID().uuidString)")
+        // The exporter refuses to invent a missing destination root (that's
+        // the `destinationUnreachable` signal), so create it like a user
+        // picking an existing folder would.
+        try FileManager.default.createDirectory(at: mirrorDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: mirrorDir) }
 
         let (stores, storage, settings, _) = makeStores()
@@ -361,6 +374,10 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
     @Test func backfillMirrorBackupMirrorsReadyMeetings() async throws {
         let mirrorDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MirrorBackup-\(UUID().uuidString)")
+        // The exporter refuses to invent a missing destination root (that's
+        // the `destinationUnreachable` signal), so create it like a user
+        // picking an existing folder would.
+        try FileManager.default.createDirectory(at: mirrorDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: mirrorDir) }
 
         let (stores, storage, settings, _) = makeStores()

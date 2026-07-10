@@ -16,7 +16,7 @@ import RecapTranscription
 ///
 /// This is a composition root: it owns the stores and wires the per-subsystem
 /// coordinators (`RecordingController`, `ImportCoordinator`,
-/// `AutoRecordCoordinator`, `BackupMirrorCoordinator`, `ChangeBusConsumer`),
+/// `AutoRecordCoordinator`, `BackupStatusStore`, `ChangeBusConsumer`),
 /// keeping thin forwarders for the coordinator entry points views already call.
 @MainActor
 @Observable
@@ -62,8 +62,9 @@ public final class AppStores {
     public let importer: ImportCoordinator
     /// Calendar auto-record policy + the "Meeting started?" nudge.
     public let autoRecord: AutoRecordCoordinator
-    /// Folder-mirror backup backfill.
-    public let mirrorBackup: BackupMirrorCoordinator
+    /// Aggregate folder-mirror backup status + backfill/retry — absorbed
+    /// `BackupMirrorCoordinator` and the mirror half of `ChangeBusConsumer`.
+    public let backup: BackupStatusStore
     /// Debounced change-bus re-export consumer; nil when there's no
     /// disk-backed storage to export from (fixtures/preview/soak).
     private let changeBusConsumer: ChangeBusConsumer?
@@ -90,6 +91,15 @@ public final class AppStores {
     /// Ignored in `-fixtures`/`-soak` graphs, which never touch this field.
     public let launchSeedDir: URL?
 
+    /// Fresh, isolated `UserDefaults` for `BackupStatusStore`'s
+    /// "stuck since" persistence in fixture/soak graphs — neither ever
+    /// wants to read or leave behind state in the user's real defaults.
+    private static func ephemeralBackupDefaults() -> UserDefaults {
+        let suite = UserDefaults(suiteName: "recap.ephemeral.fixtures.backup") ?? .standard
+        suite.removePersistentDomain(forName: "recap.ephemeral.fixtures.backup")
+        return suite
+    }
+
     /// The launch graph used by the app, selected by the parsed launch
     /// configuration: `.normal` is disk-backed; `.fixtures` swaps in sample
     /// data for UI work and screenshots (no queue — fixtures never process);
@@ -108,8 +118,11 @@ public final class AppStores {
             _ recordTapped: @escaping @MainActor (MeetingNudge) -> Void,
             _ onDismissed: @escaping @MainActor () -> Void
         ) -> CallStartNotifying?
+        var fixtureScenarioValue: FixtureScenario?
+        let backup: BackupStatusStore
         if case .fixtures = configuration.mode {
             let scenario = FixtureScenario(rawScenario: fixtureScenario ?? "default")
+            fixtureScenarioValue = scenario
             settings = .ephemeralOnboarded()
             library = scenario.library
             models = WhisperModelManager()
@@ -122,6 +135,9 @@ public final class AppStores {
             makeCallAudioMonitor = { nil }
             todayEventsProvider = { _ in [] }
             makeCallStartNotifier = { _, _ in nil }
+            backup = BackupStatusStore(
+                settings: settings, library: library, storage: nil, defaults: Self.ephemeralBackupDefaults()
+            )
         } else if configuration.mode == .soak {
             // Soak-test graph: real recording pipeline (mixer, writer, clock,
             // menu bar) driven by synthetic zero-hardware audio sources, no
@@ -148,6 +164,9 @@ public final class AppStores {
             makeCallAudioMonitor = { nil }
             todayEventsProvider = { _ in [] }
             makeCallStartNotifier = { _, _ in nil }
+            backup = BackupStatusStore(
+                settings: settings, library: library, storage: storage, defaults: Self.ephemeralBackupDefaults()
+            )
             let session = self.session
             Task { @MainActor in
                 guard let record = library.startNewMeeting(title: "Soak recording") else { return }
@@ -202,9 +221,11 @@ public final class AppStores {
             makeCallStartNotifier = { recordTapped, onDismissed in
                 CallStartNotifier(router: notificationRouter, recordTapped: recordTapped, onDismissed: onDismissed)
             }
+            let backupStore = BackupStatusStore(settings: settings, library: library, storage: storage)
+            backup = backupStore
             queue = QueueStore(
                 library: library, storage: storage, models: models, changeBus: changeBus,
-                settings: settings,
+                settings: settings, backup: backupStore,
                 onError: { message in toasts.show(message) },
                 onMeetingReady: { [weak library] id in
                     guard let library,
@@ -219,6 +240,7 @@ public final class AppStores {
                 }
             )
         }
+        self.backup = backup
 
         let coordinators = Self.makeCoordinators(
             settings: settings, storage: storage, library: library, models: models,
@@ -231,14 +253,19 @@ public final class AppStores {
         recording = coordinators.recording
         importer = coordinators.importer
         autoRecord = coordinators.autoRecord
-        mirrorBackup = coordinators.mirrorBackup
 
         if configuration.mode == .normal, let storage {
             changeBusConsumer = ChangeBusConsumer(
-                changeBus: changeBus, storage: storage, settings: settings, exportDebounce: .seconds(5)
+                changeBus: changeBus, storage: storage, backup: backup, exportDebounce: .seconds(5)
             )
         } else {
             changeBusConsumer = nil
+        }
+        // The `backupStuck` fixture scenario has no real backup pipeline
+        // behind it — override the derived state directly so the footer
+        // renders the stuck variant for screenshots.
+        if let fixtureScenarioValue, fixtureScenarioValue == .backupStuck {
+            backup.setStateForFixtures(.stuck(reason: .folderUnreachable, since: Date(timeIntervalSinceNow: -2 * 86400)))
         }
         if configuration.mode == .normal {
             recording.registerGlobalControls()
@@ -267,6 +294,9 @@ public final class AppStores {
         storage = nil
         changeBus = LibraryChangeBus()
         upcoming = .fixture()
+        backup = BackupStatusStore(
+            settings: settings, library: library, storage: nil, defaults: Self.ephemeralBackupDefaults()
+        )
         let coordinators = Self.makeCoordinators(
             settings: settings, storage: nil, library: library, models: models,
             session: session, queue: nil, router: router, toasts: toasts,
@@ -277,7 +307,6 @@ public final class AppStores {
         recording = coordinators.recording
         importer = coordinators.importer
         autoRecord = coordinators.autoRecord
-        mirrorBackup = coordinators.mirrorBackup
         changeBusConsumer = nil
     }
 
@@ -316,6 +345,8 @@ public final class AppStores {
         self.queue = queue
         self.changeBus = changeBus
         self.upcoming = upcoming
+        let backup = BackupStatusStore(settings: settings, library: library, storage: storage)
+        self.backup = backup
 
         let coordinators = Self.makeCoordinators(
             settings: settings, storage: storage, library: library, models: models,
@@ -327,7 +358,6 @@ public final class AppStores {
         recording = coordinators.recording
         importer = coordinators.importer
         autoRecord = coordinators.autoRecord
-        mirrorBackup = coordinators.mirrorBackup
 
         if registersHotKey {
             recording.registerGlobalControls()
@@ -335,7 +365,7 @@ public final class AppStores {
         }
         if let storage {
             let consumer = ChangeBusConsumer(
-                changeBus: changeBus, storage: storage, settings: settings, exportDebounce: exportDebounce
+                changeBus: changeBus, storage: storage, backup: backup, exportDebounce: exportDebounce
             )
             changeBusConsumer = consumer
             consumer.start()
@@ -387,8 +417,7 @@ public final class AppStores {
             _ onDismissed: @escaping @MainActor () -> Void
         ) -> CallStartNotifying? = { _, _ in nil }
     ) -> (
-        recording: RecordingController, importer: ImportCoordinator, autoRecord: AutoRecordCoordinator,
-        mirrorBackup: BackupMirrorCoordinator
+        recording: RecordingController, importer: ImportCoordinator, autoRecord: AutoRecordCoordinator
     ) {
         let recording = RecordingController(
             session: session, library: library, models: models, settings: settings,
@@ -410,8 +439,7 @@ public final class AppStores {
             stopRecording: { recording.stopRecording() },
             makeCallStartNotifier: makeCallStartNotifier
         )
-        let mirrorBackup = BackupMirrorCoordinator(settings: settings, library: library)
-        return (recording, importer, autoRecord, mirrorBackup)
+        return (recording, importer, autoRecord)
     }
 
     // MARK: Cross-store seams
@@ -476,5 +504,5 @@ public final class AppStores {
         set { autoRecord.onNudgePresented = newValue }
     }
 
-    public func backfillMirrorBackup() { mirrorBackup.backfill() }
+    public func backfillMirrorBackup() { backup.backfill() }
 }
