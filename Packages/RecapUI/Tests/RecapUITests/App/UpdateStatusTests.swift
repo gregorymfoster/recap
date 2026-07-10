@@ -14,6 +14,60 @@ import Testing
         #expect(status.isAvailable)
     }
 
+    @MainActor @Test func markAvailableCapturesVersion() {
+        let status = UpdateStatus()
+        status.markAvailable(version: "1.4.0")
+        #expect(status.availableVersion == "1.4.0")
+    }
+
+    @MainActor @Test func markAvailableWithNilVersionDoesNotClobberExisting() {
+        let status = UpdateStatus()
+        status.markAvailable(version: "1.4.0")
+        status.markAvailable(version: nil)
+        #expect(status.availableVersion == "1.4.0")
+    }
+
+    @MainActor @Test func showsBannerTruthTable() {
+        let status = UpdateStatus()
+        #expect(status.showsBanner == false) // not available, not dismissed
+
+        status.markAvailable()
+        #expect(status.showsBanner) // available, not dismissed
+
+        status.dismissBanner()
+        #expect(status.showsBanner == false) // available, dismissed
+    }
+
+    @MainActor @Test func dismissBannerLeavesIsAvailableTrue() {
+        let status = UpdateStatus()
+        status.markAvailable()
+        status.dismissBanner()
+        #expect(status.isAvailable)
+        #expect(status.isBannerDismissed)
+    }
+
+    @MainActor @Test func markAvailableWithNewVersionResetsDismissal() {
+        let status = UpdateStatus()
+        status.markAvailable(version: "1.4.0")
+        status.dismissBanner()
+        #expect(status.showsBanner == false)
+
+        status.markAvailable(version: "1.5.0")
+        #expect(status.isBannerDismissed == false)
+        #expect(status.showsBanner)
+    }
+
+    @MainActor @Test func markAvailableWithSameVersionLeavesDismissalAlone() {
+        let status = UpdateStatus()
+        status.markAvailable(version: "1.4.0")
+        status.dismissBanner()
+        #expect(status.showsBanner == false)
+
+        status.markAvailable(version: "1.4.0")
+        #expect(status.isBannerDismissed)
+        #expect(status.showsBanner == false)
+    }
+
     @MainActor @Test func triggerInstallCallsInstallHook() {
         let status = UpdateStatus()
         var presented = 0

@@ -58,6 +58,7 @@ open <path>/Recap.app --args -fixtures busy
   overridden to `.downloading` — exercises the row's "Waiting for setup · N%" copy.
 - `nextMeetingSoon` — the `default` library with the standard fixture calendar events (one
   ~19 minutes out), so `NextMeetingBanner` renders above the list.
+- `updateAvailable` — library update banner + menu-bar install row, no Sparkle.
 
 Unit tests for each scenario's invariants live in
 `Packages/RecapUI/Tests/RecapUITests/Fixtures/FixtureScenariosTests.swift`.

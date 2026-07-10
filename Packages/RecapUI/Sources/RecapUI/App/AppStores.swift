@@ -48,6 +48,10 @@ public final class AppStores {
     /// In-app "update available" indicator state. Driven by the app target's
     /// Sparkle owner (`UpdaterModel`); read by the menu bar extra.
     public let updateStatus = UpdateStatus()
+    /// Posts the system-notification half of the layered update-available UX
+    /// (`UpdateReminderDecision` decides when). `nil` in fixtures/soak/preview
+    /// graphs — nothing there ever runs a real Sparkle check.
+    @ObservationIgnored public private(set) var updateNotifier: UpdateNotifier?
     /// nil in fixture/preview graphs, where nothing touches disk.
     private let storage: LibraryStorage?
     /// Fan-out of library changes to mirror/sync consumers. Constructed once
@@ -241,6 +245,11 @@ public final class AppStores {
                 }
             )
             completionNotifier = notifier
+            let updateStatus = updateStatus
+            updateNotifier = UpdateNotifier(
+                router: notificationRouter,
+                onInstall: { updateStatus.triggerInstall() }
+            )
             let notificationRouter = notificationRouter
             makeCallStartNotifier = { recordTapped, onDismissed in
                 CallStartNotifier(router: notificationRouter, recordTapped: recordTapped, onDismissed: onDismissed)
@@ -303,6 +312,12 @@ public final class AppStores {
         // renders for screenshots.
         if let fixtureScenarioValue, fixtureScenarioValue == .rootUnreachable {
             library.setRootUnreachableForFixtures(true)
+        }
+        // The `updateAvailable` fixture scenario has no real Sparkle check
+        // behind it — mark a version directly so the Library banner and menu
+        // bar install row render for screenshots without Sparkle.
+        if let fixtureScenarioValue, fixtureScenarioValue == .updateAvailable {
+            updateStatus.markAvailable(version: "1.4.0")
         }
         // `recording`: route straight to the full-window recording screen so
         // `-fixtures recording` renders `RecordingView` + the docked

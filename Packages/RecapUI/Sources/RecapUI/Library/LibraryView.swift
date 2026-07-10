@@ -42,21 +42,30 @@ struct LibraryView: View {
                     .padding(.horizontal, 24)
                     .padding(.top, 16)
                 }
+                if let updateStatus = stores?.updateStatus, updateStatus.showsBanner {
+                    UpdateAvailableBanner(
+                        version: updateStatus.availableVersion,
+                        onInstall: { updateStatus.triggerInstall() },
+                        onDismiss: { updateStatus.dismissBanner() }
+                    )
+                    .padding(.horizontal, 24)
+                    .padding(.top, library.rootUnreachable ? 12 : 16)
+                }
                 if let imminentEvent {
                     NextMeetingBanner(event: imminentEvent, now: .now) {
                         stores?.startRecording(title: imminentEvent.title, attendees: imminentEvent.otherAttendees)
                     }
                     .padding(.horizontal, 24)
-                    .padding(.top, 16)
+                    .padding(.top, showsAnyBannerAbove ? 12 : 16)
                 }
                 if library.meetings.isEmpty {
                     emptyState
                         .padding(.horizontal, 24)
-                        .padding(.top, imminentEvent == nil ? 16 : 18)
+                        .padding(.top, showsAnyBanner ? 18 : 16)
                 } else {
                     content
                         .padding(.horizontal, 24)
-                        .padding(.top, imminentEvent == nil ? 16 : 18)
+                        .padding(.top, showsAnyBanner ? 18 : 16)
                 }
                 Color.clear.frame(height: 16)
             }
@@ -115,6 +124,19 @@ struct LibraryView: View {
     /// rather than rendering something with nothing to show.
     private var imminentEvent: CalendarEventSnapshot? {
         stores?.upcoming.imminentEvent()
+    }
+
+    /// Whether a banner above `NextMeetingBanner` (root-unreachable error or
+    /// update-available) is already showing — tightens its top padding so
+    /// stacked banners don't double up on spacing.
+    private var showsAnyBannerAbove: Bool {
+        library.rootUnreachable || (stores?.updateStatus.showsBanner ?? false)
+    }
+
+    /// Whether any banner (error, update, or agenda) is showing above the
+    /// list/empty-state — used to pick their shared top padding.
+    private var showsAnyBanner: Bool {
+        showsAnyBannerAbove || imminentEvent != nil
     }
 
     // MARK: Toolbar (design global #3 — unified toolbar, not an in-content header)

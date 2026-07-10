@@ -68,6 +68,11 @@ public enum FixtureScenario: String, CaseIterable, Sendable {
     /// `AppStores` overrides the flag directly for screenshots since there's
     /// no real vanished folder behind this scenario.
     case rootUnreachable
+    /// Renders the Library update banner and the menu-bar install row
+    /// without Sparkle — reuses the `default` library; `AppStores` marks
+    /// `updateStatus` directly since there's no real background check
+    /// behind this scenario.
+    case updateAvailable
 
     /// Parses a raw `-fixtures <name>` scenario string. Unknown strings fall
     /// back to `.default` with a warning — a typo'd scenario name should
@@ -85,7 +90,7 @@ public enum FixtureScenario: String, CaseIterable, Sendable {
     @MainActor
     public var library: LibraryStore {
         switch self {
-        case .default, .noMeetingsToday, .recording, .nextMeetingSoon, .rootUnreachable: FixtureScenarios.defaultLibrary()
+        case .default, .noMeetingsToday, .recording, .nextMeetingSoon, .rootUnreachable, .updateAvailable: FixtureScenarios.defaultLibrary()
         case .empty, .firstRunWithAgenda, .firstRun: FixtureScenarios.emptyLibrary()
         case .busy: FixtureScenarios.busyLibrary()
         case .processing: FixtureScenarios.processingLibrary()

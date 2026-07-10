@@ -54,7 +54,8 @@ usually; use one for iterating on a single store, e.g. `--filter LibraryStore`.
   content in a screenshot-able window.
 - `-fixtures <scenario>` selects a named graph from `Fixtures/FixtureScenarios.swift`
   (`default`/`empty`/`firstRunWithAgenda`/`noMeetingsToday`/`busy`/`processing`/`error`/
-  `recording`/`firstRun`/`backupStuck`/`recovered`/`waitingForSetup`/`nextMeetingSoon`; unknown
-  names log a warning and fall back to `default`) — `LibraryStore.fixture()` is just
+  `recording`/`firstRun`/`backupStuck`/`recovered`/`waitingForSetup`/`nextMeetingSoon`/
+  `updateAvailable`; unknown names log a warning and fall back to `default`) —
+  `LibraryStore.fixture()` is just
   `FixtureScenario.default.library` kept as the legacy no-arg entry point every preview/test
   already calls. See `Fixtures/README.md` for the scenario list.

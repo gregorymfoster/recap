@@ -130,6 +130,16 @@ extension AXID {
     /// The next-meeting banner's Record button.
     public static let bannerRecordButton = AXID("library-banner-record-button")
 
+    /// The "update available" banner above the Library list
+    /// (`UpdateAvailableBanner`), shown when `UpdateStatus.showsBanner` is true.
+    public static let libraryUpdateBanner = AXID("library-update-banner")
+
+    /// The update banner's Install button (`UpdateStatus.triggerInstall()`).
+    public static let libraryUpdateBannerInstallButton = AXID("library-update-banner-install-button")
+
+    /// The update banner's quiet dismiss button (`UpdateStatus.dismissBanner()`).
+    public static let libraryUpdateBannerDismissButton = AXID("library-update-banner-dismiss-button")
+
     /// Meeting detail's "backed up" status indicator.
     public static let detailBackedUpStatus = AXID("library-detail-backed-up-status")
 

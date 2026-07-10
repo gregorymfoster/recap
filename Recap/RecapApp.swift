@@ -40,7 +40,9 @@ struct RecapApp: App {
         UserDefaults.standard.register(defaults: LaunchConfiguration.requiredDefaultsRegistrations)
         let stores = AppStores(configuration: launch)
         _stores = State(initialValue: stores)
-        updater = AppIdentity.isDevBuild ? nil : UpdaterModel(status: stores.updateStatus)
+        updater = AppIdentity.isDevBuild
+            ? nil
+            : UpdaterModel(status: stores.updateStatus, notifier: stores.updateNotifier)
         floatingIndicator = FloatingIndicatorController(stores: stores)
         // The delegate adaptor is created before any @State is readable from
         // it, so hand the graph over through a static hook; the delegate
