@@ -75,8 +75,12 @@ import Testing
 
         // Let the queue fully drain: `first` legitimately errors (it has no
         // audio file either), and `trashed`'s pending job must never run.
+        // Wait on the error toast, not the status write — `onStatus` performs
+        // them as two separate MainActor hops (updateStatus first, onError
+        // second), so polling on the status alone can observe a moment where
+        // the status has landed but the toast hasn't yet.
         await waitUntil {
-            library.record(for: first.meeting.id)?.meeting.status == .error(message: "Recording file missing")
+            !errors.isEmpty
         }
 
         // No error toast for the trashed meeting: only one error surfaced
