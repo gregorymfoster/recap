@@ -1,5 +1,7 @@
 import AppKit
+import CoreAudio
 import Foundation
+import RecapAudio
 import RecapCore
 import SwiftUI
 
@@ -46,8 +48,9 @@ public struct MenuBarLabel: View {
 ///     calendar access is already granted and a meeting-shaped event starts
 ///     within 8h), a "Recent" section (up to 2 meetings), then the standard
 ///     Open/Settings/Quit rows.
-///   - Recording: a header block with the live elapsed label, pause, and
-///     stop, then Open meeting / Settings.
+///   - Recording (Phase 3C): a header block with the live elapsed label,
+///     full-width Pause/Resume + Stop buttons, a device row sharing
+///     `InputDeviceMenu` with `SessionCapsule`, then Open Recap.
 /// Buttons in `.window`-style content don't auto-dismiss the popover the way
 /// `.menu`-style items do, so every action dismisses explicitly via
 /// `@Environment(\.dismiss)`.
@@ -61,6 +64,12 @@ public struct MenuBarContent: View {
     /// reconstructed every render.
     @State private var calendarQuery = CalendarWatcher(onMeetingStarting: { _ in })
     @State private var upNext: CalendarEventSnapshot?
+    /// The device row's `InputDeviceMenu` options — refreshed the same way
+    /// `MeetingDetailView`/`RecordingView` do (`onAppear` + a live device-list
+    /// listener), since the popover can appear while a recording is already
+    /// under way.
+    @State private var inputDevices: [AudioInputDevice] = []
+    @State private var deviceListListener: AudioObjectPropertyListenerBlock?
 
     public init(stores: AppStores) {
         self.stores = stores
@@ -70,18 +79,14 @@ public struct MenuBarContent: View {
         VStack(alignment: .leading, spacing: 0) {
             if stores.session.isRecording {
                 recordingHeader
+                recordingButtons
                 Divider().padding(.vertical, 5)
-                menuRow("Open meeting") {
-                    if let record = stores.session.activeRecord {
-                        stores.showMeeting(record.meeting.id)
-                    }
+                deviceRow
+                Divider().padding(.vertical, 5)
+                menuRow("Open Recap") {
                     activateApp()
                 }
-                .axID(.menuBarOpenMeetingButton)
-                menuRow("Settings…", trailing: "⌘,") {
-                    openSettings()
-                }
-                .axID(.menuBarSettingsButton)
+                .axID(.menuBarOpenAppButton)
             } else {
                 menuRow("Start recording", trailing: "⌥⌘R") {
                     stores.startRecording()
@@ -128,18 +133,30 @@ public struct MenuBarContent: View {
         .frame(width: 270)
         .accessibilityElement(children: .contain)
         .axID(.menuBarContent)
-        .onAppear(perform: refreshUpNext)
+        .onAppear {
+            refreshUpNext()
+            refreshInputDevices()
+        }
+        .onDisappear {
+            if let deviceListListener {
+                AudioInputDevices.removeDeviceListListener(deviceListListener)
+            }
+            deviceListListener = nil
+        }
     }
 
     // MARK: Recording header
 
     private var recordingHeader: some View {
         HStack(spacing: 9) {
-            PulsingDot(
-                color: stores.session.isPaused ? Tokens.warningAmber : Tokens.recordRed,
-                pulsing: !stores.session.isPaused,
-                size: 8
-            )
+            if stores.session.isPaused {
+                Text("Paused")
+                    .font(Tokens.microLabel)
+                    .foregroundStyle(Tokens.warningAmber)
+                    .fixedSize()
+            } else {
+                PulsingDot(color: Tokens.recordRed, pulsing: true, size: 8)
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(stores.session.activeRecord?.meeting.title ?? "Recording")
                     .font(.system(size: 12.5, weight: .semibold))
@@ -151,38 +168,82 @@ public struct MenuBarContent: View {
                     .foregroundStyle(Tokens.textSecondary)
             }
             Spacer(minLength: 8)
-            Button {
-                stores.togglePause()
-            } label: {
-                Image(systemName: stores.session.isPaused ? "play.fill" : "pause.fill")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.black)
-                    .frame(width: 24, height: 24)
-                    .background(.white, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .axID(.menuBarPauseButton)
-            Button {
-                stores.stopRecording()
-            } label: {
-                Text("Stop")
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 4)
-                    .background(.white, in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .axID(.menuBarStopButton)
         }
         .padding(.horizontal, 4)
         .padding(.top, 3)
         .padding(.bottom, 2)
     }
 
+    /// Full-width, side-by-side Pause/Resume (ghost) + Stop (red) buttons —
+    /// the popover's recording-state control surface, mirroring
+    /// `SessionCapsule`'s pause/stop pairing.
+    private var recordingButtons: some View {
+        HStack(spacing: 8) {
+            Button {
+                stores.togglePause()
+            } label: {
+                Text(stores.session.isPaused ? "Resume" : "Pause")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Tokens.textPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: Tokens.radiusRow))
+            }
+            .buttonStyle(.plain)
+            .axID(.menuBarPauseButton)
+
+            Button {
+                stores.stopRecording()
+            } label: {
+                Text("Stop")
+                    // stays: white text on the fixed recordRed fill in both modes
+                    .foregroundStyle(.white)
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(Tokens.recordRed, in: RoundedRectangle(cornerRadius: Tokens.radiusRow))
+            }
+            .buttonStyle(.plain)
+            .axID(.menuBarStopButton)
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 6)
+    }
+
+    /// "Mic: <device>" plus the shared `InputDeviceMenu` — switching here
+    /// goes through the same `settings.preferredInputUID`/
+    /// `session.setPreferredInputUID` path as `RecordingView`'s capsule.
+    private var deviceRow: some View {
+        HStack(spacing: 6) {
+            Text("Mic: \(stores.session.activeInputDeviceName ?? "System default")")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Tokens.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 6)
+            InputDeviceMenu(
+                devices: inputDevices, selectedUID: stores.settings.preferredInputUID,
+                onSelect: { uid in
+                    stores.settings.preferredInputUID = uid
+                    stores.session.setPreferredInputUID(uid)
+                },
+                axID: .menuBarDeviceMenu
+            )
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+    }
+
     private var headerStatusLine: String {
         guard let elapsed = stores.session.menuBarElapsedLabel else { return "" }
         return stores.session.isPaused ? "Paused · \(elapsed)" : "Recording · \(elapsed)"
+    }
+
+    private func refreshInputDevices() {
+        inputDevices = AudioInputDevices.inputDevices()
+        deviceListListener = AudioInputDevices.addDeviceListListener(queue: .main) {
+            Task { @MainActor in inputDevices = AudioInputDevices.inputDevices() }
+        }
     }
 
     // MARK: Idle sections
@@ -240,15 +301,13 @@ public struct MenuBarContent: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 8)
-                if case .transcribing(let progress) = record.meeting.status {
-                    Text("\(Int(progress * 100))%")
-                        .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(Tokens.accentBlue)
-                } else {
-                    Text(Duration.seconds(record.meeting.duration).formatted(.units(allowed: [.hours, .minutes], width: .narrow)))
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(Tokens.textSecondary)
-                }
+                // Deliberately no per-row processing percentage here (Phase
+                // 3C) — a duration is a stable fact about the meeting, a
+                // live progress number is churny state that doesn't belong
+                // in this compact "Recent" list.
+                Text(Duration.seconds(record.meeting.duration).formatted(.units(allowed: [.hours, .minutes], width: .narrow)))
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Tokens.textSecondary)
             }
         }
         .buttonStyle(.plain)

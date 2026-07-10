@@ -221,20 +221,30 @@ private final class FirstMouseHostingView<Content: View>: NSHostingView<Content>
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-/// Thin SwiftUI wrapper feeding `FloatingIndicatorView` from the live
-/// `MeetingSessionStore`/`SettingsStore`, so the hosting view re-renders on
-/// the same `@Observable` change tracking as the rest of the app.
+/// Thin SwiftUI wrapper feeding `FloatingIndicatorView` (`SessionCapsule`
+/// under the hood, Phase 3C) from the live `MeetingSessionStore`, so the
+/// hosting view re-renders on the same `@Observable` change tracking as the
+/// rest of the app. Empty while `clock` is nil — in practice that's never
+/// while the panel is actually shown, since `refreshVisibility()` only ever
+/// shows the panel while `session.isRecording`, which is exactly when
+/// `session.clock` is non-nil.
 struct FloatingIndicatorHostView: View {
     let stores: AppStores
     let onActivate: () -> Void
 
     var body: some View {
-        FloatingIndicatorView(
-            isPaused: stores.session.isPaused,
-            levels: WaveformDownsample.bars(from: stores.session.levels, count: 4),
-            elapsedLabel: stores.session.menuBarElapsedLabel,
-            onActivate: onActivate
-        )
+        Group {
+            if let clock = stores.session.clock {
+                FloatingIndicatorView(
+                    clock: clock,
+                    isPaused: stores.session.isPaused,
+                    levels: WaveformDownsample.bars(from: stores.session.levels, count: 4),
+                    onActivate: onActivate,
+                    onPauseToggle: { stores.togglePause() },
+                    onStop: { stores.stopRecording() }
+                )
+            }
+        }
         .fixedSize()
     }
 }

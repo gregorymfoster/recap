@@ -136,7 +136,10 @@ public final class AppStores {
                 // card has something to show.
                 setup.setPhaseForFixtures(.downloading(progress: 0.34))
             }
-            session = MeetingSessionStore()
+            // `recording` needs a session that actually looks mid-recording so
+            // `RecordingView` + the docked `SessionCapsule` have something to
+            // render — see `FixtureScenarios.recordingSession(activeIn:)`.
+            session = scenario == .recording ? FixtureScenarios.recordingSession(activeIn: library) : MeetingSessionStore()
             queue = nil
             storage = nil
             changeBus = LibraryChangeBus()
@@ -285,6 +288,16 @@ public final class AppStores {
         // override above).
         if let fixtureScenarioValue, fixtureScenarioValue == .waitingForSetup {
             setup.setPhaseForFixtures(.downloading(progress: 0.34))
+        }
+        // `recording`: route straight to the full-window recording screen so
+        // `-fixtures recording` renders `RecordingView` + the docked
+        // `SessionCapsule` immediately instead of landing on the Library
+        // screen first. `session.activeRecord` populates asynchronously
+        // (`FixtureScenarios.recordingSession(activeIn:)` awaits `session.start`),
+        // so `RootView` briefly shows Library before flipping over — same as
+        // any real "just started recording" launch.
+        if let fixtureScenarioValue, fixtureScenarioValue == .recording {
+            router.screen = .recording
         }
         if configuration.mode == .normal {
             recording.registerGlobalControls()

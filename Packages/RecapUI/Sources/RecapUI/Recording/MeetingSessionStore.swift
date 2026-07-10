@@ -132,7 +132,7 @@ public final class MeetingSessionStore {
     /// visible string actually changed (pause freezes the clock, so paused
     /// ticks are no-ops and cause no label re-render).
     private func refreshMenuBarLabel() {
-        let label = clock.map { RecordingPill.elapsedLabel(seconds: Int($0.elapsed(at: .now))) }
+        let label = clock.map { ElapsedLabel.format(seconds: Int($0.elapsed(at: .now))) }
         if menuBarElapsedLabel != label {
             menuBarElapsedLabel = label
         }
@@ -327,5 +327,16 @@ public final class MeetingSessionStore {
         levels.removeFirst()
         // Perceptual boost: raw speech RMS sits around 0.02–0.2.
         levels.append(min(1, level * 6))
+    }
+
+    /// Fixture-only override: the `-fixtures recording` scenario drives a
+    /// `MeetingRecorder` built on `SyntheticMicSource`/`SyntheticSystemAudioSource`
+    /// (see `AppStores`'s `-soak` graph for the same pattern), which yields
+    /// nothing but silence — real hardware levels would defeat the point of a
+    /// hardware-free fixture. This paints canned bars into `levels` so
+    /// `SessionCapsule`'s meter isn't just a flat line in screenshots. Mirrors
+    /// `BackupStatusStore.setStateForFixtures`.
+    public func setLevelsForFixtures(_ levels: [Float]) {
+        self.levels = levels
     }
 }

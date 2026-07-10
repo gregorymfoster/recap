@@ -101,17 +101,6 @@ public struct RootView: View {
             // screen's identifier (`library-list`) in the AX tree.
             .accessibilityElement(children: .contain)
             .axID(.rootView)
-            .overlay(alignment: .bottom) {
-                if let clock = session.clock {
-                    RecordingPill(
-                        clock: clock, isPaused: session.isPaused,
-                        levels: WaveformDownsample.bars(from: session.levels, count: 5),
-                        onPauseToggle: { stores.togglePause() },
-                        onStop: { stores.stopRecording() }
-                    )
-                    .padding(.bottom, 22)
-                }
-            }
             .overlay {
                 if showSearch {
                     ZStack(alignment: .top) {
@@ -221,41 +210,11 @@ public struct RootView: View {
             }
         case .recording:
             if session.activeRecord != nil {
-                RecordingHostPlaceholderView()
+                RecordingView()
             } else {
                 LibraryView(showSearch: $showSearch)
             }
         }
-    }
-}
-
-/// Full-window placeholder for `router.screen == .recording`.
-/// TODO(phase-3C): replaced by a real `RecordingView`; this exists only to
-/// keep push-style navigation coherent (a just-started recording, and the
-/// Library toolbar's "Recording · MM:SS" pill, both route here) until then.
-/// The docked `RecordingPill` overlay (`RootView.body`) remains the actual
-/// pause/stop control surface app-wide — this view only adds a plain Stop
-/// affordance for when it's on screen.
-private struct RecordingHostPlaceholderView: View {
-    @Environment(AppStores.self) private var stores: AppStores?
-    @Environment(MeetingSessionStore.self) private var session
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Text(session.activeRecord?.meeting.title ?? "Recording")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(Tokens.textPrimary)
-            Text(session.menuBarElapsedLabel.map { "Recording · \($0)" } ?? "Recording…")
-                .font(.system(size: 14))
-                .foregroundStyle(Tokens.textSecondary)
-            Button("Stop") {
-                stores?.stopRecording()
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(Tokens.recordRed)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Tokens.surface)
     }
 }
 
