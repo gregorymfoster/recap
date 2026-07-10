@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import RecapAudio
 import RecapCore
 
 private let fixtureScenariosLog = Logger(subsystem: "com.gregfoster.recap", category: "FixtureScenarios")
@@ -43,7 +44,12 @@ public enum FixtureScenario: String, CaseIterable, Sendable {
     // TODO(phase-3x): give each of these its own dedicated fixture graph
     // once the corresponding redesigned surface lands; for now they reuse
     // the nearest existing scenario so the launch-arg name already resolves.
-    /// Redesigned full-window recording view. TODO(phase-3x): dedicated graph.
+    /// Redesigned full-window recording view (`RecordingView` + the docked
+    /// `SessionCapsule`). Dedicated graph: `FixtureScenarios.recordingSession(activeIn:)`
+    /// builds a `MeetingSessionStore` mid-recording (synthetic zero-hardware
+    /// recorder, canned levels, a couple of timed notes already saved) —
+    /// `AppStores`'s `.fixtures` graph is the caller (mirrors how it already
+    /// wires the `-soak` graph's synthetic session).
     case recording
     /// Redesigned first-run flow. TODO(phase-3x): dedicated graph.
     case firstRun
@@ -303,5 +309,55 @@ enum FixtureScenarios {
             ),
         ]
         return LibraryStore(fixtures: meetings)
+    }
+
+    // MARK: recording
+
+    /// A `MeetingSessionStore` that looks mid-recording without touching any
+    /// hardware — the `-fixtures recording` scenario's session graph, so
+    /// `RecordingView` + the docked `SessionCapsule` (and, trivially, the
+    /// `-show-menubar-content` recording popover) have something real to
+    /// render for screenshots.
+    ///
+    /// Reuses the exact same synthetic-recorder seam the `-soak` launch mode
+    /// already relies on (`SyntheticMicSource`/`SyntheticSystemAudioSource`
+    /// feeding a real `MeetingRecorder`, see `AppStores.init(configuration:)`)
+    /// rather than inventing a second one — no mic/system-audio TCC prompt,
+    /// no real capture. `MeetingSessionStore.setLevelsForFixtures(_:)` then
+    /// paints canned bars over the synthetic recorder's all-silence levels
+    /// stream, so the meter isn't just a flat line in a screenshot, and a
+    /// couple of timed notes are saved up front so the notes list isn't
+    /// empty either.
+    ///
+    /// `AppStores`'s `.fixtures` graph is expected to call this (in place of
+    /// a bare `MeetingSessionStore()`) whenever `scenario == .recording`,
+    /// passing the same `library` it builds from `FixtureScenario.library`.
+    @MainActor
+    static func recordingSession(activeIn library: LibraryStore) -> MeetingSessionStore {
+        let session = MeetingSessionStore(makeRecorder: {
+            MeetingRecorder(mic: SyntheticMicSource(), makeSystemTap: { SyntheticSystemAudioSource() })
+        })
+        guard var record = library.startNewMeeting(title: "Design sync — Q3 roadmap", attendees: ["Maya", "Sam", "Priya"]) else {
+            return session
+        }
+        // Fixture-mode `startNewMeeting` points every record at `/dev/null`
+        // (no `LibraryStorage` to create a real folder) — fine for records
+        // that never actually record, but `MeetingRecorder.start(writingTo:)`
+        // needs a real, writable `audio.m4a` path to open an `AVAudioFile`
+        // for. Same throwaway-temp-folder spirit as `FixtureAudio`/the
+        // `-soak` graph's temp root, just without pre-filled audio content
+        // since the (synthetic) recorder writes it live.
+        let folderURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RecapFixtureRecording-\(UUID().uuidString)", isDirectory: true)
+        if (try? FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)) != nil {
+            record.folderURL = folderURL
+        }
+        Task { @MainActor in
+            await session.start(record: record, engine: nil, includeSystemAudio: true, includeMic: true)
+            session.setLevelsForFixtures([0.2, 0.55, 0.8, 0.35, 0.65, 0.3, 0.9, 0.45, 0.6, 0.25, 0.7, 0.4, 0.55, 0.3, 0.6, 0.35])
+            library.addTimedNote("Follow up on Q3 roadmap numbers with Sam", at: 45, in: record)
+            library.addTimedNote("Ask Priya about the onboarding usability pass timeline", at: 132, in: record)
+        }
+        return session
     }
 }

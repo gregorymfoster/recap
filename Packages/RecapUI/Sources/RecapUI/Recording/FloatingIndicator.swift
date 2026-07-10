@@ -46,112 +46,60 @@ public enum FloatingIndicatorPlacement {
 }
 
 /// Compact always-on-top capsule shown at the screen edge while recording
-/// and Recap is backgrounded — a Granola-style confidence indicator. Visually
-/// a smaller sibling of `RecordingPill`: same dark-surface chrome and
-/// `PulsingDot`, but with only a click target (no pause/stop controls) since
-/// it's meant to be glanced at, not operated. Always shows dot + timer + a
-/// small waveform (previously the `.full` style — capsule style is no longer
-/// user-configurable). On hover the capsule brightens and the waveform swaps
-/// for an "Open Recap ↗" label.
+/// and Recap is backgrounded — a Granola-style confidence indicator. Phase 3C:
+/// this is now a thin wrapper around `SessionCapsule(.floating)` — the one
+/// capsule component family, shared with the docked capsule `RecordingView`
+/// hosts, rather than a separate hand-rolled implementation. Unlike the old
+/// click-only capsule, the floating variant now carries real pause/stop
+/// buttons (nested `Button`s inside the outer activate button — the
+/// innermost view claims the tap first, so pause/stop don't also activate
+/// Recap); tapping anywhere else on the capsule still activates Recap and
+/// brings the live meeting forward.
 struct FloatingIndicatorView: View {
+    var clock: RecordingClock
     var isPaused: Bool
     var levels: [Float]
-    var elapsedLabel: String?
     var onActivate: () -> Void
-
-    @State private var isHovering = false
+    var onPauseToggle: () -> Void
+    var onStop: () -> Void
 
     var body: some View {
         Button(action: onActivate) {
-            HStack(spacing: 8) {
-                PulsingDot(
-                    color: isPaused ? Tokens.warningAmber : Tokens.recordRed,
-                    pulsing: !isPaused,
-                    size: 7
-                )
-                Text(isPaused ? "Paused" : "Recording")
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(.white.opacity(isPaused ? 0.7 : 0.9))
-                if let elapsedLabel {
-                    Text(elapsedLabel)
-                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(.white.opacity(isPaused ? 0.45 : 0.85))
-                        .fixedSize()
-                }
-                if isHovering {
-                    // stays: white-on-darkSurface hairline divider + label in both modes
-                    Rectangle()
-                        .fill(.white.opacity(0.15))
-                        .frame(width: 1, height: 12)
-                    HStack(spacing: 4) {
-                        Text("Open Recap")
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.8))
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.white.opacity(0.45))
-                    }
-                    .fixedSize()
-                } else if !isPaused, levels.contains(where: { $0 > 0.01 }) {
-                    waveform
-                }
-            }
+            SessionCapsule(
+                variant: .floating, clock: clock, isPaused: isPaused, levels: levels,
+                onPauseToggle: onPauseToggle, onStop: onStop
+            )
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .background(
-            (isHovering ? FloatingIndicatorTokens.hoverSurface : FloatingIndicatorTokens.idleSurface),
-            in: Capsule()
-        )
-        .overlay {
-            Capsule().stroke(.white.opacity(isHovering ? 0.14 : 0.08), lineWidth: 1)
-        }
-        // No SwiftUI .shadow here: it would clip at the panel's bounds. The
-        // NSPanel draws the drop shadow (hasShadow) around the capsule
-        // silhouette instead.
-        .contentShape(Capsule())
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .animation(.easeOut(duration: 0.12), value: isHovering)
-        .accessibilityLabel(isPaused ? "Recording paused" : "Recording in progress")
-        .accessibilityValue(elapsedLabel ?? "")
-        .accessibilityHint("Open Recap")
-        .axID(.floatingIndicator)
-    }
-
-    private var waveform: some View {
-        HStack(spacing: 2) {
-            ForEach(levels.indices, id: \.self) { i in
-                Capsule()
-                    .fill(.white.opacity(0.4))
-                    .frame(width: 2, height: max(2, CGFloat(levels[i]) * 10))
-            }
-        }
-        .frame(height: 10)
-        .animation(.easeOut(duration: 0.12), value: levels)
+        // `SessionCapsule` already draws its own capsule background/stroke/
+        // shadow — this wrapper contributes no chrome of its own, it only
+        // turns "tap anywhere on the capsule" into `onActivate`.
+        .buttonStyle(FloatingIndicatorActivateButtonStyle())
     }
 }
 
-/// Fixed (non-dynamic) surface colors for the capsule's idle/hover states —
-/// per design mock 7a these are specific alpha values on a near-black,
-/// independent of `Tokens.darkSurface`'s light/dark split, since the capsule
-/// always floats over arbitrary desktop content rather than app chrome.
-private enum FloatingIndicatorTokens {
-    static let idleSurface = Color(red: 32 / 255, green: 32 / 255, blue: 34 / 255).opacity(0.88)
-    static let hoverSurface = Color(red: 40 / 255, green: 40 / 255, blue: 42 / 255).opacity(0.98)
+private struct FloatingIndicatorActivateButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+    }
 }
 
 #Preview("States") {
     VStack(alignment: .leading, spacing: 16) {
         FloatingIndicatorView(
+            clock: RecordingClock(startedAt: .now.addingTimeInterval(-761)),
             isPaused: false,
             levels: (0..<4).map { _ in Float.random(in: 0.2...0.9) },
-            elapsedLabel: "12:41", onActivate: {}
+            onActivate: {}, onPauseToggle: {}, onStop: {}
         )
         FloatingIndicatorView(
+            clock: {
+                var clock = RecordingClock(startedAt: .now.addingTimeInterval(-761))
+                clock.pause(at: .now)
+                return clock
+            }(),
             isPaused: true,
             levels: [Float](repeating: 0, count: 4),
-            elapsedLabel: "12:41", onActivate: {}
+            onActivate: {}, onPauseToggle: {}, onStop: {}
         )
     }
     .padding(40)
