@@ -1,62 +1,41 @@
 import Foundation
 
-/// Accessibility identifiers for the Settings window: the window root, each
-/// tab, and the key interactive controls per tab. See `AccessibilityIdentifiers.swift`
-/// for the naming convention and the `axID(_:)` modifier.
+/// Accessibility identifiers for the Settings window: the page root and the
+/// key interactive controls in each of its grouped-form sections (Audio,
+/// Transcription, Storage, Launch at Login — see `SettingsWindowView`, the
+/// one-page redesign that replaced the old five-tab window). See
+/// `AccessibilityIdentifiers.swift` for the naming convention and the
+/// `axID(_:)` modifier.
 extension AXID {
-    // MARK: - Window & tabs
+    /// The Settings window's root container (`SettingsWindowView`).
+    public static let settingsPage = AXID("settings-page")
 
-    /// The Settings window's root `TabView` (`SettingsWindowView`).
-    public static let settingsWindow = AXID("settings-window")
-    public static let settingsTabGeneral = AXID("settings-tab-general")
-    public static let settingsTabRecording = AXID("settings-tab-recording")
-    public static let settingsTabCalendar = AXID("settings-tab-calendar")
-    public static let settingsTabSync = AXID("settings-tab-sync")
-    public static let settingsTabPrivacy = AXID("settings-tab-privacy")
-
-    // MARK: - General tab
-
-    public static let settingsLaunchAtLoginToggle = AXID("settings-general-launch-at-login-toggle")
-
-    // MARK: - Recording tab
+    // MARK: - Audio group
 
     public static let settingsInputDevicePicker = AXID("settings-recording-input-device-picker")
     public static let settingsSystemAudioToggle = AXID("settings-recording-system-audio-toggle")
-
-    // MARK: - Calendar tab
-
-    public static let settingsCalendarAutoRecordPicker = AXID("settings-calendar-auto-record-picker")
-    /// A single "detect calls from" app toggle, keyed by the app's own
-    /// stable id (`CallApp.id`) rather than its display name.
-    public static func settingsCallAppToggle(_ appID: String) -> AXID { AXID("settings-calendar-call-app-toggle-\(appID)") }
-
-    // MARK: - Sync tab
-
-    public static let settingsMirrorBackupToggle = AXID("settings-sync-mirror-backup-toggle")
-    public static let settingsMirrorFolderChangeButton = AXID("settings-sync-mirror-folder-change-button")
-
-    // MARK: - Privacy tab
-
     public static let settingsMicrophonePermissionButton = AXID("settings-privacy-microphone-permission-button")
-    public static let settingsSystemAudioPermissionButton = AXID("settings-privacy-system-audio-permission-button")
-    public static let settingsSystemAudioProbeButton = AXID("settings-privacy-system-audio-probe-button")
-    public static let settingsCalendarPermissionButton = AXID("settings-privacy-calendar-permission-button")
-    public static let settingsMeetingsFolderChangeButton = AXID("settings-privacy-meetings-folder-change-button")
 
-    // MARK: - Redesign (Phase 0 scaffolding)
-
-    /// The redesigned Settings surface's root container.
-    public static let settingsPage = AXID("settings-page")
+    // MARK: - Transcription group
 
     /// The transcription-quality picker (best quality / faster).
     public static let settingsQualityPicker = AXID("settings-quality-picker")
 
-    /// The row shown while a quality-switch model download is in progress.
+    /// The row shown while a quality-switch model download is in progress
+    /// (also used for the `.failed` retry row — same slot, different content).
     public static let settingsDownloadingRow = AXID("settings-downloading-row")
 
-    /// The mirror-backup enable/disable toggle on the redesigned surface.
+    // MARK: - Storage group
+
+    public static let settingsMeetingsFolderChangeButton = AXID("settings-privacy-meetings-folder-change-button")
+
+    /// The mirror-backup enable/disable toggle.
     public static let settingsBackupToggle = AXID("settings-backup-toggle")
 
-    /// The backup-status summary row on the redesigned surface.
+    /// The backup-status summary row (ok/working/stuck).
     public static let settingsBackupStatusRow = AXID("settings-backup-status-row")
+
+    // MARK: - Launch at Login
+
+    public static let settingsLaunchAtLoginToggle = AXID("settings-general-launch-at-login-toggle")
 }
