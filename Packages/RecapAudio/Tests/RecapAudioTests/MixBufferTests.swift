@@ -46,6 +46,54 @@ import Testing
         #expect(buffer.system.isEmpty)
     }
 
+    /// The flushed-alone branch must route through `MonoMixer.mix` with a
+    /// zero-filled counterpart rather than passing the backed-up side through
+    /// raw — this keeps the flush path consistent with `flushRemainder` and
+    /// applies the same [-1, 1] clamping `mix` guarantees everywhere else.
+    @Test func starvedSideFlushIsZeroPaddedThroughMixer() {
+        var buffer = MixBuffer(starvationThreshold: 10)
+        // Include an out-of-range sample to prove clamping now applies here
+        // too, not just a value-preservation check that any implementation
+        // would pass.
+        let side: [Float] = [Float](repeating: 0.5, count: 10) + [1.5]
+        _ = buffer.pushMic(Array(side.dropLast()))
+        let flushed = buffer.pushMic([side.last!])
+        let expected = MonoMixer.mix(side, [Float](repeating: 0, count: side.count))
+        #expect(flushed == expected)
+        #expect(flushed.last == 1.0)  // clamped, where raw pass-through would have been 1.5
+    }
+
+    /// Regression coverage for the mic/system alignment invariant: a stall
+    /// that triggers a starvation flush on one side must not leave a
+    /// permanent skew once both sides resume normal paired delivery. Total
+    /// frames emitted must exactly track total frames pushed on the leading
+    /// side — no samples silently dropped or double-counted across the
+    /// stall-then-resume transition.
+    @Test func stallThenResumeStaysAlignedAcrossMultipleFlushes() {
+        var buffer = MixBuffer(starvationThreshold: 10)
+        var totalOut = 0
+
+        // System is silent while mic pushes past threshold — mic backs up
+        // and flushes alone.
+        totalOut += buffer.pushMic([Float](repeating: 0.2, count: 11)).count
+        #expect(buffer.mic.isEmpty)
+        #expect(buffer.system.isEmpty)
+
+        // Resume normal paired cadence on both sides for several cycles.
+        for _ in 0..<5 {
+            totalOut += buffer.pushMic([0.1, 0.1, 0.1]).count
+            totalOut += buffer.pushSystem([0.1, 0.1, 0.1]).count
+            #expect(buffer.mic.isEmpty)
+            #expect(buffer.system.isEmpty)
+        }
+
+        let tail = buffer.flushRemainder()
+        totalOut += tail.count
+
+        #expect(totalOut == buffer.totalMicSamples)
+        #expect(buffer.mic.isEmpty && buffer.system.isEmpty)
+    }
+
     @Test func totalSampleCountsTrackBothSidesIndependently() {
         var buffer = MixBuffer()
         _ = buffer.pushMic([0.1, 0.1, 0.1])

@@ -59,13 +59,27 @@ struct MixBuffer {
             return out
         }
         // One side is empty. Flush the other if it has backed up past the threshold.
+        //
+        // Invariant: mic/system pairing positions must advance in lockstep —
+        // silence on a stalled side still represents elapsed wall-clock time.
+        // Routing the flush through MonoMixer.mix with a zero-filled
+        // counterpart (and resetting both buffers explicitly, rather than
+        // relying on the min-count check above having already emptied the
+        // other side) enforces that invariant and keeps this path consistent
+        // with `flushRemainder`'s zero-padding at stop, including its
+        // clamping. Known limit: a stalled side that later delivers its
+        // backlog *late* (rather than dropping it) would still pair old
+        // samples against new ones — fixing that needs per-sample timestamps
+        // and is deliberately out of scope.
         if mic.count > starvationThreshold {
-            let out = mic
+            let out = MonoMixer.mix(mic, [Float](repeating: 0, count: mic.count))
             mic = []
+            system = []
             return out
         }
         if system.count > starvationThreshold {
-            let out = system
+            let out = MonoMixer.mix(system, [Float](repeating: 0, count: system.count))
+            mic = []
             system = []
             return out
         }
