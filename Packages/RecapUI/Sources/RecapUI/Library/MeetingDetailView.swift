@@ -40,10 +40,12 @@ struct MeetingDetailView: View {
             .padding(.bottom, 40)
             .frame(maxWidth: Self.columnWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
+            // On the inner stack, not the ScrollView: RootView's `.axID(.rootView)`
+            // lands on the same AXScrollArea and would clobber this id there.
+            .accessibilityElement(children: .contain)
+            .axID(.detailPane)
         }
         .background(Tokens.surface)
-        .accessibilityElement(children: .contain)
-        .axID(.detailPane)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 12) {

@@ -109,10 +109,11 @@ struct LibraryView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .primaryAction) {
+        // One group, not two ToolbarItems: separate `.primaryAction` items
+        // can get collapsed into toolbar overflow, which drops the search
+        // field entirely (found via ui-smoke — search-field missing from AX).
+        ToolbarItemGroup(placement: .primaryAction) {
             searchField
-        }
-        ToolbarItem(placement: .primaryAction) {
             if session.isRecording {
                 recordingIndicatorButton
             } else {
@@ -135,10 +136,13 @@ struct LibraryView: View {
                 Text("Search")
                     .font(.system(size: 12))
                     .foregroundStyle(Tokens.textTertiary)
-                Spacer(minLength: 8)
+                // No Spacer here: an infinitely-flexible Spacer inside a
+                // toolbar button label collapses the whole item out of the
+                // toolbar on macOS 26 — pin the ⌘K hint with a frame instead.
                 Text("⌘K")
                     .font(.system(size: 9.5))
                     .foregroundStyle(Tokens.textPrimary.opacity(0.3))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .padding(.horizontal, 10)
             .frame(width: 180, height: 28)
