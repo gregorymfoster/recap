@@ -13,8 +13,11 @@ import Testing
         #expect(LaunchRecovery.action(for: .transcribing(progress: 0.4)) == .requeueTranscribe)
     }
 
-    @Test func recordingRequeuesTranscribe() {
-        #expect(LaunchRecovery.action(for: .recording) == .requeueTranscribe)
+    /// A meeting still `.recording` at launch means Recap crashed mid-recording.
+    /// The salvaged audio is parked in `.recovered`, not silently requeued for
+    /// transcription — the user explicitly presses Transcribe later.
+    @Test func recordingMarksRecoveredRatherThanAutoRequeuing() {
+        #expect(LaunchRecovery.action(for: .recording) == .markRecovered)
     }
 
     /// A crash-salvaged recording found at launch stays parked — the user

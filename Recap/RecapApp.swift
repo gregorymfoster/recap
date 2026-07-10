@@ -165,8 +165,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Blocks quitting mid-recording behind a confirmation alert; a manual
     /// stop-and-save always finishes before termination actually proceeds.
+    /// Also flushes any pending (debounced) notes edit on every return path —
+    /// `MeetingDetailView`'s `.onDisappear` and `RootView`'s window-close
+    /// observer both cover in-app teardown, but quitting via ⌘Q/menu goes
+    /// straight here without either firing first, so a note edit still
+    /// sitting inside the 1s autosave debounce would otherwise be lost.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let stores = Self.stores else { return .terminateNow }
+        if case .detail(let meetingID) = stores.router.screen, let record = stores.library.record(for: meetingID) {
+            stores.library.flushNotes(for: record)
+        }
         let title = stores.session.activeRecord?.meeting.title ?? ""
         let elapsedLabel = stores.session.menuBarElapsedLabel ?? "0:00"
         switch QuitGuard.decide(isRecording: stores.session.isRecording, title: title, elapsedLabel: elapsedLabel) {

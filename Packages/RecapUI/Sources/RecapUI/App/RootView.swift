@@ -1,3 +1,4 @@
+import AppKit
 import Observation
 import RecapCore
 import RecapTranscription
@@ -133,6 +134,23 @@ public struct RootView: View {
             // route is only ever present when `-open` was actually passed, so
             // there's nothing here to race against a restored window.
             .task { applyLaunchRouteIfNeeded() }
+            // Belt-and-suspenders for the notes-autosave-debounce-loss bug:
+            // `.onDisappear` on `MeetingDetailView` covers in-app screen
+            // swaps, but closing the main window (traffic light) doesn't
+            // reliably tear down the SwiftUI view hierarchy first — so a
+            // note edit still sitting inside the 1s debounce can survive the
+            // window close. This observes every `NSWindow.willClose` (not
+            // just the main window's — flushing is idempotent/harmless if
+            // there's nothing pending, e.g. a Settings-window close) and
+            // flushes explicitly. Plain `.onReceive` (rather than a manual
+            // `NotificationCenter` observer) keeps this MainActor-isolated
+            // without fighting Swift 6's `@Sendable` requirement on
+            // `NotificationCenter.addObserver`'s closure.
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
+                if case .detail(let meetingID) = router.screen, let record = library.record(for: meetingID) {
+                    library.flushNotes(for: record)
+                }
+            }
             .environment(stores)
             .environment(library)
             .environment(session)
