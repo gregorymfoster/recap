@@ -136,7 +136,7 @@ public struct RootView: View {
                     .opacity(0)
             }
             .sheet(isPresented: .constant(!settings.hasOnboarded)) {
-                OnboardingView()
+                FirstRunView(setup: stores.setup)
             }
             // A model was installed at launch or just now → finish any recordings
             // parked in `.needsModel`.

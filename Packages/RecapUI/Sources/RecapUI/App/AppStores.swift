@@ -123,10 +123,19 @@ public final class AppStores {
         if case .fixtures = configuration.mode {
             let scenario = FixtureScenario(rawScenario: fixtureScenario ?? "default")
             fixtureScenarioValue = scenario
-            settings = .ephemeralOnboarded()
+            // `firstRun` is the one scenario that needs the sheet itself to
+            // render — every other scenario stays onboarded so it can show
+            // its own surface underneath.
+            settings = .ephemeral(onboarded: scenario != .firstRun)
             library = scenario.library
             models = WhisperModelManager()
             setup = TranscriptionSetupStore(models: models, settings: settings)
+            if scenario == .firstRun {
+                // No real model manager is driving `setup` in fixtures mode —
+                // force a mid-download phase so the "setting up transcription"
+                // card has something to show.
+                setup.setPhaseForFixtures(.downloading(progress: 0.34))
+            }
             session = MeetingSessionStore()
             queue = nil
             storage = nil

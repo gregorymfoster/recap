@@ -120,10 +120,18 @@ public final class SettingsStore {
     /// Isolated store for previews and `-fixtures` runs — never touches the
     /// app's real defaults (so it can't suppress first-run onboarding).
     static func ephemeralOnboarded() -> SettingsStore {
+        ephemeral(onboarded: true)
+    }
+
+    /// Isolated store for previews and `-fixtures` runs, with the given
+    /// onboarded state — never touches the app's real defaults. The
+    /// `firstRun` fixture scenario passes `false` so the first-run sheet
+    /// actually renders for screenshots.
+    static func ephemeral(onboarded: Bool) -> SettingsStore {
         let suite = UserDefaults(suiteName: "recap.ephemeral.fixtures") ?? .standard
         suite.removePersistentDomain(forName: "recap.ephemeral.fixtures")
         let store = SettingsStore(defaults: suite)
-        store.hasOnboarded = true
+        store.hasOnboarded = onboarded
         return store
     }
 }
