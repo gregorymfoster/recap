@@ -53,4 +53,34 @@ import Testing
         )
         #expect(outcome.trimSamples == 16_000)
     }
+
+    @Test func overflowDropZeroWhenUnderMax() {
+        #expect(StreamingPass.overflowDrop(bufferCount: 10, maxBuffer: 30) == 0)
+        #expect(StreamingPass.overflowDrop(bufferCount: 30, maxBuffer: 30) == 0)
+    }
+
+    @Test func overflowDropExactAmountWhenOver() {
+        #expect(StreamingPass.overflowDrop(bufferCount: 45, maxBuffer: 30) == 15)
+    }
+
+    @Test func overflowDropCapsMonologueBufferAcrossPasses() {
+        // Simulates a continuous monologue: every pass, Whisper returns one long segment whose
+        // start stays ~0, so `trimSamples` alone makes no progress. The buffer should still
+        // never exceed `maxBuffer` once the unconditional clamp is applied.
+        let maxBuffer = 30 * 16_000
+        let passStride = 4 * 16_000
+        var bufferCount = 0
+        for _ in 0..<20 {
+            bufferCount += passStride
+            let outcome = StreamingPass.process(
+                segments: [.init(start: 0, end: Double(bufferCount) / 16_000, text: "still talking")],
+                bufferStart: 0,
+                bufferSampleCount: bufferCount,
+                sampleRate: 16_000
+            )
+            bufferCount -= outcome.trimSamples
+            bufferCount -= StreamingPass.overflowDrop(bufferCount: bufferCount, maxBuffer: maxBuffer)
+            #expect(bufferCount <= maxBuffer)
+        }
+    }
 }

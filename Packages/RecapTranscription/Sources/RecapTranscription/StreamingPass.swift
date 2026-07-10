@@ -48,6 +48,14 @@ enum StreamingPass {
         return outcome
     }
 
+    /// Extra samples to drop from the front of the buffer so it never exceeds `maxBuffer`.
+    /// Needed because segment-based trimming (`trimSamples` above) makes no progress during a
+    /// continuous monologue — Whisper returns one long segment whose start stays ~0 — so relying
+    /// on it alone would let the buffer grow unbounded.
+    static func overflowDrop(bufferCount: Int, maxBuffer: Int) -> Int {
+        max(0, bufferCount - maxBuffer)
+    }
+
     private static func utterance(from segment: Segment, offset: TimeInterval) -> Utterance {
         Utterance(start: offset + segment.start, end: offset + segment.end, text: segment.text)
     }

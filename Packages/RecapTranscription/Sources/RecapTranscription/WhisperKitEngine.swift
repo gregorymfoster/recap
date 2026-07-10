@@ -135,15 +135,18 @@ public struct WhisperKitEngine: TranscriptionEngine {
         var bufferStart: TimeInterval = 0
         var newSamples = 0
 
+        func clampToMaxBuffer() {
+            let drop = StreamingPass.overflowDrop(bufferCount: buffer.count, maxBuffer: maxBuffer)
+            guard drop > 0 else { return }
+            buffer.removeFirst(drop)
+            bufferStart += Double(drop) / sampleRate
+        }
+
         func runPass(final: Bool) async {
             // Skip silent windows entirely (VAD gate).
             let rms = sqrt(buffer.reduce(Float(0)) { $0 + $1 * $1 } / Float(max(1, buffer.count)))
             guard rms >= silenceRMS else {
-                if buffer.count > maxBuffer {
-                    let drop = buffer.count - maxBuffer
-                    buffer.removeFirst(drop)
-                    bufferStart += Double(drop) / sampleRate
-                }
+                clampToMaxBuffer()
                 return
             }
             guard !Task.isCancelled else { return }
@@ -175,6 +178,9 @@ public struct WhisperKitEngine: TranscriptionEngine {
                     bufferStart += Double(outcome.trimSamples) / sampleRate
                 }
             }
+            // Segment-based trimming above makes no progress during a continuous monologue, so
+            // clamp unconditionally or the buffer (and per-pass transcribe cost) grows unbounded.
+            clampToMaxBuffer()
         }
 
         for await chunk in stream {
