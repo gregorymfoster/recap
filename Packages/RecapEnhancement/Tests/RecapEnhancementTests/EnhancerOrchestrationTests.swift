@@ -14,6 +14,7 @@ private actor FakeEnhancerModel: EnhancerModel {
     var mergeCalls: [String] = []
     var summarizeCalls: [String] = []
     var rewriteCalls: [(line: String, digestText: String)] = []
+    var rewriteAllCalls: [(lines: [String], digestText: String)] = []
     var extraFactsCalls: [(digestText: String, notesBlock: String)] = []
     var subtitleCalls: [String] = []
 
@@ -21,6 +22,7 @@ private actor FakeEnhancerModel: EnhancerModel {
     private var mergeImpl: (@Sendable (String) async throws -> ChunkDigest)?
     private var summarizeImpl: (@Sendable (String) async throws -> String)?
     private var rewriteImpl: (@Sendable (String, String) async throws -> String)?
+    private var rewriteAllImpl: (@Sendable ([String], String) async throws -> [String])?
     private var extraFactsImpl: (@Sendable (String, String) async throws -> [String])?
     private var subtitleImpl: (@Sendable (String) async throws -> String)?
 
@@ -30,6 +32,7 @@ private actor FakeEnhancerModel: EnhancerModel {
         merge: (@Sendable (String) async throws -> ChunkDigest)? = nil,
         summarize: (@Sendable (String) async throws -> String)? = nil,
         rewrite: (@Sendable (String, String) async throws -> String)? = nil,
+        rewriteAll: (@Sendable ([String], String) async throws -> [String])? = nil,
         extraFacts: (@Sendable (String, String) async throws -> [String])? = nil,
         subtitle: (@Sendable (String) async throws -> String)? = nil
     ) {
@@ -38,6 +41,7 @@ private actor FakeEnhancerModel: EnhancerModel {
         self.mergeImpl = merge
         self.summarizeImpl = summarize
         self.rewriteImpl = rewrite
+        self.rewriteAllImpl = rewriteAll
         self.extraFactsImpl = extraFacts
         self.subtitleImpl = subtitle
     }
@@ -72,6 +76,23 @@ private actor FakeEnhancerModel: EnhancerModel {
             return try await rewriteImpl(line, digestText)
         }
         return line
+    }
+
+    /// Default (no explicit `rewriteAll` closure given) delegates to
+    /// `rewrite` one line at a time, so existing tests that only configure
+    /// `rewrite:` keep exercising the same per-line call recording/behavior
+    /// they always have — the batched path is opt-in per test via
+    /// `rewriteAll:`.
+    func rewriteAll(lines: [String], digestText: String) async throws -> [String] {
+        rewriteAllCalls.append((lines, digestText))
+        if let rewriteAllImpl {
+            return try await rewriteAllImpl(lines, digestText)
+        }
+        var results: [String] = []
+        for line in lines {
+            results.append(try await rewrite(line: line, digestText: digestText))
+        }
+        return results
     }
 
     func extraFacts(digestText: String, notesBlock: String) async throws -> [String] {
@@ -171,6 +192,43 @@ private actor FakeEnhancerModel: EnhancerModel {
         #expect(mergeCount == 3)
     }
 
+    // MARK: 2a. Concurrent digests stay index-ordered
+
+    @Test func chunkDigestsCompleteOutOfOrderButResultsStayIndexOrdered() async throws {
+        // Three big-enough utterances force three separate chunks (same trick
+        // as the merge tests above), each tagged with a marker so the fake
+        // can tell them apart and each given a different completion delay —
+        // the earliest chunk finishes last. If ordering were determined by
+        // completion time instead of chunk index, "Third" would land first.
+        func markedUtterance(_ marker: String) -> String {
+            String(repeating: "word ", count: 1_800) + marker
+        }
+        let utterances = [markedUtterance("MARKER-A"), markedUtterance("MARKER-B"), markedUtterance("MARKER-C")]
+        let expectedChunks = TranscriptChunker.chunk(transcript(utterances)).count
+        #expect(expectedChunks == 3)
+
+        let model = FakeEnhancerModel(digest: { chunkText in
+            if chunkText.contains("MARKER-A") {
+                try await Task.sleep(nanoseconds: 40_000_000)
+                return ChunkDigest(keyPoints: ["First"], decisions: [], actionItems: [])
+            } else if chunkText.contains("MARKER-B") {
+                try await Task.sleep(nanoseconds: 20_000_000)
+                return ChunkDigest(keyPoints: ["Second"], decisions: [], actionItems: [])
+            } else {
+                return ChunkDigest(keyPoints: ["Third"], decisions: [], actionItems: [])
+            }
+        })
+        let enhancer = FoundationModelEnhancer(model: model)
+        _ = try await enhancer.enhance(rawNotes: "", transcript: transcript(utterances))
+
+        let digestText = try #require(await model.summarizeCalls.first)
+        let firstRange = try #require(digestText.range(of: "First"))
+        let secondRange = try #require(digestText.range(of: "Second"))
+        let thirdRange = try #require(digestText.range(of: "Third"))
+        #expect(firstRange.lowerBound < secondRange.lowerBound)
+        #expect(secondRange.lowerBound < thirdRange.lowerBound)
+    }
+
     // MARK: 3. Empty notes -> summarize path
 
     @Test func emptyNotesUsesSummarizePath() async throws {
@@ -199,6 +257,58 @@ private actor FakeEnhancerModel: EnhancerModel {
         let bulletsSection = result.notes.components(separatedBy: "\n\n## Also discussed").first ?? result.notes
         let bullets = bulletsSection.components(separatedBy: "\n")
         #expect(bullets.count == 3)
+        #expect(bullets == [
+            "- Rewritten: first line",
+            "- Rewritten: second line",
+            "- Rewritten: third line",
+        ])
+    }
+
+    // MARK: 4a. Batched rewrite
+
+    @Test func rewriteAllHappyPathIsOneBatchedCallInOrder() async throws {
+        let model = FakeEnhancerModel(
+            rewriteAll: { lines, _ in lines.map { "Rewritten: \($0)" } }
+        )
+        let enhancer = FoundationModelEnhancer(model: model)
+        let rawNotes = "- first line\n\n• second line\nthird line"
+        let result = try await enhancer.enhance(rawNotes: rawNotes, transcript: transcript([Self.longEnoughText]))
+
+        let rewriteAllCalls = await model.rewriteAllCalls
+        let rewriteCalls = await model.rewriteCalls.count
+        #expect(rewriteAllCalls.count == 1)
+        #expect(rewriteAllCalls.first?.lines == ["first line", "second line", "third line"])
+        // The per-line path must not run at all on the happy path.
+        #expect(rewriteCalls == 0)
+
+        let bulletsSection = result.notes.components(separatedBy: "\n\n## Also discussed").first ?? result.notes
+        let bullets = bulletsSection.components(separatedBy: "\n")
+        #expect(bullets == [
+            "- Rewritten: first line",
+            "- Rewritten: second line",
+            "- Rewritten: third line",
+        ])
+    }
+
+    @Test func rewriteAllCountMismatchFallsBackToPerLine() async throws {
+        let model = FakeEnhancerModel(
+            rewrite: { line, _ in "Rewritten: \(line)" },
+            // Drop the last line's output — a structurally unsafe response
+            // that must never be trusted.
+            rewriteAll: { lines, _ in Array(lines.dropLast()) }
+        )
+        let enhancer = FoundationModelEnhancer(model: model)
+        let rawNotes = "- first line\n- second line\n- third line"
+        let result = try await enhancer.enhance(rawNotes: rawNotes, transcript: transcript([Self.longEnoughText]))
+
+        let rewriteAllCalls = await model.rewriteAllCalls.count
+        let rewriteCalls = await model.rewriteCalls
+        #expect(rewriteAllCalls == 1)
+        // Fallback ran the per-line path for every line, in order.
+        #expect(rewriteCalls.map(\.line) == ["first line", "second line", "third line"])
+
+        let bulletsSection = result.notes.components(separatedBy: "\n\n## Also discussed").first ?? result.notes
+        let bullets = bulletsSection.components(separatedBy: "\n")
         #expect(bullets == [
             "- Rewritten: first line",
             "- Rewritten: second line",

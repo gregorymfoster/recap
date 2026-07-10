@@ -11,6 +11,7 @@ protocol EnhancerModel: Sendable {
     func merge(renderedPair: String) async throws -> ChunkDigest
     func summarize(digestText: String) async throws -> String
     func rewrite(line: String, digestText: String) async throws -> String
+    func rewriteAll(lines: [String], digestText: String) async throws -> [String]
     func extraFacts(digestText: String, notesBlock: String) async throws -> [String]
     func subtitle(digestText: String) async throws -> String
 }
@@ -80,6 +81,35 @@ struct FoundationModelBackend: EnhancerModel {
             to: "Meeting digest:\n\(digestText)\n\nRough note to rewrite:\n\(line)",
             generating: FoundationModelEnhancer.RewrittenLine.self
         ).content.text
+    }
+
+    func rewriteAll(lines: [String], digestText: String) async throws -> [String] {
+        let session = LanguageModelSession(
+            instructions: """
+            You rewrite a numbered list of rough meeting-note lines, each as ONE clear \
+            sentence, using the meeting digest only when it has facts about that \
+            specific line's own topic.
+
+            Example digest: "- Budget approved at 40k for Q3. - Launch moved to Sept 12."
+            Note: "budget ok??" → "Budget approved at 40k for Q3."
+            Note: "launch date" → "Launch moved to September 12."
+            Note: "ask legal re trademark" → "Ask legal about the trademark." \
+            (digest says nothing about it, so only the wording is cleaned)
+
+            Rules: one short sentence per line; keep each line's own question marks; \
+            never mention the digest or notes themselves; never invent outcomes or \
+            reactions; never import digest facts about other lines' topics. You MUST \
+            return exactly one output line for every numbered input line, in the same \
+            order, with no additions, omissions, or merged lines.
+            """
+        )
+        let numbered = lines.enumerated()
+            .map { "\($0.offset + 1). \($0.element)" }
+            .joined(separator: "\n")
+        return try await session.respond(
+            to: "Meeting digest:\n\(digestText)\n\nRough note lines to rewrite:\n\(numbered)",
+            generating: FoundationModelEnhancer.RewrittenLines.self
+        ).content.lines
     }
 
     func extraFacts(digestText: String, notesBlock: String) async throws -> [String] {

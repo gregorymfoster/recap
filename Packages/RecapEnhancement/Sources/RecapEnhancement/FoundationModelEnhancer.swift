@@ -70,13 +70,10 @@ public struct FoundationModelEnhancer: NoteEnhancer {
             throw EnhancementError.transcriptTooShort
         }
 
-        // Map: digest each chunk.
-        var digests: [ChunkDigest] = []
-        for (index, chunk) in chunks.enumerated() {
-            try Task.checkCancellation()
-            enhancementLog.info("digest \(index + 1, privacy: .public)/\(chunks.count, privacy: .public)")
-            digests.append(DigestSanitizer.sanitize(try await digest(chunkText: chunk.text)))
-        }
+        // Map: digest each chunk. Chunks are independent (fresh session per
+        // call, no shared state) so they run concurrently, capped so we don't
+        // spawn an unbounded number of tasks for very long meetings.
+        var digests = try await digestConcurrently(chunks: chunks)
 
         // Merge layer: keep the reduce prompt inside the context window.
         var mergeRound = 0
@@ -114,7 +111,7 @@ public struct FoundationModelEnhancer: NoteEnhancer {
     /// to nothing, so callers only ever see a usable subtitle or none.
     private func generateSubtitle(digests: [ChunkDigest]) async throws -> String? {
         let digestText = render(digests)
-        let raw = try await respondWithRetry {
+        let raw = try await Self.respondWithRetry {
             try await model.subtitle(digestText: digestText)
         }
         var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -128,10 +125,47 @@ public struct FoundationModelEnhancer: NoteEnhancer {
 
     // MARK: Map
 
-    private func digest(chunkText: String) async throws -> ChunkDigest {
-        try await respondWithRetry {
-            try await model.digest(chunkText: chunkText)
+    /// Maximum number of digest calls in flight at once. The on-device model
+    /// may serialize these anyway, but we shouldn't spawn dozens of unbounded
+    /// tasks for a long meeting.
+    private static let maxConcurrentDigests = 3
+
+    /// Digests every chunk concurrently (each chunk is independent — fresh
+    /// session per call, no shared state), then returns results back in
+    /// chunk order regardless of completion order, since downstream merge
+    /// and "Part N" numbering depend on that order.
+    private func digestConcurrently(chunks: [TranscriptChunker.Chunk]) async throws -> [ChunkDigest] {
+        let model = self.model
+        let total = chunks.count
+        var results = [ChunkDigest?](repeating: nil, count: total)
+        var nextIndex = 0
+
+        try await withThrowingTaskGroup(of: (Int, ChunkDigest).self) { group in
+            func addNext() {
+                guard nextIndex < total else { return }
+                let index = nextIndex
+                let chunkText = chunks[index].text
+                nextIndex += 1
+                group.addTask {
+                    try Task.checkCancellation()
+                    enhancementLog.info("digest \(index + 1, privacy: .public)/\(total, privacy: .public)")
+                    let raw = try await Self.respondWithRetry {
+                        try await model.digest(chunkText: chunkText)
+                    }
+                    return (index, DigestSanitizer.sanitize(raw))
+                }
+            }
+
+            for _ in 0..<min(Self.maxConcurrentDigests, total) {
+                addNext()
+            }
+            while let (index, digest) = try await group.next() {
+                results[index] = digest
+                addNext()
+            }
         }
+
+        return results.map { $0! }
     }
 
     private func mergeInPairs(_ digests: [ChunkDigest]) async throws -> [ChunkDigest] {
@@ -142,7 +176,7 @@ public struct FoundationModelEnhancer: NoteEnhancer {
                 let combined = render([digests[pair], digests[pair + 1]])
                 merged.append(
                     DigestSanitizer.sanitize(
-                        try await respondWithRetry {
+                        try await Self.respondWithRetry {
                             try await model.merge(renderedPair: combined)
                         }
                     )
@@ -167,7 +201,7 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         let digestText = render(digests)
 
         if noteLines.isEmpty {
-            let raw = try await respondWithRetry {
+            let raw = try await Self.respondWithRetry {
                 try await model.summarize(digestText: digestText)
             }
             let cleaned = DigestSanitizer.cleanSummaryMarkdown(raw)
@@ -175,13 +209,13 @@ public struct FoundationModelEnhancer: NoteEnhancer {
             return cleaned
         }
 
-        // One call per note line: the code owns the structure, so no line can
-        // be dropped or reordered — the model only ever rewrites one line.
-        var bullets: [String] = []
-        for line in noteLines {
-            try Task.checkCancellation()
-            bullets.append("- " + (try await rewrite(line: line, digestText: digestText)))
-        }
+        // The code owns the structure, so no line can be dropped or
+        // reordered: try one batched call for all note lines, but the model's
+        // returned count is never trusted — a count mismatch falls back to
+        // the one-call-per-line path, which pairs each output with its input
+        // by construction and can't drop or reorder anything.
+        let rewrittenLines = try await rewriteAll(lines: noteLines, digestText: digestText)
+        let bullets = rewrittenLines.map { "- " + $0 }
 
         var sections = [bullets.joined(separator: "\n")]
         // Compare against the REWRITTEN bullets: they contain the facts that
@@ -216,14 +250,48 @@ public struct FoundationModelEnhancer: NoteEnhancer {
         var text: String
     }
 
+    @Generable
+    struct RewrittenLines {
+        @Guide(description: "One rewritten line per numbered input line, in the same order — no additions or omissions")
+        var lines: [String]
+    }
+
+    /// Rewrites every note line in one batched call when possible, falling
+    /// back to the one-call-per-line path if the model's output count
+    /// doesn't match the input count — the fallback is what actually
+    /// guarantees no line is dropped or reordered; the batched path is only
+    /// ever a fast path on top of it.
+    private func rewriteAll(lines: [String], digestText: String) async throws -> [String] {
+        let raw = try await Self.respondWithRetry {
+            try await model.rewriteAll(lines: lines, digestText: digestText)
+        }
+        guard raw.count == lines.count else {
+            enhancementLog.error(
+                "rewriteAll returned \(raw.count, privacy: .public) line(s) for \(lines.count, privacy: .public) input(s); falling back to per-line rewrite"
+            )
+            var bullets: [String] = []
+            for line in lines {
+                try Task.checkCancellation()
+                bullets.append(try await rewrite(line: line, digestText: digestText))
+            }
+            return bullets
+        }
+        return zip(lines, raw).map { line, text in Self.postProcessRewrite(original: line, raw: text) }
+    }
+
     private func rewrite(line: String, digestText: String) async throws -> String {
-        let text = try await respondWithRetry {
+        let raw = try await Self.respondWithRetry {
             try await model.rewrite(line: line, digestText: digestText)
         }
-        .replacingOccurrences(of: "\n", with: " ")
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        // A small model occasionally narrates instead of rewriting; keep the
-        // user's own words rather than shipping meta-commentary.
+        return Self.postProcessRewrite(original: line, raw: raw)
+    }
+
+    /// A small model occasionally narrates instead of rewriting; keep the
+    /// user's own words rather than shipping meta-commentary.
+    private static func postProcessRewrite(original line: String, raw: String) -> String {
+        let text = raw
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         let lowered = text.lowercased()
         if text.isEmpty || lowered.contains("digest") || lowered.contains("the note") {
             return line
@@ -233,7 +301,7 @@ public struct FoundationModelEnhancer: NoteEnhancer {
 
     private func alsoDiscussed(noteLines: [String], digestText: String) async throws -> [String] {
         let notesBlock = noteLines.map { "- \($0)" }.joined(separator: "\n")
-        let items = try await respondWithRetry {
+        let items = try await Self.respondWithRetry {
             try await model.extraFacts(digestText: digestText, notesBlock: notesBlock)
         }
         return items
@@ -253,7 +321,9 @@ public struct FoundationModelEnhancer: NoteEnhancer {
     }
 
     /// Meetings can trip safety guardrails; retry once, then surface a typed error.
-    private func respondWithRetry<T>(_ attempt: () async throws -> T) async throws -> T {
+    /// Static (doesn't touch `self`) so it can be called from concurrent
+    /// tasks without capturing the enclosing struct.
+    private static func respondWithRetry<T>(_ attempt: () async throws -> T) async throws -> T {
         do {
             return try await attempt()
         } catch is CancellationError {
