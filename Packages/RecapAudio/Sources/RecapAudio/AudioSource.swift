@@ -28,6 +28,11 @@ public protocol MicCapturing: AnyObject {
 public protocol SystemAudioCapturing: AnyObject {
     func start() async throws -> AsyncStream<[Float]>
     func stop()
+    /// Tears down and rebuilds the capture graph, feeding the SAME stream
+    /// `start()` returned — used on wake from sleep and by the liveness
+    /// watchdog's bounded auto-recovery when system samples stop arriving.
+    /// A no-op if capture isn't currently running.
+    func rebuild() async
 }
 
 extension MicSource: MicCapturing {}

@@ -8,34 +8,66 @@ import Testing
 @Suite struct LivenessWatchdogTests {
     private let threshold = LivenessWatchdog.stallThreshold
 
-    // MARK: System-stall direction (mirrors the original one-sided behavior)
+    // MARK: System-stall direction (symmetric with the mic direction)
 
-    @Test func systemStallFiresOnceWhenMicKeepsAdvancingAndSystemDoesNot() {
+    @Test func systemStallFiresWhenMicKeepsAdvancingAndSystemDoesNot() {
         var watchdog = LivenessWatchdog()
 
         // Both sides make some initial progress together.
         #expect(watchdog.recordProgress(micTotal: 1_000, systemTotal: 1_000, systemExpected: true, micExpected: true) == nil)
 
         // System stops advancing; mic keeps going past the threshold.
-        var event: LivenessWatchdog.Event?
-        event = watchdog.recordProgress(
+        let event = watchdog.recordProgress(
             micTotal: 1_000 + threshold + 1, systemTotal: 1_000, systemExpected: true, micExpected: true
         )
         #expect(event == .stalled(.system))
+    }
 
-        // Further mic progress must NOT refire — one-shot, permanently.
-        event = watchdog.recordProgress(
-            micTotal: 1_000 + threshold * 3 + 1, systemTotal: 1_000, systemExpected: true, micExpected: true
-        )
-        #expect(event == nil)
+    @Test func systemStallRefiresAfterEachFurtherThresholdOfContinuedSilence() {
+        var watchdog = LivenessWatchdog()
+        #expect(watchdog.recordProgress(micTotal: 0, systemTotal: 0, systemExpected: true, micExpected: true) == nil)
 
-        // Even if system audio somehow resumes afterward, the system
-        // direction never reports `.resumed` — there is no recovery path to
-        // resume from by design.
-        event = watchdog.recordProgress(
-            micTotal: 1_000 + threshold * 3 + 1, systemTotal: 2_000, systemExpected: true, micExpected: true
+        let first = watchdog.recordProgress(
+            micTotal: threshold + 1, systemTotal: 0, systemExpected: true, micExpected: true
         )
-        #expect(event == nil)
+        #expect(first == .stalled(.system))
+
+        // Not enough further silence yet — must not refire immediately.
+        let tooSoon = watchdog.recordProgress(
+            micTotal: threshold + 1 + 10, systemTotal: 0, systemExpected: true, micExpected: true
+        )
+        #expect(tooSoon == nil)
+
+        // Another full threshold of continued silence — measured from the
+        // bumped baseline (`threshold + 1`, set when `first` fired), not
+        // from zero. This is what lets `MeetingRecorder` retry the tap
+        // rebuild a bounded number of times instead of latching forever.
+        let second = watchdog.recordProgress(
+            micTotal: threshold + 1 + threshold + 2, systemTotal: 0, systemExpected: true, micExpected: true
+        )
+        #expect(second == .stalled(.system))
+    }
+
+    @Test func systemResumingAfterStallReportsResumedExactlyOnce() {
+        var watchdog = LivenessWatchdog()
+        #expect(watchdog.recordProgress(micTotal: 0, systemTotal: 0, systemExpected: true, micExpected: true) == nil)
+
+        let stalled = watchdog.recordProgress(
+            micTotal: threshold + 1, systemTotal: 0, systemExpected: true, micExpected: true
+        )
+        #expect(stalled == .stalled(.system))
+
+        // System audio starts producing samples again (a successful rebuild).
+        let resumed = watchdog.recordProgress(
+            micTotal: threshold + 100, systemTotal: 1, systemExpected: true, micExpected: true
+        )
+        #expect(resumed == .resumed(.system))
+
+        // Continued system progress afterward reports nothing further.
+        let quiet = watchdog.recordProgress(
+            micTotal: threshold + 200, systemTotal: 2, systemExpected: true, micExpected: true
+        )
+        #expect(quiet == nil)
     }
 
     @Test func systemStayingLiveNeverFiresSystemStall() {

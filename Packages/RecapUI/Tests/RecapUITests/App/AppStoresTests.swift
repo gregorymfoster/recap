@@ -44,6 +44,8 @@ private final class FakeSystemAudioSourceForGateTest: SystemAudioCapturing {
         continuation?.finish()
         continuation = nil
     }
+
+    func rebuild() async {}
 }
 
 /// Fake `MeetingEventWatching`: `start()` returns a configurable grant

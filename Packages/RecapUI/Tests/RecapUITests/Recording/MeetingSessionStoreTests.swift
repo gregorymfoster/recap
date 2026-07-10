@@ -50,6 +50,8 @@ private final class FakeSystemAudioSource: SystemAudioCapturing {
         continuation?.finish()
         continuation = nil
     }
+
+    func rebuild() async {}
 }
 
 private struct FakeError: Error {}
@@ -301,5 +303,9 @@ private final class SuspendingSystemAudioSource: SystemAudioCapturing {
 
     func stop() {
         wrapped.stop()
+    }
+
+    func rebuild() async {
+        await wrapped.rebuild()
     }
 }

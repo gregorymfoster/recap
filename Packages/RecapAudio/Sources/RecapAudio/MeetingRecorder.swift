@@ -44,12 +44,16 @@ public enum RecorderEvent: Equatable, Sendable {
     /// The recording should be stopped and salvaged.
     case writeFailed
     /// System audio started successfully but has gone silent mid-recording
-    /// (e.g. an output-device/route change breaks the aggregate device's tap
-    /// link) — the mic side is still being captured, but the other call
-    /// participant(s) are no longer being recorded. Fires at most once per
-    /// recording. The recording is NOT stopped; this is a warning, not a
-    /// failure — mirrors `.writeFailed`'s one-shot semantics without the
-    /// auto-stop behavior.
+    /// (e.g. an output-device/route change or a sleep cycle breaks the
+    /// aggregate device's tap link) — the mic side is still being captured,
+    /// but the other call participant(s) are no longer being recorded. By
+    /// the time this fires, `MeetingRecorder` has already made up to two
+    /// bounded attempts to recover the tap via
+    /// `SystemAudioCapturing.rebuild()`; this only reaches the UI once those
+    /// attempts didn't bring samples back. Fires at most once per recording.
+    /// The recording is NOT stopped; this is a warning, not a failure —
+    /// mirrors `.writeFailed`'s one-shot semantics without the auto-stop
+    /// behavior.
     case systemAudioStalled
     /// The mic went silent mid-recording (e.g. a USB device unplugged with
     /// no fallback) while system audio (when active) kept flowing — the
@@ -300,6 +304,9 @@ public final class MeetingRecorder {
                 attemptMicRecovery: { [weak self] in
                     self?.mic.forceRebuild()
                 },
+                attemptSystemRecovery: { [weak self] in
+                    await self?.systemTap?.rebuild()
+                },
                 fileWriterOverride: testFileWriterOverride,
                 spoolWriterOverride: testSpoolWriterOverride
             )
@@ -482,15 +489,14 @@ private actor MixerEngine {
     private let systemActive: Bool
     private let micCaptureActive: Bool
     private var livenessWatchdog = LivenessWatchdog()
-    /// Bounded auto-recovery for a stalled mic: rebuilds the capture graph
-    /// via `MicCapturing.forceRebuild()` (invoked back on `MeetingRecorder`'s
-    /// `@MainActor`, since that's where `mic` lives) up to
-    /// `maxMicRebuildAttempts` times before giving up and emitting
-    /// `.micStalled` to the UI.
+    /// Bounded auto-recovery for a stalled side: rebuilds the capture graph
+    /// (invoked back on `MeetingRecorder`'s `@MainActor`, since that's where
+    /// the sources live) up to `RestartPolicy.attemptsAllowed` times before
+    /// giving up and emitting `.micStalled`/`.systemAudioStalled` to the UI.
     private let attemptMicRecovery: @MainActor () async -> Void
-    private var micRebuildAttempts = 0
-    private var reportedMicStalledExternally = false
-    private static let maxMicRebuildAttempts = 2
+    private let attemptSystemRecovery: @MainActor () async -> Void
+    private var micRestartPolicy = RestartPolicy()
+    private var systemRestartPolicy = RestartPolicy()
 
     /// A handful of consecutive failures means the disk is genuinely stuck,
     /// not a transient hiccup.
@@ -504,6 +510,7 @@ private actor MixerEngine {
         levels: AsyncStream<Float>.Continuation,
         events: AsyncStream<RecorderEvent>.Continuation,
         attemptMicRecovery: @MainActor @escaping () async -> Void = {},
+        attemptSystemRecovery: @MainActor @escaping () async -> Void = {},
         fileWriterOverride: (any AudioFileWriting)? = nil,
         spoolWriterOverride: (any AudioFileWriting)? = nil
     ) throws {
@@ -512,6 +519,7 @@ private actor MixerEngine {
         self.systemActive = systemActive
         self.micCaptureActive = micActive
         self.attemptMicRecovery = attemptMicRecovery
+        self.attemptSystemRecovery = attemptSystemRecovery
         guard
             let format = AVAudioFormat(
                 commonFormat: .pcmFormatFloat32, sampleRate: AudioPipeline.mixerSampleRate,
@@ -588,16 +596,15 @@ private actor MixerEngine {
     }
 
     /// Feeds the current running totals to `LivenessWatchdog` and reacts to
-    /// whatever it reports. System-side stalls (an output-device/route
-    /// change breaking the aggregate device's tap link, most commonly) are
-    /// warning-only and one-shot — there's no recovery path for the tap yet
-    /// (see the historical note kept on `RecorderEvent.systemAudioStalled`).
-    /// Mic-side stalls get a bounded auto-recovery first: up to
-    /// `maxMicRebuildAttempts` calls to `MicCapturing.forceRebuild()` (hopped
-    /// back to `MeetingRecorder`'s `@MainActor`, where `mic` lives) before
-    /// `.micStalled` reaches the UI. `LivenessWatchdog` reports `.resumed(.mic)`
-    /// once real progress resumes, which resets the attempt counter so a
-    /// later, independent stall gets its own fresh attempts.
+    /// whatever it reports. Both sides get the same bounded auto-recovery,
+    /// tracked by one `RestartPolicy` each: up to
+    /// `RestartPolicy.attemptsAllowed` rebuild calls
+    /// (`MicCapturing.forceRebuild()` / `SystemAudioCapturing.rebuild()`,
+    /// hopped back to `MeetingRecorder`'s `@MainActor`, where the sources
+    /// live) before `.micStalled`/`.systemAudioStalled` reaches the UI.
+    /// `LivenessWatchdog` reports `.resumed` once real progress resumes,
+    /// which resets that side's policy so a later, independent stall gets
+    /// its own fresh attempts.
     private func checkLiveness() {
         guard
             let event = livenessWatchdog.recordProgress(
@@ -608,26 +615,27 @@ private actor MixerEngine {
 
         switch event {
         case .stalled(.system):
-            recorderLog.error("system audio stalled: no further system samples arriving")
-            events.yield(.systemAudioStalled)
+            if systemRestartPolicy.shouldAttempt() {
+                recorderLog.error("system audio stalled: attempting tap rebuild")
+                let recover = attemptSystemRecovery
+                Task { await recover() }
+            } else if systemRestartPolicy.shouldReport() {
+                recorderLog.error("system audio stalled: recovery attempts exhausted, reporting to UI")
+                events.yield(.systemAudioStalled)
+            }
         case .stalled(.mic):
-            if micRebuildAttempts < Self.maxMicRebuildAttempts {
-                micRebuildAttempts += 1
-                recorderLog.error("mic stalled: attempting recovery (\(self.micRebuildAttempts, privacy: .public)/\(Self.maxMicRebuildAttempts, privacy: .public))")
+            if micRestartPolicy.shouldAttempt() {
+                recorderLog.error("mic stalled: attempting recovery")
                 let recover = attemptMicRecovery
                 Task { await recover() }
-            } else if !reportedMicStalledExternally {
-                reportedMicStalledExternally = true
+            } else if micRestartPolicy.shouldReport() {
                 recorderLog.error("mic stalled: recovery attempts exhausted, reporting to UI")
                 events.yield(.micStalled)
             }
         case .resumed(.mic):
-            micRebuildAttempts = 0
-            reportedMicStalledExternally = false
+            micRestartPolicy.recordResumed()
         case .resumed(.system):
-            // Never emitted: the system direction latches permanently once
-            // reported (no recovery path exists to resume from).
-            break
+            systemRestartPolicy.recordResumed()
         }
     }
 

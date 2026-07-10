@@ -53,6 +53,12 @@ private final class FakeSystemAudioSource: SystemAudioCapturing {
     /// tests hold the call suspended to exercise the re-entrancy guard.
     var suspendUntil: (() async -> Void)?
 
+    /// Counts calls to `rebuild()` — the liveness watchdog's bounded
+    /// system-side auto-recovery. Tests set `onRebuildRequested` to simulate
+    /// a successful (or permanently failed) recovery attempt.
+    private(set) var rebuildCallCount = 0
+    var onRebuildRequested: (() -> Void)?
+
     func start() async throws -> AsyncStream<[Float]> {
         if let suspendUntil {
             await suspendUntil()
@@ -67,6 +73,11 @@ private final class FakeSystemAudioSource: SystemAudioCapturing {
         stopCalled = true
         continuation?.finish()
         continuation = nil
+    }
+
+    func rebuild() async {
+        rebuildCallCount += 1
+        onRebuildRequested?()
     }
 }
 
@@ -433,20 +444,23 @@ private final class ThrowingFileWriter: AudioFileWriting {
         #expect(collected.contains(.inputRebuilt(reason: "device switch")))
     }
 
-    // MARK: 7b. System audio stall detection
+    // MARK: 7b. System audio stall detection + bounded auto-recovery
 
     /// Reproduces the reported bug: system audio starts successfully
     /// (`systemAudioActive == true`) but then goes silent mid-call (e.g. a
-    /// route change breaks the aggregate device's tap link) while the mic
-    /// keeps streaming. The watchdog in `MixerEngine` must notice — driven
-    /// purely by sample counts, so this needs no wall-clock waiting: push
-    /// enough mic-only audio past `systemAudioStallThreshold` (4s ≈ 192,000
-    /// samples at 48kHz) with zero further system samples, and the recorder
-    /// must emit `.systemAudioStalled` exactly once, while the recording
-    /// keeps running (not stopped) and `systemAudioActive` stays true
-    /// (mirroring `.writeFailed`'s auto-stop being the only case that tears
-    /// the session down).
-    @Test func systemAudioGoingSilentMidRecordingEmitsStallEvent() async throws {
+    /// route change or sleep cycle breaks the aggregate device's tap link)
+    /// while the mic keeps streaming. The watchdog in `MixerEngine` must
+    /// notice — driven purely by sample counts, so this needs no wall-clock
+    /// waiting. Like the mic side, the recorder first makes bounded recovery
+    /// attempts (`SystemAudioCapturing.rebuild()`, up to
+    /// `RestartPolicy.attemptsAllowed` == 2) before giving up and emitting
+    /// `.systemAudioStalled` — this fake's `rebuild()` is a no-op
+    /// (simulating a tap that can't be brought back), so recovery never
+    /// succeeds and the event must eventually surface exactly once, while
+    /// the recording keeps running (not stopped) and `systemAudioActive`
+    /// stays true (mirroring `.writeFailed`'s auto-stop being the only case
+    /// that tears the session down).
+    @Test func systemTapNeverRecoveringEmitsSystemAudioStalledAfterBoundedAttempts() async throws {
         let dir = try tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("audio.m4a")
@@ -471,10 +485,13 @@ private final class ThrowingFileWriter: AudioFileWriting {
         systemContinuation.yield(sineBlock(seconds: 0.2))
         await push(micContinuation, seconds: 0.2)
 
-        // Now system audio goes silent while the mic keeps streaming past
-        // the stall threshold (4s of mic samples with zero more from system).
-        await push(micContinuation, seconds: 4.5)
+        // Now system audio goes silent for good while the mic keeps
+        // streaming past three stall thresholds — two bounded recovery
+        // attempts, then the final report once recovery keeps failing.
+        let secondsPerThreshold = Double(LivenessWatchdog.stallThreshold) / AudioPipeline.mixerSampleRate
+        await push(micContinuation, seconds: secondsPerThreshold * 3.5, chunkSeconds: 0.5)
 
+        #expect(tap.rebuildCallCount == 2)
         #expect(collected.contains(.systemAudioStalled))
         // Exactly once — not repeated on every subsequent mic push.
         #expect(collected.filter { $0 == .systemAudioStalled }.count == 1)
@@ -482,6 +499,52 @@ private final class ThrowingFileWriter: AudioFileWriting {
         // only `.writeFailed` triggers auto-stop; `systemAudioActive` stays
         // true because the tap itself never reported failure, only silence.
         #expect(recorder.systemAudioActive == true)
+
+        _ = await recorder.stop()
+        await collectorTask.value
+    }
+
+    /// When the bounded rebuild actually brings system audio back (the
+    /// fake's `rebuild()` here pushes fresh samples into the SAME stream,
+    /// simulating `SystemAudioTap.rebuild()`'s stable-stream re-setup), the
+    /// recorder must NOT emit `.systemAudioStalled` at all — successful
+    /// recovery means no toast — and must reset its attempt counter so a
+    /// later, independent stall gets fresh attempts.
+    @Test func systemTapDyingMidRecordingAttemptsRebuildAndSuppressesToastOnRecovery() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("audio.m4a")
+        let mic = FakeMicSource()
+        let tap = FakeSystemAudioSource()
+        let recorder = MeetingRecorder(mic: mic, makeSystemTap: { tap })
+
+        let output = try await recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
+        let micContinuation = try #require(mic.continuation)
+        let systemContinuation = try #require(tap.continuation)
+
+        // Simulate a successful rebuild: as soon as `rebuild()` is called,
+        // system samples start flowing again on the same continuation.
+        tap.onRebuildRequested = { [systemContinuation] in
+            systemContinuation.yield([Float](repeating: 0.1, count: 4_800))
+        }
+
+        var collected: [RecorderEvent] = []
+        let collectorTask = Task {
+            for await event in output.events {
+                collected.append(event)
+            }
+        }
+
+        systemContinuation.yield(sineBlock(seconds: 0.2))
+        await push(micContinuation, seconds: 0.2)
+
+        // Cross exactly one stall threshold — first rebuild attempt fires,
+        // and (per the fake's hook above) immediately "succeeds".
+        let secondsPerThreshold = Double(LivenessWatchdog.stallThreshold) / AudioPipeline.mixerSampleRate
+        await push(micContinuation, seconds: secondsPerThreshold + 0.2, chunkSeconds: 0.5)
+
+        #expect(tap.rebuildCallCount == 1)
+        #expect(!collected.contains(.systemAudioStalled))
 
         _ = await recorder.stop()
         await collectorTask.value

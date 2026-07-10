@@ -77,4 +77,8 @@ public final class SyntheticSystemAudioSource: SystemAudioCapturing {
         continuation?.finish()
         continuation = nil
     }
+
+    /// No-op: the synthetic soak source's timer pump never dies, so there is
+    /// no graph to rebuild.
+    public func rebuild() async {}
 }

@@ -12,15 +12,13 @@ import Foundation
 /// and testable without real timers — mirrors the original one-sided
 /// `MixerEngine.checkSystemAudioLiveness` this replaces.
 ///
-/// The two directions are NOT symmetric in one respect: a system-audio
-/// stall latches permanently (`.stalled(.system)` fires at most once per
-/// recording, ever — there is no recovery path for the system tap yet, so
-/// there is nothing to "resume" from the watchdog's point of view). A mic
-/// stall is retryable (mic recovery is a bounded, bounded-attempt rebuild),
-/// so it can fire `.stalled(.mic)` more than once — once per
-/// `stallThreshold` worth of continued silence — and reports `.resumed(.mic)`
-/// the moment mic samples start advancing again, so a caller driving bounded
-/// recovery attempts knows when to reset its attempt counter.
+/// Both directions are retryable and resumable, with identical semantics:
+/// each side's recovery is a bounded-attempt rebuild driven by the caller
+/// (`MicCapturing.forceRebuild()` / `SystemAudioCapturing.rebuild()`), so a
+/// stalled side can fire `.stalled` more than once — once per
+/// `stallThreshold` worth of continued silence — and reports `.resumed` the
+/// moment its samples start advancing again, so the caller knows when to
+/// reset its attempt counter.
 struct LivenessWatchdog {
     enum Side: Sendable, Equatable {
         case mic
@@ -43,7 +41,7 @@ struct LivenessWatchdog {
     // System-stall direction: is system audio keeping up with the mic?
     private var systemTotalAtLastSystemProgress = 0
     private var micTotalAtLastSystemProgress = 0
-    private var reportedSystemStall = false
+    private var systemStalledSinceResume = false
 
     // Mic-stall direction: is the mic keeping up with system audio?
     private var micTotalAtLastMicProgress = 0
@@ -69,14 +67,22 @@ struct LivenessWatchdog {
     ) -> Event? {
         var event: Event?
 
-        if systemExpected, !reportedSystemStall {
+        if systemExpected {
             if systemTotal > systemTotalAtLastSystemProgress {
                 systemTotalAtLastSystemProgress = systemTotal
                 micTotalAtLastSystemProgress = micTotal
+                if systemStalledSinceResume {
+                    systemStalledSinceResume = false
+                    event = .resumed(.system)
+                }
             } else {
                 let micSinceProgress = micTotal - micTotalAtLastSystemProgress
                 if micSinceProgress > Self.stallThreshold {
-                    reportedSystemStall = true
+                    systemStalledSinceResume = true
+                    // Bump the baseline so the next fire needs another full
+                    // threshold of continued silence, rather than firing on
+                    // every subsequent push — mirrors the mic direction.
+                    micTotalAtLastSystemProgress = micTotal
                     event = .stalled(.system)
                 }
             }
