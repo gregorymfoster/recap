@@ -112,6 +112,9 @@ struct LibraryView: View {
         // One group, not two ToolbarItems: separate `.primaryAction` items
         // can get collapsed into toolbar overflow, which drops the search
         // field entirely (found via ui-smoke — search-field missing from AX).
+        // .sharedBackgroundVisibility(.hidden) removes the system Liquid Glass
+        // bezel the toolbar draws around the group — both controls draw their
+        // own backgrounds, so the bezel showed as a doubled outline.
         ToolbarItemGroup(placement: .primaryAction) {
             searchField
             if session.isRecording {
@@ -120,6 +123,7 @@ struct LibraryView: View {
                 recordButton
             }
         }
+        .sharedBackgroundVisibility(.hidden)
     }
 
     /// Styled like a compact search field, but it's a button — clicking (or
