@@ -38,8 +38,8 @@ targets:
       path: Recap/Info.plist
       properties:
         CFBundleDisplayName: $(PRODUCT_NAME)
-        CFBundleShortVersionString: "0.17.0"
-        CFBundleVersion: "184"
+        CFBundleShortVersionString: "0.18.0"
+        CFBundleVersion: "193"
         LSMinimumSystemVersion: "26.0"
         LSApplicationCategoryType: public.app-category.productivity
         NSMicrophoneUsageDescription: Recap records your microphone during meetings you start. Audio never leaves your Mac.
@@ -70,8 +70,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.gregfoster.recap
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: 2V7W69N399
-        MARKETING_VERSION: "0.17.0"
-        CURRENT_PROJECT_VERSION: "184"
+        MARKETING_VERSION: "0.18.0"
+        CURRENT_PROJECT_VERSION: "193"
         ENABLE_USER_SCRIPT_SANDBOXING: true
       configs:
         Debug:
