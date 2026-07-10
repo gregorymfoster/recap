@@ -167,6 +167,7 @@ struct SummaryDisclosure: View {
     }
 }
 
+#if DEBUG
 #Preview("Collapsed") {
     SummaryDisclosure(enhancedNotes: "## Updates\n- Maya shipped the Q3 roadmap draft.", notes: .constant(""))
         .frame(width: 620)
@@ -181,7 +182,6 @@ struct SummaryDisclosure: View {
         .background(Tokens.surface)
 }
 
-#if DEBUG
 private struct SummaryDisclosureExpandedPreview: View {
     @State private var notes = "Follow up with Sam about the API access ticket."
 
