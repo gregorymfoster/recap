@@ -84,6 +84,15 @@ public final class TranscriptionSetupStore {
         reconcile()
     }
 
+    /// Fixtures-only hook: forces `phase` directly, without a real
+    /// `ModelInstalling` driving it, so the `firstRun` fixture scenario can
+    /// render a downloading/failed/done "setting up transcription" card
+    /// deterministically for screenshots. Never called from `start()`/the
+    /// normal graph.
+    public func setPhaseForFixtures(_ newPhase: SetupPhase) {
+        phase = newPhase
+    }
+
     /// Persists the new quality and re-plans: downloads/activates/cleans up
     /// whatever moving to it requires.
     public func setQuality(_ quality: TranscriptionQuality) {

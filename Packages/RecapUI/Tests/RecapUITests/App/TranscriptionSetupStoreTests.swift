@@ -189,4 +189,27 @@ private final class FakeModelInstalling: ModelInstalling {
         #expect(store.phase == .done)
         #expect(models.activeModelID == bestQualityModelID)
     }
+
+    // MARK: fixtures-only phase override
+
+    /// `setPhaseForFixtures` is the seam the `firstRun` fixture scenario uses
+    /// to force a downloading/failed/done "setting up transcription" card
+    /// without a real `ModelInstalling` driving it — it must set `phase`
+    /// directly and never touch `models`.
+    @Test func setPhaseForFixturesOverridesPhaseWithoutTouchingModels() {
+        let models = FakeModelInstalling()
+        let settings = ephemeralSettings()
+        let store = TranscriptionSetupStore(models: models, settings: settings, hardware: appleSilicon, retryTick: instantTick)
+        #expect(store.phase == .done)
+
+        store.setPhaseForFixtures(.downloading(progress: 0.34))
+        #expect(store.phase == .downloading(progress: 0.34))
+        #expect(models.downloadedIDs.isEmpty)
+
+        store.setPhaseForFixtures(.failed)
+        #expect(store.phase == .failed)
+
+        store.setPhaseForFixtures(.done)
+        #expect(store.phase == .done)
+    }
 }
