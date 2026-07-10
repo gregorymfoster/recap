@@ -84,6 +84,14 @@ public final class TranscriptionSetupStore {
         reconcile()
     }
 
+    /// Fixture-only: overrides `phase` directly for scenario screenshots
+    /// (e.g. the `waitingForSetup` fixture scenario), bypassing the real
+    /// model-download reconciliation entirely. No production graph calls
+    /// this — mirrors `BackupStatusStore.setStateForFixtures`.
+    public func setPhaseForFixtures(_ phase: SetupPhase) {
+        self.phase = phase
+    }
+
     /// Persists the new quality and re-plans: downloads/activates/cleans up
     /// whatever moving to it requires.
     public func setQuality(_ quality: TranscriptionQuality) {

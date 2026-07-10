@@ -3,8 +3,9 @@ import RecapCore
 import Testing
 @testable import RecapUI
 
-/// Covers `UpcomingStore` (the Library's "Upcoming" section state, design
-/// mock 9a) and the pure display helpers in `UpcomingSection.swift`.
+/// Covers `UpcomingStore` (today's remaining calendar events, feeding the
+/// Library's `NextMeetingBanner`, design mock 10a/11c) and its
+/// `imminentEvent` helper.
 @MainActor
 @Suite struct UpcomingStoreTests {
     private let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
@@ -95,132 +96,36 @@ import Testing
         #expect(later != nil)
         #expect(!UpcomingEvents.isImminent(later!, now: now))
     }
-}
 
-// MARK: - UpcomingAgendaState
+    // MARK: imminentEvent (NextMeetingBanner, design mock 10a/11c)
 
-/// Covers the pure gating behind the Library's three agenda states (bug fix:
-/// "connected but empty" used to render identically to "not connected" —
-/// both were just an absent section). Extracted out of `LibraryView` so the
-/// state-selection rule is testable without a View.
-@Suite struct UpcomingAgendaStateTests {
-    private func event(id: String = "e1") -> CalendarEventSnapshot {
-        CalendarEventSnapshot(
-            id: id, title: "Sync", start: .now.addingTimeInterval(900),
-            end: .now.addingTimeInterval(2700), otherAttendees: ["Maya"]
-        )
+    @Test func imminentEventReturnsTheFixtureImminentEvent() {
+        let store = UpcomingStore.fixture(now: now)
+        #expect(store.imminentEvent(now: now)?.id == "fixture-upcoming-imminent")
     }
 
-    @Test func hasEventsWhenAuthorizedWithEvents() {
-        let events = [event()]
-        let state = UpcomingAgendaState.resolve(
-            isAvailable: true, events: events, isFilterActive: false, isLongestSort: false
-        )
-        #expect(state == .hasEvents(events))
+    @Test func imminentEventIsNilWhenUnavailable() {
+        let events = [event(id: "soon", startOffset: 600)]
+        let store = UpcomingStore(calendar: calendar, availability: { false }, provider: { _ in events })
+        store.refresh(now: now)
+        #expect(store.imminentEvent(now: now) == nil)
     }
 
-    /// The exact scenario from the bug report: calendar authorized, but no
-    /// meeting-shaped events left today — must be a distinct, explicit state
-    /// from `.unauthorized`, not just "no section rendered".
-    @Test func authorizedEmptyWhenAuthorizedWithNoEvents() {
-        let state = UpcomingAgendaState.resolve(
-            isAvailable: true, events: [], isFilterActive: false, isLongestSort: false
-        )
-        #expect(state == .authorizedEmpty)
+    @Test func imminentEventIsNilWhenNothingIsWithinThreshold() {
+        let events = [event(id: "later", startOffset: 3600)]
+        let store = UpcomingStore(calendar: calendar, availability: { true }, provider: { _ in events })
+        store.refresh(now: now)
+        #expect(store.imminentEvent(now: now) == nil)
     }
 
-    @Test func unauthorizedWhenNotAvailableEvenWithEvents() {
-        // Shouldn't happen in practice (the store clears events when
-        // unavailable) but `.resolve` should still prioritize
-        // `.unauthorized` defensively.
-        let state = UpcomingAgendaState.resolve(
-            isAvailable: false, events: [event()], isFilterActive: false, isLongestSort: false
-        )
-        #expect(state == .unauthorized)
+    @Test func pureImminentEventFilterMatchesStaticHelper() {
+        let imminent = event(id: "imminent", startOffset: 600)
+        let later = event(id: "later", startOffset: 3600)
+        #expect(UpcomingStore.imminentEvent(in: [later, imminent], now: now)?.id == "imminent")
     }
 
-    @Test func nilWhenFilterIsActive() {
-        let state = UpcomingAgendaState.resolve(
-            isAvailable: true, events: [event()], isFilterActive: true, isLongestSort: false
-        )
-        #expect(state == nil)
-    }
-
-    @Test func nilWhenSortIsLongest() {
-        let state = UpcomingAgendaState.resolve(
-            isAvailable: true, events: [event()], isFilterActive: false, isLongestSort: true
-        )
-        #expect(state == nil)
-    }
-
-    @Test func nilWhenFilterActiveEvenIfUnauthorized() {
-        let state = UpcomingAgendaState.resolve(
-            isAvailable: false, events: [], isFilterActive: true, isLongestSort: false
-        )
-        #expect(state == nil)
-    }
-}
-
-// MARK: - UpcomingRowFormatting
-
-@Suite struct UpcomingRowFormattingTests {
-    private let calendar = Calendar(identifier: .gregorian)
-
-    private func date(month: Int, day: Int, hour: Int = 9) -> Date {
-        var components = DateComponents()
-        components.year = 2026
-        components.month = month
-        components.day = day
-        components.hour = hour
-        return calendar.date(from: components)!
-    }
-
-    @Test func monthAbbreviationIsUppercase() {
-        let jan9 = date(month: 1, day: 9)
-        #expect(UpcomingRowFormatting.monthAbbreviation(for: jan9, calendar: calendar) == "JAN")
-    }
-
-    @Test func dayNumberMatchesCalendarDay() {
-        let jul3 = date(month: 7, day: 3)
-        #expect(UpcomingRowFormatting.dayNumber(for: jul3, calendar: calendar) == "3")
-    }
-
-    private func event(otherAttendees: [String]) -> CalendarEventSnapshot {
-        CalendarEventSnapshot(
-            id: "e1", title: "Sync", start: .now, end: .now.addingTimeInterval(1800),
-            otherAttendees: otherAttendees
-        )
-    }
-
-    @Test func attendeeSummaryIsNilWithNoOtherAttendees() {
-        #expect(UpcomingRowFormatting.attendeeSummary(for: event(otherAttendees: [])) == nil)
-    }
-
-    @Test func attendeeSummaryCountsSelfPlusOthers() {
-        #expect(UpcomingRowFormatting.attendeeSummary(for: event(otherAttendees: ["Maya"])) == "2 attendees")
-        #expect(UpcomingRowFormatting.attendeeSummary(for: event(otherAttendees: ["Maya", "Sam", "Priya"])) == "4 attendees")
-    }
-
-    @Test func metaLineComponentsOmitsNilSegments() {
-        let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
-        let bare = CalendarEventSnapshot(
-            id: "e1", title: "Sync", start: now.addingTimeInterval(600), end: now.addingTimeInterval(2400),
-            otherAttendees: []
-        )
-        let components = UpcomingRowFormatting.metaLineComponents(for: bare, now: now)
-        // Only clock time + relative time — no conference provider, no attendees.
-        #expect(components.count == 2)
-    }
-
-    @Test func metaLineComponentsIncludesConferenceProviderAndAttendees() {
-        let now = Date(timeIntervalSinceReferenceDate: 1_000_000)
-        let full = CalendarEventSnapshot(
-            id: "e1", title: "Sync", start: now.addingTimeInterval(600), end: now.addingTimeInterval(2400),
-            otherAttendees: ["Maya"], hasConferenceURL: true, conferenceProvider: "Zoom"
-        )
-        let components = UpcomingRowFormatting.metaLineComponents(for: full, now: now)
-        #expect(components.count == 4)
-        #expect(components.contains("Zoom"))
-        #expect(components.contains("2 attendees"))
+    @Test func pureImminentEventFilterReturnsNilWithNoCandidates() {
+        let later = event(id: "later", startOffset: 3600)
+        #expect(UpcomingStore.imminentEvent(in: [later], now: now) == nil)
     }
 }

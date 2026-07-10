@@ -270,6 +270,13 @@ public final class AppStores {
         if let fixtureScenarioValue, fixtureScenarioValue == .backupStuck {
             backup.setStateForFixtures(.stuck(reason: .folderUnreachable, since: Date(timeIntervalSinceNow: -2 * 86400)))
         }
+        // The `waitingForSetup` fixture scenario has no real model download
+        // behind it — override the setup phase directly so rows derive their
+        // "Waiting for setup · N%" copy from it (mirrors the `backupStuck`
+        // override above).
+        if let fixtureScenarioValue, fixtureScenarioValue == .waitingForSetup {
+            setup.setPhaseForFixtures(.downloading(progress: 0.34))
+        }
         if configuration.mode == .normal {
             recording.registerGlobalControls()
             autoRecord.applyCalendarAutoRecordSetting()

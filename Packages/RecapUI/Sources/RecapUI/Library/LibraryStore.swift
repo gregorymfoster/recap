@@ -2,59 +2,16 @@ import Foundation
 import Observation
 import RecapCore
 
-/// Library list ordering. Persisted to UserDefaults — the user's chosen sort
-/// should survive a relaunch, unlike the filter (session-only).
-public enum LibrarySort: String, CaseIterable, Sendable {
-    case newest
-    case oldest
-    case longest
-
-    var label: String {
-        switch self {
-        case .newest: "Newest first"
-        case .oldest: "Oldest first"
-        case .longest: "Longest first"
-        }
-    }
-}
-
-/// Metadata-only narrowing of the library list — no disk I/O, so it's cheap
-/// to recompute on every keystroke/toggle. Session-only (not persisted): a
-/// fresh launch always shows everything until the user filters again.
-public struct LibraryFilter: Equatable, Sendable {
-    public var minDuration: TimeInterval?
-    public var readyOnly: Bool
-
-    public init(minDuration: TimeInterval? = nil, readyOnly: Bool = false) {
-        self.minDuration = minDuration
-        self.readyOnly = readyOnly
-    }
-
-    public var isActive: Bool { minDuration != nil || readyOnly }
-
-    func matches(_ record: MeetingRecord) -> Bool {
-        if let minDuration, record.meeting.duration < minDuration { return false }
-        if readyOnly, record.meeting.status != .ready { return false }
-        return true
-    }
-}
-
 @MainActor
 @Observable
 public final class LibraryStore {
     public private(set) var meetings: [MeetingRecord] = []
     public var selectedMeetingID: UUID?
 
-    public var sort: LibrarySort {
-        didSet { defaults?.set(sort.rawValue, forKey: Self.sortKey) }
-    }
-    public var filter = LibraryFilter()
-
     let storage: LibraryStorage?
     let index: SearchIndex?
     let autosaver: NotesAutosaver?
     let changeBus: LibraryChangeBus?
-    private let defaults: UserDefaults?
     /// Canned transcripts for fixture records (no disk in fixture mode), so
     /// -fixtures runs and screenshot dumps can show the transcript pane —
     /// avatars, rename affordance, playback follow. Empty in disk-backed mode.
@@ -74,16 +31,12 @@ public final class LibraryStore {
     /// first load, kept in sync by `addTimedNote`. Disk-backed mode only.
     var timedNotesCache: [UUID: [TimedNote]] = [:]
 
-    private static let sortKey = "librarySort"
-
     /// Disk-backed store: loads the library and rebuilds the search index.
-    public init(storage: LibraryStorage, index: SearchIndex, changeBus: LibraryChangeBus, defaults: UserDefaults = .standard) {
+    public init(storage: LibraryStorage, index: SearchIndex, changeBus: LibraryChangeBus) {
         self.storage = storage
         self.index = index
         self.autosaver = NotesAutosaver(storage: storage)
         self.changeBus = changeBus
-        self.defaults = defaults
-        self.sort = defaults.string(forKey: Self.sortKey).flatMap(LibrarySort.init(rawValue:)) ?? .newest
         reload()
     }
 
@@ -99,8 +52,6 @@ public final class LibraryStore {
         self.index = nil
         self.autosaver = nil
         self.changeBus = nil
-        self.defaults = nil
-        self.sort = .newest
         self.meetings = fixtures
         self.fixtureTranscripts = transcripts
         self.fixtureNotes = notes
@@ -108,19 +59,12 @@ public final class LibraryStore {
         self.fixtureTimedNotes = timedNotes
     }
 
-    /// `meetings` filtered then sorted — the source of truth (`meetings`,
-    /// newest-first from disk) never changes. Recomputed on demand; cheap
-    /// since it's metadata-only.
+    /// `meetings`, newest-first — the source of truth (`meetings`) never
+    /// changes order itself; this is recomputed on demand. The redesign
+    /// (design mock 10a/11c) dropped the user-facing sort/filter UI in favor
+    /// of a single fixed ordering.
     public var displayMeetings: [MeetingRecord] {
-        let filtered = filter.isActive ? meetings.filter(filter.matches) : meetings
-        switch sort {
-        case .newest:
-            return filtered.sorted { $0.meeting.date > $1.meeting.date }
-        case .oldest:
-            return filtered.sorted { $0.meeting.date < $1.meeting.date }
-        case .longest:
-            return filtered.sorted { $0.meeting.duration > $1.meeting.duration }
-        }
+        meetings.sorted { $0.meeting.date > $1.meeting.date }
     }
 
     public func reload() {

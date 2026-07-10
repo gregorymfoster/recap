@@ -78,3 +78,23 @@ public final class UpcomingStore {
         return store
     }
 }
+
+extension UpcomingStore {
+    /// The next event starting within 30 minutes, if calendar access is
+    /// authorized — drives `NextMeetingBanner` (replaces the old
+    /// always-present "Upcoming" agenda with a single high-signal row,
+    /// design mock 10a/11c). `events` is already `UpcomingEvents
+    /// .todayRemaining`-filtered and sorts an already-started meeting first,
+    /// but `isImminent` only matches events that haven't started yet, so a
+    /// plain first-match over `events` is correct without extra sorting.
+    public func imminentEvent(now: Date = .now) -> CalendarEventSnapshot? {
+        guard isAvailable else { return nil }
+        return Self.imminentEvent(in: events, now: now)
+    }
+
+    /// Pure filter extracted out of the instance method above so it's
+    /// directly unit-testable without constructing a store.
+    public static func imminentEvent(in events: [CalendarEventSnapshot], now: Date) -> CalendarEventSnapshot? {
+        events.first { UpcomingEvents.isImminent($0, now: now) }
+    }
+}

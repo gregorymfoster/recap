@@ -127,6 +127,41 @@ import Testing
         #expect(!recoverable.isEmpty)
     }
 
+    // MARK: backupStuck
+
+    @Test func backupStuckHasFailedAndRecoverableMeetings() {
+        // Reuses `errorLibrary()` — the stuck footer treatment comes from
+        // `AppStores` overriding `BackupStatusStore.state`, not from the
+        // library shape itself.
+        let library = FixtureScenario.backupStuck.library
+        #expect(!library.meetings.isEmpty)
+    }
+
+    // MARK: recovered
+
+    @Test func recoveredHasARecoveredMeetingAtTopOfToday() {
+        let library = FixtureScenario.recovered.library
+        let sections = MeetingGrouping.sections(library.displayMeetings, now: .now, calendar: .current)
+        let today = sections.first { $0.title == "Today" }
+        #expect(today?.records.first?.meeting.status == .recovered)
+    }
+
+    // MARK: waitingForSetup
+
+    @Test func waitingForSetupHasNeedsModelMeetings() {
+        let library = FixtureScenario.waitingForSetup.library
+        let needsModel = library.meetings.filter { $0.meeting.status == .needsModel }
+        #expect(!needsModel.isEmpty)
+    }
+
+    // MARK: nextMeetingSoon
+
+    @Test func nextMeetingSoonHasAnImminentUpcomingEvent() {
+        let upcoming = FixtureScenario.nextMeetingSoon.upcoming
+        upcoming.refresh()
+        #expect(upcoming.imminentEvent() != nil)
+    }
+
     // MARK: default forwarding
 
     @Test func libraryStoreFixtureMatchesDefaultScenarioShape() {

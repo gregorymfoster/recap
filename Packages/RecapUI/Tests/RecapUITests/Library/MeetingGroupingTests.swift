@@ -14,9 +14,11 @@ import Testing
         return calendar
     }
 
-    static func record(title: String, daysAgo: Double, relativeTo base: Date = now) -> MeetingRecord {
+    static func record(
+        title: String, daysAgo: Double, relativeTo base: Date = now, status: MeetingStatus = .ready
+    ) -> MeetingRecord {
         MeetingRecord(
-            meeting: Meeting(title: title, date: base.addingTimeInterval(-daysAgo * 86_400)),
+            meeting: Meeting(title: title, date: base.addingTimeInterval(-daysAgo * 86_400), status: status),
             folderURL: URL(filePath: "/dev/null")
         )
     }
@@ -102,6 +104,41 @@ import Testing
         let sections = MeetingGrouping.sections([b, c, a], now: Self.now, calendar: Self.calendar())
         #expect(sections.count == 1)
         #expect(sections[0].records.map(\.meeting.title) == ["B", "C", "A"])
+    }
+
+    /// A `.recovered` meeting (crash-salvaged audio, design mock 10a/11c)
+    /// should sort ahead of everything else in Today, regardless of where it
+    /// falls in the input order — it's the most actionable row in the list.
+    @Test func recoveredMeetingSortsToTopOfToday() {
+        let first = Self.record(title: "First", daysAgo: 0)
+        let recovered = Self.record(title: "Recovered", daysAgo: 0, status: .recovered)
+        let last = Self.record(title: "Last", daysAgo: 0)
+        let sections = MeetingGrouping.sections([first, recovered, last], now: Self.now, calendar: Self.calendar())
+        #expect(sections.first?.title == "Today")
+        #expect(sections.first?.records.map(\.meeting.title) == ["Recovered", "First", "Last"])
+    }
+
+    /// No recovered meeting today: ordering is untouched.
+    @Test func todayWithNoRecoveredMeetingKeepsInputOrder() {
+        let first = Self.record(title: "First", daysAgo: 0)
+        let second = Self.record(title: "Second", daysAgo: 0)
+        let sections = MeetingGrouping.sections([first, second], now: Self.now, calendar: Self.calendar())
+        #expect(sections.first?.records.map(\.meeting.title) == ["First", "Second"])
+    }
+
+    /// A `.recovered` meeting outside Today (e.g. Yesterday) is left alone —
+    /// the "sorts to top" rule only applies within the Today bucket.
+    @Test func recoveredMeetingOutsideTodayIsNotReordered() {
+        let today = Self.record(title: "Today meeting", daysAgo: 0)
+        let plainYesterday = Self.record(title: "Plain yesterday", daysAgo: 1)
+        let recoveredYesterday = Self.record(title: "Recovered yesterday", daysAgo: 1, status: .recovered)
+        let sections = MeetingGrouping.sections(
+            [today, plainYesterday, recoveredYesterday], now: Self.now, calendar: Self.calendar()
+        )
+        let yesterday = sections.first { $0.title == "Yesterday" }
+        // Input order preserved (plain first, recovered second) — the
+        // top-of-Today reorder only applies to the Today bucket.
+        #expect(yesterday?.records.map(\.meeting.title) == ["Plain yesterday", "Recovered yesterday"])
     }
 
     @Test func weekBoundaryRespectsInjectedFirstWeekday() {

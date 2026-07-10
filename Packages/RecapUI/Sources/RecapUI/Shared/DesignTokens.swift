@@ -51,6 +51,11 @@ public enum Tokens {
     )
     public static let hairline = dynamic(light: NSColor.black.withAlphaComponent(0.07), dark: NSColor.white.withAlphaComponent(0.10))
     public static let accentBlue = Color(red: 0x0A / 255, green: 0x84 / 255, blue: 0xFF / 255)  // #0a84ff
+    /// Lighter accent used for icons/text against a blue-tinted background
+    /// (e.g. `NextMeetingBanner`'s calendar glyph) — matches
+    /// `QuietBlueOutlineButtonStyle`'s fixed blue. Not dynamic: reads
+    /// correctly against a fixed blue-tint fill in both appearances.
+    public static let accentBlueLight = Color(red: 109 / 255, green: 178 / 255, blue: 255 / 255)  // #6db2ff
     public static let recordRed = Color(red: 0xFF / 255, green: 0x45 / 255, blue: 0x3A / 255)  // #ff453a
     public static let recordRedDark = Color(red: 0xD6 / 255, green: 0x3A / 255, blue: 0x30 / 255)  // #d63a30
     public static let successGreen = Color(red: 0x30 / 255, green: 0xB3 / 255, blue: 0x52 / 255)  // #30b352
