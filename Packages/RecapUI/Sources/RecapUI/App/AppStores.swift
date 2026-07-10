@@ -207,13 +207,16 @@ public final class AppStores {
                 router: notificationRouter,
                 onOpenMeeting: { [weak library] id in
                     // Mirrors `AppStores.showMeeting(_:)`, inlined: `self`
-                    // isn't fully initialized yet at this point in `init`.
-                    router.section = .library
+                    // isn't fully initialized yet at this point in `init`. A
+                    // completion notification only ever fires for a meeting
+                    // that just finished processing, so it's never the
+                    // active recording — always route straight to `.detail`.
+                    router.screen = .detail(meetingID: id)
                     library?.selectedMeetingID = id
                     NSApp.activate(ignoringOtherApps: true)
                 },
                 isMeetingCurrentlyVisible: { [weak library] in
-                    NSApp.isActive && router.section == .library && library?.selectedMeetingID == $0
+                    NSApp.isActive && router.screen == .detail(meetingID: $0) && library?.selectedMeetingID == $0
                 }
             )
             completionNotifier = notifier
@@ -424,8 +427,12 @@ public final class AppStores {
             toasts: toasts, queue: queue,
             showMeeting: { id in
                 // Mirrors `AppStores.showMeeting(_:)` without capturing the
-                // not-yet-initialized `AppStores`.
-                router.section = .library
+                // not-yet-initialized `AppStores`. `RecordingController`
+                // calls this right after a recording starts (routes to the
+                // full-window `.recording` placeholder) and right after one
+                // stops (by which point `session.activeRecord` is already
+                // nil, so it routes to `.detail` of the finished meeting).
+                router.screen = session.activeRecord?.meeting.id == id ? .recording : .detail(meetingID: id)
                 library.selectedMeetingID = id
             }
         )
@@ -455,20 +462,20 @@ public final class AppStores {
         queue?.cancel(meetingID: record.meeting.id)
     }
 
-    /// Navigates to a meeting (used by the menu bar extra's jump items).
+    /// Navigates to a meeting (used by the menu bar extra's jump items, and
+    /// `SettingsPrivacyTab`'s backup-fix deep link). Routes to the
+    /// full-window `.recording` placeholder when `id` is the meeting
+    /// currently being recorded, otherwise to its `.detail` screen.
     public func showMeeting(_ id: UUID) {
-        router.section = .library
+        router.screen = session.activeRecord?.meeting.id == id ? .recording : .detail(meetingID: id)
         library.selectedMeetingID = id
     }
 
-    /// Routes to a section and brings the main window forward (recreating it
-    /// if it was closed). `openWindow` is a SwiftUI Environment value only
-    /// available in a view/scene context, so callers (the ⌘, command, the
-    /// menu bar extra) pass theirs in rather than this living on `AppStores`.
-    public func openMainWindow(section: SidebarItem? = nil, openWindow: (String) -> Void) {
-        if let section {
-            router.section = section
-        }
+    /// Brings the main window forward (recreating it if it was closed).
+    /// `openWindow` is a SwiftUI Environment value only available in a
+    /// view/scene context, so callers (the ⌘, command, the menu bar extra)
+    /// pass theirs in rather than this living on `AppStores`.
+    public func openMainWindow(openWindow: (String) -> Void) {
         openWindow("main")
         NSApp.activate(ignoringOtherApps: true)
     }

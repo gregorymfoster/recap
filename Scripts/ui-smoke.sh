@@ -160,19 +160,11 @@ echo "── asserting AXIDs ──"
 # the default -fixtures launch state (no interaction needed): the app opens
 # straight to the Library list with no meeting selected, so `library-detail-pane`
 # is asserted only after clicking into a fixture meeting row below.
-#
-# `root-view` is dropped: SwiftUI's NavigationSplitView appends its own
-# generated identifier onto the AXSplitGroup's AXIdentifier attribute
-# alongside `.axID(.rootView)`'s "root-view" (observed as
-# "main-AppWindow-1, SidebarNavigationSplitView" in the AX tree) — it never
-# resolves to a plain "root-view" match. Same underlying element is reachable
-# indirectly via the window list instead (asserted as part of the
-# wait-for-main-window step above).
+# (The sidebar and queue-widget ids are gone with the sidebar itself — the
+# Library list is the whole main window now.)
 ids=(
-  sidebar
   library-list
   search-field
-  queue-widget
   menu-bar-content
 )
 

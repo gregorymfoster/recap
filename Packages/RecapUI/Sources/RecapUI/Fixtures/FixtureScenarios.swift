@@ -35,7 +35,7 @@ public enum FixtureScenario: String, CaseIterable, Sendable {
     /// transcripts + notes — exercises list grouping/perf.
     case busy
     /// A queue mid-flight: several meetings in in-progress/queued states so
-    /// the sidebar queue widget renders.
+    /// the list's per-row progress states render.
     case processing
     /// Failed/retry-able job states, including a meeting with a failed
     /// transcription.
@@ -185,7 +185,6 @@ enum FixtureScenarios {
                     subtitle: "Usage-based tier wins, enterprise floor set at 20 seats"
                 ),
             ],
-            queueSummary: QueueSummary(jobCount: 2, progress: 0.42),
             transcripts: [standup.meeting.id: standupTranscript],
             notes: [standup.meeting.id: standupNotes],
             enhancedNotes: [standup.meeting.id: standupEnhancedNotes]
@@ -199,7 +198,7 @@ enum FixtureScenarios {
     /// queue activity.
     @MainActor
     static func emptyLibrary() -> LibraryStore {
-        LibraryStore(fixtures: [], queueSummary: nil)
+        LibraryStore(fixtures: [])
     }
 
     // MARK: busy
@@ -254,7 +253,6 @@ enum FixtureScenarios {
 
         return LibraryStore(
             fixtures: meetings,
-            queueSummary: QueueSummary(jobCount: 3, progress: 0.6),
             transcripts: transcripts,
             notes: notes,
             enhancedNotes: enhancedNotes
@@ -264,7 +262,7 @@ enum FixtureScenarios {
     // MARK: processing
 
     /// A queue mid-flight: several meetings actively in-progress/queued so
-    /// the sidebar queue widget has real work to show.
+    /// the list's per-row progress states have real work to show.
     @MainActor
     static func processingLibrary() -> LibraryStore {
         let now = Date.now
@@ -279,17 +277,13 @@ enum FixtureScenarios {
                 subtitle: "Usage-based tier wins, enterprise floor set at 20 seats"
             ),
         ]
-        return LibraryStore(
-            fixtures: meetings,
-            queueSummary: QueueSummary(jobCount: 4, progress: 0.42)
-        )
+        return LibraryStore(fixtures: meetings)
     }
 
     // MARK: error
 
     /// Failed/retry-able job states: a meeting with a genuinely failed
-    /// transcription, one blocked on a missing model (recoverable), and a
-    /// paused queue summary so the sidebar widget shows the pause reason.
+    /// transcription and one blocked on a missing model (recoverable).
     @MainActor
     static func errorLibrary() -> LibraryStore {
         let now = Date.now
@@ -308,9 +302,6 @@ enum FixtureScenarios {
                 subtitle: "Promotion timeline agreed, mentorship pairing starts next sprint"
             ),
         ]
-        return LibraryStore(
-            fixtures: meetings,
-            queueSummary: QueueSummary(jobCount: 2, progress: 0, pauseReason: "No speech model installed")
-        )
+        return LibraryStore(fixtures: meetings)
     }
 }

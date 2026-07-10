@@ -166,11 +166,15 @@ public final class RecordingController {
     }
 
     /// The one stop flow: finish the recording and queue transcription.
+    /// `session.activeRecord` is already `nil` by the time `session.stop()`
+    /// returns, so `showMeeting` routes to the finished meeting's `.detail`
+    /// screen rather than back into `.recording`.
     public func stopRecording() {
         Task {
             if let (record, duration) = await session.stop() {
                 library.finishRecording(record, duration: duration)
                 queue?.enqueueTranscription(for: record.meeting.id)
+                showMeeting(record.meeting.id)
             }
         }
     }

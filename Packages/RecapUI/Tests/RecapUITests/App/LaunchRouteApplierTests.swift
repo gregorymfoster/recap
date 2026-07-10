@@ -84,6 +84,22 @@ struct LaunchRouteApplierTests {
     }
 }
 
+@Suite("AppRouter.SettingsSection legacy-tab mapping")
+@MainActor
+struct SettingsSectionLegacyTabTests {
+    @Test func legacyTabsMapToRedesignedSections() {
+        #expect(AppRouter.SettingsSection(legacyTab: .general) == .audio)
+        #expect(AppRouter.SettingsSection(legacyTab: .recording) == .audio)
+        #expect(AppRouter.SettingsSection(legacyTab: .calendar) == .audio)
+        #expect(AppRouter.SettingsSection(legacyTab: .privacy) == .audio)
+        #expect(AppRouter.SettingsSection(legacyTab: .sync) == .storage)
+    }
+
+    @Test func nilLegacyTabMapsToNil() {
+        #expect(AppRouter.SettingsSection(legacyTab: nil) == nil)
+    }
+}
+
 @Suite("LaunchRouteMeetingResolver")
 struct LaunchRouteMeetingResolverTests {
     @Test func firstAliasResolvesToFirstMeetingID() {

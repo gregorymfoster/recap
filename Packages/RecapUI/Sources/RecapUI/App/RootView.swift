@@ -3,22 +3,15 @@ import RecapCore
 import RecapTranscription
 import SwiftUI
 
-/// Which top-level section is showing. Held in the environment so any view
-/// (e.g. a "needs model" library chip) can navigate without threading bindings.
-/// Owned by `AppStores` so the menu bar extra can navigate too.
+/// Which top-level screen is showing. Held in the environment so any view
+/// (e.g. a "needs model" library chip, the menu bar extra) can navigate
+/// without threading bindings. Owned by `AppStores`.
 @MainActor
 @Observable
 public final class AppRouter {
-    public var section: SidebarItem? = .library
-    /// Preselects a Settings tab the next time the Settings window opens —
-    /// set by `-open settings/<tab>` (`LaunchRouteApplier`) and read once by
-    /// `SettingsWindowView`'s `.task`, which clears it back to `nil` so a
-    /// later manual ⌘, doesn't keep reapplying a stale launch route.
-    public var pendingSettingsTab: SettingsTab?
-
-    /// Coarse-grained screen the redesigned shell is showing. Additive
-    /// alongside `section` (which keeps driving today's `NavigationSplitView`
-    /// sidebar) — later phases migrate navigation onto this instead.
+    /// The coarse-grained screen `RootView` renders: the Library list, one
+    /// meeting's detail, or the (placeholder, pre-Phase-3C) full-window
+    /// recording surface.
     public enum Screen: Equatable, Sendable {
         case library
         case detail(meetingID: UUID)
@@ -27,12 +20,34 @@ public final class AppRouter {
 
     public var screen: Screen = .library
 
+    /// Preselects a Settings tab the next time the Settings window opens —
+    /// set by `-open settings/<tab>` (`LaunchRouteApplier`) and read once by
+    /// `SettingsWindowView`'s `.task`, which clears it back to `nil` so a
+    /// later manual ⌘, doesn't keep reapplying a stale launch route.
+    /// `SettingsWindowView` still drives its tab selection from this today —
+    /// the Settings one-page rewrite (Phase 3D) retires it in favor of
+    /// `pendingSettingsSection` below.
+    public var pendingSettingsTab: SettingsTab?
+
     /// Settings tab groupings for the redesigned Settings surface. Distinct
     /// from `SettingsTab` (today's tab enum) — later phases reconcile the two.
     public enum SettingsSection: String, Sendable {
         case audio
         case transcription
         case storage
+
+        /// Coarse mapping from today's legacy `SettingsTab` names, wired
+        /// alongside `pendingSettingsTab` by `-open settings/<tab>` so the
+        /// redesigned Settings surface (Phase 3D) has real routing data to
+        /// switch onto once it exists; `SettingsWindowView` doesn't read this
+        /// yet.
+        public init?(legacyTab: SettingsTab?) {
+            guard let legacyTab else { return nil }
+            switch legacyTab {
+            case .general, .recording, .calendar, .privacy: self = .audio
+            case .sync: self = .storage
+            }
+        }
     }
 
     /// Preselects a redesigned-Settings section the next time it opens,
@@ -42,7 +57,7 @@ public final class AppRouter {
     public init() {}
 }
 
-/// App root: sidebar navigation + the selected section. Never build stores
+/// App root: push-style navigation over `router.screen`. Never build stores
 /// here — view values re-initialize freely; the graph lives in `AppStores`.
 public struct RootView: View {
     private let stores: AppStores
@@ -79,72 +94,71 @@ public struct RootView: View {
     }
 
     public var body: some View {
-        @Bindable var router = router
-        return NavigationSplitView {
-            Sidebar(selection: $router.section)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 220)
-        } detail: {
-            detail
-        }
-        .axID(.rootView)
-        .overlay(alignment: .bottom) {
-            if let clock = session.clock {
-                RecordingPill(
-                    clock: clock, isPaused: session.isPaused,
-                    levels: WaveformDownsample.bars(from: session.levels, count: 5),
-                    onPauseToggle: { stores.togglePause() },
-                    onStop: { stores.stopRecording() }
-                )
-                .padding(.bottom, 22)
-            }
-        }
-        .overlay {
-            if showSearch {
-                ZStack(alignment: .top) {
-                    Tokens.scrim
-                        .ignoresSafeArea()
-                        .onTapGesture { showSearch = false }
-                    SearchOverlay(isPresented: $showSearch, initialQuery: searchQuery)
-                        .padding(.top, 90)
+        screenContent
+            // `.contain` forces a dedicated AX container for `root-view` —
+            // without it the identifier lands on the child screen's own root
+            // element (e.g. LibraryView's ScrollView), overwriting that
+            // screen's identifier (`library-list`) in the AX tree.
+            .accessibilityElement(children: .contain)
+            .axID(.rootView)
+            .overlay(alignment: .bottom) {
+                if let clock = session.clock {
+                    RecordingPill(
+                        clock: clock, isPaused: session.isPaused,
+                        levels: WaveformDownsample.bars(from: session.levels, count: 5),
+                        onPauseToggle: { stores.togglePause() },
+                        onStop: { stores.stopRecording() }
+                    )
+                    .padding(.bottom, 22)
                 }
             }
-        }
-        .overlay(alignment: .bottom) {
-            // Lift above the recording pill (~64pt tall + 22pt bottom
-            // padding) when one is showing, so the two don't collide — the
-            // system-audio-fallback toast fires right as recording starts.
-            ToastOverlay(toasts: stores.toasts, bottomInset: session.clock != nil ? 96 : 12)
-        }
-        .background {
-            // Global ⌘K without a visible control.
-            Button("") { showSearch.toggle() }
-                .keyboardShortcut("k", modifiers: .command)
-                .opacity(0)
-        }
-        .sheet(isPresented: .constant(!settings.hasOnboarded)) {
-            OnboardingView()
-        }
-        // A model was installed at launch or just now → finish any recordings
-        // parked in `.needsModel`.
-        .task { if models.activeModelID != nil { queue?.retryMeetingsAwaitingModel(in: library) } }
-        .onChange(of: models.activeModelID) { _, active in
-            if active != nil { queue?.retryMeetingsAwaitingModel(in: library) }
-        }
-        // Applies `-open <route>` exactly once (`LaunchRouteApplier` guards
-        // repeat `.task` runs), after the store graph above already exists
-        // and the main window is up. Must not fight scene restoration —
-        // restoration is disabled outright in fixtures/soak
-        // (`LaunchConfiguration.restoresWindowState`), and in normal mode a
-        // route is only ever present when `-open` was actually passed, so
-        // there's nothing here to race against a restored window.
-        .task { applyLaunchRouteIfNeeded() }
-        .environment(stores)
-        .environment(library)
-        .environment(session)
-        .environment(models)
-        .environment(settings)
-        .environment(queue)
-        .environment(router)
+            .overlay {
+                if showSearch {
+                    ZStack(alignment: .top) {
+                        Tokens.scrim
+                            .ignoresSafeArea()
+                            .onTapGesture { showSearch = false }
+                        SearchOverlay(isPresented: $showSearch, initialQuery: searchQuery)
+                            .padding(.top, 90)
+                    }
+                }
+            }
+            .overlay(alignment: .bottom) {
+                // Lift above the recording pill (~64pt tall + 22pt bottom
+                // padding) when one is showing, so the two don't collide — the
+                // system-audio-fallback toast fires right as recording starts.
+                ToastOverlay(toasts: stores.toasts, bottomInset: session.clock != nil ? 96 : 12)
+            }
+            .background {
+                // Global ⌘K without a visible control.
+                Button("") { showSearch.toggle() }
+                    .keyboardShortcut("k", modifiers: .command)
+                    .opacity(0)
+            }
+            .sheet(isPresented: .constant(!settings.hasOnboarded)) {
+                OnboardingView()
+            }
+            // A model was installed at launch or just now → finish any recordings
+            // parked in `.needsModel`.
+            .task { if models.activeModelID != nil { queue?.retryMeetingsAwaitingModel(in: library) } }
+            .onChange(of: models.activeModelID) { _, active in
+                if active != nil { queue?.retryMeetingsAwaitingModel(in: library) }
+            }
+            // Applies `-open <route>` exactly once (`LaunchRouteApplier` guards
+            // repeat `.task` runs), after the store graph above already exists
+            // and the main window is up. Must not fight scene restoration —
+            // restoration is disabled outright in fixtures/soak
+            // (`LaunchConfiguration.restoresWindowState`), and in normal mode a
+            // route is only ever present when `-open` was actually passed, so
+            // there's nothing here to race against a restored window.
+            .task { applyLaunchRouteIfNeeded() }
+            .environment(stores)
+            .environment(library)
+            .environment(session)
+            .environment(models)
+            .environment(settings)
+            .environment(queue)
+            .environment(router)
     }
 
     /// Runs whatever `LaunchRouteAction`s `routeApplier` hands back for
@@ -161,14 +175,15 @@ public struct RootView: View {
         for action in actions {
             switch action {
             case .showLibrary:
-                router.section = .library
+                router.screen = .library
                 library.selectedMeetingID = nil
             case .selectMeeting(let id):
                 guard let uuid = UUID(uuidString: id) else { continue }
-                router.section = .library
+                router.screen = .detail(meetingID: uuid)
                 library.selectedMeetingID = uuid
             case .openSettings(let tab):
                 router.pendingSettingsTab = tab
+                router.pendingSettingsSection = AppRouter.SettingsSection(legacyTab: tab)
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
             case .openSearch(let query):
@@ -178,16 +193,24 @@ public struct RootView: View {
         }
     }
 
+    /// The whole main window's content, driven entirely by `router.screen` —
+    /// push-style navigation with no sidebar. `.detail` falls back to
+    /// `.library` when the id doesn't resolve to a meeting (e.g. it was just
+    /// trashed); `.recording` falls back the same way once the recording
+    /// that put it there has ended.
     @ViewBuilder
-    private var detail: some View {
-        switch router.section {
-        case .library, nil:
-            if let id = library.selectedMeetingID, let record = library.record(for: id) {
+    private var screenContent: some View {
+        switch router.screen {
+        case .library:
+            LibraryView(showSearch: $showSearch)
+        case .detail(let meetingID):
+            if let record = library.record(for: meetingID) {
                 MeetingDetailView(record: record)
                     .toolbar {
                         ToolbarItem(placement: .navigation) {
                             Button("Library", systemImage: "chevron.left") {
                                 library.flushNotes(for: record)
+                                router.screen = .library
                                 library.selectedMeetingID = nil
                             }
                             .axID(.libraryBackButton)
@@ -196,9 +219,43 @@ public struct RootView: View {
             } else {
                 LibraryView(showSearch: $showSearch)
             }
-        case .models:
-            ModelManagerView()
+        case .recording:
+            if session.activeRecord != nil {
+                RecordingHostPlaceholderView()
+            } else {
+                LibraryView(showSearch: $showSearch)
+            }
         }
+    }
+}
+
+/// Full-window placeholder for `router.screen == .recording`.
+/// TODO(phase-3C): replaced by a real `RecordingView`; this exists only to
+/// keep push-style navigation coherent (a just-started recording, and the
+/// Library toolbar's "Recording · MM:SS" pill, both route here) until then.
+/// The docked `RecordingPill` overlay (`RootView.body`) remains the actual
+/// pause/stop control surface app-wide — this view only adds a plain Stop
+/// affordance for when it's on screen.
+private struct RecordingHostPlaceholderView: View {
+    @Environment(AppStores.self) private var stores: AppStores?
+    @Environment(MeetingSessionStore.self) private var session
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Text(session.activeRecord?.meeting.title ?? "Recording")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(Tokens.textPrimary)
+            Text(session.menuBarElapsedLabel.map { "Recording · \($0)" } ?? "Recording…")
+                .font(.system(size: 14))
+                .foregroundStyle(Tokens.textSecondary)
+            Button("Stop") {
+                stores?.stopRecording()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Tokens.recordRed)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Tokens.surface)
     }
 }
 

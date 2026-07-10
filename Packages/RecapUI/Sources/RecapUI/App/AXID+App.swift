@@ -6,7 +6,7 @@ import SwiftUI
 extension AXID {
     // MARK: Root
 
-    /// The `RootView`'s top-level `NavigationSplitView` root.
+    /// The `RootView`'s top-level, push-style-navigated content container.
     public static let rootView = AXID("root-view")
 
     /// "‹ Library" back button shown in the meeting detail toolbar.

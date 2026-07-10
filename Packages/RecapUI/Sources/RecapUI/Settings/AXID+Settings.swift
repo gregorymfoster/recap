@@ -43,17 +43,6 @@ extension AXID {
     public static let settingsCalendarPermissionButton = AXID("settings-privacy-calendar-permission-button")
     public static let settingsMeetingsFolderChangeButton = AXID("settings-privacy-meetings-folder-change-button")
 
-    // MARK: - Models
-
-    /// The Models section root (`ModelManagerView`).
-    public static let settingsModelsList = AXID("settings-models-list")
-    /// A single model row's primary action (Download/Pause/Use), keyed by
-    /// the model's own stable id rather than its display name.
-    public static func settingsModelDownloadButton(_ modelID: String) -> AXID { AXID("settings-models-download-button-\(modelID)") }
-    public static func settingsModelUseButton(_ modelID: String) -> AXID { AXID("settings-models-use-button-\(modelID)") }
-    public static func settingsModelDeleteButton(_ modelID: String) -> AXID { AXID("settings-models-delete-button-\(modelID)") }
-    public static func settingsModelPauseButton(_ modelID: String) -> AXID { AXID("settings-models-pause-button-\(modelID)") }
-
     // MARK: - Redesign (Phase 0 scaffolding)
 
     /// The redesigned Settings surface's root container.

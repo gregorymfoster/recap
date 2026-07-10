@@ -32,16 +32,11 @@ import Testing
         #expect(readyMeetings.contains { $0.folderURL.path != "/dev/null" })
     }
 
-    @Test func defaultHasQueueSummary() {
-        #expect(FixtureScenario.default.library.queueSummary != nil)
-    }
-
     // MARK: empty
 
     @Test func emptyHasNoMeetings() {
         let library = FixtureScenario.empty.library
         #expect(library.meetings.isEmpty)
-        #expect(library.queueSummary == nil)
     }
 
     @Test func emptyHasNoUpcomingEvents() {
@@ -117,8 +112,6 @@ import Testing
             }
         }
         #expect(inFlight.count >= 3)
-        #expect(library.queueSummary != nil)
-        #expect(library.queueSummary?.jobCount ?? 0 > 0)
     }
 
     // MARK: error
@@ -132,7 +125,6 @@ import Testing
         let recoverable = library.meetings.filter { $0.meeting.status == .needsModel }
         #expect(!failed.isEmpty)
         #expect(!recoverable.isEmpty)
-        #expect(library.queueSummary?.pauseReason != nil)
     }
 
     // MARK: default forwarding

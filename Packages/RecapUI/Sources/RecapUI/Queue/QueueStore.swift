@@ -5,8 +5,8 @@ import RecapCore
 import RecapEnhancement
 import RecapTranscription
 
-/// Owns the background queue: feeds it power state, publishes its snapshot
-/// to the sidebar widget, and re-enqueues unfinished work at launch.
+/// Owns the background queue: feeds it power state and re-enqueues unfinished
+/// work at launch.
 @MainActor
 @Observable
 public final class QueueStore {
@@ -91,19 +91,6 @@ public final class QueueStore {
         self.queue = queue
         Task { await queueBox.set(queue) }
 
-        Task {
-            await queue.setObserver { snapshot in
-                Task { @MainActor in
-                    library.queueSummary = snapshot.jobCount == 0
-                        ? nil
-                        : QueueSummary(
-                            jobCount: snapshot.jobCount,
-                            progress: snapshot.runningProgress,
-                            pauseReason: snapshot.pauseReason
-                        )
-                }
-            }
-        }
         monitorTask = Task { [monitor] in
             for await state in monitor.updates() {
                 await queue.powerStateChanged(state)

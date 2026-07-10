@@ -51,10 +51,10 @@ struct RecapApp: App {
     var body: some Scene {
         WindowGroup(id: "main") {
             RootView(stores: stores)
-                .frame(minWidth: 800, minHeight: 500)
+                .frame(minWidth: 880, minHeight: 560)
                 .modifier(DebugWindowOpener(configuration: launch))
         }
-        .defaultSize(width: 1060, height: 660)
+        .defaultSize(width: 880, height: 560)
         .windowResizability(.contentMinSize)
         // Fixtures/soak launches must boot into a deterministic single
         // window — never restore stale multi-window state from a previous

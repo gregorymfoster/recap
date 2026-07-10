@@ -2,14 +2,19 @@ import Foundation
 import RecapCore
 
 /// Accessibility identifiers for the Library feature (meeting list, meeting
-/// detail, transcript pane, search). See `AXID+Library.swift`'s siblings for
-/// the global anchors (`.sidebar`, `.libraryList`, `.searchField`,
-/// `.meetingRow(_:)`) already defined in `Shared/AccessibilityIdentifiers.swift`.
+/// detail, transcript pane, search). See this file's siblings for the global
+/// anchors (`.libraryList`, `.searchField`, `.meetingRow(_:)`) already
+/// defined in `Shared/AccessibilityIdentifiers.swift`.
 extension AXID {
     // MARK: Library toolbar
 
     /// The Library window toolbar's Record button (`LibraryView.recordButton`).
     public static let libraryRecordButton = AXID("library-record-button")
+
+    /// The Library window toolbar's "Recording · MM:SS" pill, shown instead
+    /// of `.libraryRecordButton` while a recording is in progress
+    /// (`LibraryView.recordingIndicatorButton`).
+    public static let libraryRecordingIndicatorButton = AXID("library-recording-indicator-button")
 
     /// The Library toolbar's sort/filter menu (`LibraryView.sortFilterMenu`).
     public static let librarySortFilterMenu = AXID("library-sort-filter-menu")
