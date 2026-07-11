@@ -50,10 +50,19 @@ struct MeetingProcessor: JobExecutor {
             // transcribing, so the meeting is never lost.
             let spoolURL = record.audioURL.deletingPathExtension().appendingPathExtension("caf")
             if FileManager.default.fileExists(atPath: spoolURL.path) {
-                if AudioTranscoder.salvageSpool(caf: spoolURL, m4a: record.audioURL),
-                   record.meeting.duration == 0,
-                   let duration = AudioTranscoder.duration(of: record.audioURL) {
-                    await onDurationRecovered(job.meetingID, duration)
+                if AudioTranscoder.salvageSpool(caf: spoolURL, m4a: record.audioURL) {
+                    await onProcessingIssue(job.meetingID, .recordingSalvageFailed, false)
+                    if record.meeting.duration == 0, let duration = AudioTranscoder.duration(of: record.audioURL) {
+                        await onDurationRecovered(job.meetingID, duration)
+                    }
+                } else if !FileManager.default.fileExists(atPath: record.audioURL.path) {
+                    // Salvage failed, but the raw audio is still safe — the
+                    // CAF spool is never deleted on a failed salvage. Distinct
+                    // from `recordingFileMissing` below (nothing left at all)
+                    // and must never fall through to it.
+                    await onProcessingIssue(job.meetingID, .recordingSalvageFailed, true)
+                    await reporter.finish(.error(message: RecoveryMessages.salvageFailed))
+                    return
                 }
             }
             guard FileManager.default.fileExists(atPath: record.audioURL.path) else {
@@ -92,6 +101,7 @@ struct MeetingProcessor: JobExecutor {
                 try storage.saveTranscript(transcript, in: record)
                 await onProcessingIssue(job.meetingID, .transcriptionFailed, false)
                 await onProcessingIssue(job.meetingID, .recordingFileMissing, false)
+                await onProcessingIssue(job.meetingID, .recordingSalvageFailed, false)
                 if enhancer.isAvailable {
                     await reporter.finish(.enhancing)
                     await chain(ProcessingJob(kind: .enhance, meetingID: job.meetingID))
@@ -100,10 +110,25 @@ struct MeetingProcessor: JobExecutor {
                     await reporter.finish(.ready)
                     await exportToConfiguredDestinations(record)
                 }
+            } catch is CancellationError {
+                // Clean stop (cancel or a queue-level timeout): close the
+                // reporter (no terminal status write) and rethrow so
+                // `ProcessingQueue` treats it as a cancellation, not a
+                // failure — it isn't retried and doesn't invoke `onJobFailed`.
+                await reporter.close()
+                throw CancellationError()
             } catch {
+                // Rethrow instead of writing `.error` here (as this used to):
+                // swallowing the error made every engine failure look like a
+                // success to `ProcessingQueue`, so its retry-once path never
+                // fired. `close()` (not `finish()`) drops any late progress
+                // update without appending a terminal status of its own —
+                // `QueueStore.setOnJobFailed` writes the actual `.error`
+                // status (and `.transcriptionFailed` issue) once the queue
+                // has exhausted its retry.
                 processorLog.error("Transcription failed: \(String(describing: error), privacy: .private)")
-                await onProcessingIssue(job.meetingID, .transcriptionFailed, true)
-                await reporter.finish(.error(message: "Transcription failed"))
+                await reporter.close()
+                throw error
             }
 
         case .enhance:
@@ -194,6 +219,17 @@ private actor ProcessingStatusCoordinator {
         guard !closed else { return }
         closed = true
         append(status)
+        await tail?.value
+    }
+
+    /// Like `finish`, but appends no terminal status of its own — used when
+    /// the caller is about to rethrow an error instead (see the `.transcribe`
+    /// catch blocks above) so a late progress task can't repaint after the
+    /// throw, without this coordinator writing a status the caller isn't
+    /// choosing.
+    func close() async {
+        guard !closed else { return }
+        closed = true
         await tail?.value
     }
 

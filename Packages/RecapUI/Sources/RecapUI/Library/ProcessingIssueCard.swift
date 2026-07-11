@@ -54,6 +54,12 @@ struct ProcessingIssueCard: View {
             ("Notes enhancement was skipped", "The transcript is ready. Re-run enhancement to create the summary.", "Retry enhancement")
         case .mirrorBackupFailed:
             ("Backup needs attention", "The meeting is saved locally. Check the backup folder, then retry delivery.", "Retry sync")
+        case .recordingSalvageFailed:
+            (
+                "Recording needs to be restored",
+                "The raw audio is safe on disk, but converting it failed — usually low disk space. Free up space and retry.",
+                "Retry transcription"
+            )
         }
     }
 }

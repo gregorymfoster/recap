@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import RecapCore
 import RecapTranscription
@@ -39,6 +40,35 @@ private struct FakeEnhancer: NoteEnhancer {
 }
 
 private struct StubError: Error {}
+
+/// Fails its first call, succeeds every call after — used to prove
+/// `ProcessingQueue`'s retry-once path now actually covers engine failures
+/// (previously `MeetingProcessor` swallowed the error and wrote `.error`
+/// itself, so the queue never saw a failure to retry).
+private actor FlakyOnceEngineState {
+    private var callCount = 0
+
+    func nextAttempt() -> Int {
+        callCount += 1
+        return callCount
+    }
+}
+
+private struct FlakyOnceEngine: TranscriptionEngine {
+    let transcript: Transcript
+    let state = FlakyOnceEngineState()
+
+    func transcribe(stream: AsyncStream<AudioChunk>) -> AsyncStream<TranscriptionUpdate> {
+        AsyncStream { $0.finish() }
+    }
+
+    func transcribe(file: URL, progress: @escaping @Sendable (Double) -> Void) async throws -> Transcript {
+        let attempt = await state.nextAttempt()
+        guard attempt > 1 else { throw StubError() }
+        progress(1.0)
+        return transcript
+    }
+}
 
 /// Collects `onStatus` transitions off the main actor, from `@Sendable`
 /// closures that may run on arbitrary executors.
@@ -104,6 +134,34 @@ private actor IssueCollector {
     /// the (fake) engine, so a zero-byte file is enough to stand in for audio.
     private func touchAudioFile(for record: MeetingRecord) throws {
         try Data().write(to: record.audioURL)
+    }
+
+    /// Writes a valid, readable CAF spool — mirrors the recorder's crash
+    /// spool format (see `RecapAudio`'s `AudioTranscoderTests`), so
+    /// `AudioTranscoder.salvageSpool` can successfully transcode it.
+    private func writeValidCAFSpool(at url: URL) throws {
+        let sampleRate = 48_000.0
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: sampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsNonInterleaved: false,
+        ]
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false
+        )!
+        let file = try AVAudioFile(
+            forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false
+        )
+        let frames = AVAudioFrameCount(sampleRate * 0.5)
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+        buffer.frameLength = frames
+        for i in 0..<Int(frames) {
+            buffer.floatChannelData![0][i] = sinf(Float(i) * 2 * .pi * 440 / Float(sampleRate)) * 0.5
+        }
+        try file.write(from: buffer)
     }
 
     private func makeTranscript(text: String = "Let's ship it.") -> Transcript {
@@ -275,7 +333,12 @@ private actor IssueCollector {
 
     // MARK: 5. Engine throws
 
-    @Test func engineThrowsErrorsTranscription() async throws {
+    /// Fix: the processor no longer writes `.error` itself on an engine
+    /// failure — it rethrows, so `ProcessingQueue`'s retry-once path can
+    /// actually fire (previously this catch swallowed the error, so the
+    /// queue never saw a failure to retry). `QueueStore.setOnJobFailed`
+    /// writes the `.error` status once the queue gives up.
+    @Test func engineThrowsRethrowsWithoutWritingErrorStatus() async throws {
         let storage = makeStorage()
         let record = try storage.create(Meeting(title: "Standup", date: .now))
         try touchAudioFile(for: record)
@@ -288,13 +351,122 @@ private actor IssueCollector {
             chainCollector: chainCollector
         )
 
+        await #expect(throws: StubError.self) {
+            try await processor.execute(
+                ProcessingJob(kind: .transcribe, meetingID: record.meeting.id), progress: { _ in }
+            )
+        }
+
+        let statuses = await statusCollector.all
+        #expect(!statuses.contains { if case .error = $0 { true } else { false } })
+        #expect(try storage.loadTranscript(in: record) == nil)
+    }
+
+    // MARK: 5a. Crash-spool salvage
+
+    /// A garbage (unreadable) .caf spool with no m4a: `salvageSpool` fails,
+    /// but per its contract the spool is never deleted on failure — the raw
+    /// audio is still safe. This is a distinct, recoverable issue from
+    /// `recordingFileMissing` and must never fall through to it.
+    @Test func garbageCAFWithNoM4ASetsSalvageFailedIssue() async throws {
+        let storage = makeStorage()
+        let record = try storage.create(Meeting(title: "Standup", date: .now))
+        let spoolURL = record.audioURL.deletingPathExtension().appendingPathExtension("caf")
+        try Data(repeating: 0xAB, count: 256).write(to: spoolURL)
+        // Intentionally no audio.m4a.
+
+        let statusCollector = StatusCollector()
+        let chainCollector = ChainCollector()
+        let issueCollector = IssueCollector()
+        let processor = makeProcessor(
+            storage: storage,
+            engine: FakeEngine(transcript: makeTranscript()),
+            statusCollector: statusCollector,
+            chainCollector: chainCollector,
+            issueCollector: issueCollector
+        )
+
         try await processor.execute(
             ProcessingJob(kind: .transcribe, meetingID: record.meeting.id), progress: { _ in }
         )
 
         let statuses = await statusCollector.all
-        #expect(statuses.last == .error(message: "Transcription failed"))
+        #expect(statuses == [.error(message: "Couldn't restore recording")])
+        let issues = await issueCollector.updates
+        #expect(issues.count == 1)
+        #expect(issues.first?.1 == .recordingSalvageFailed)
+        #expect(issues.first?.2 == true)
+        // The spool is the only surviving copy — it must not be lost.
+        #expect(FileManager.default.fileExists(atPath: spoolURL.path))
         #expect(try storage.loadTranscript(in: record) == nil)
+    }
+
+    /// A valid .caf spool: salvage succeeds, clears any prior
+    /// `.recordingSalvageFailed` issue, and transcription proceeds normally.
+    @Test func validCAFSalvagesSuccessfullyAndClearsIssue() async throws {
+        let storage = makeStorage()
+        let record = try storage.create(Meeting(title: "Standup", date: .now))
+        let spoolURL = record.audioURL.deletingPathExtension().appendingPathExtension("caf")
+        try writeValidCAFSpool(at: spoolURL)
+
+        let transcript = makeTranscript()
+        let statusCollector = StatusCollector()
+        let chainCollector = ChainCollector()
+        let issueCollector = IssueCollector()
+        let processor = makeProcessor(
+            storage: storage,
+            engine: FakeEngine(transcript: transcript),
+            enhancer: FakeEnhancer(isAvailable: false),
+            statusCollector: statusCollector,
+            chainCollector: chainCollector,
+            issueCollector: issueCollector
+        )
+
+        try await processor.execute(
+            ProcessingJob(kind: .transcribe, meetingID: record.meeting.id), progress: { _ in }
+        )
+
+        let statuses = await statusCollector.all
+        #expect(statuses.last == .ready)
+        #expect(try storage.loadTranscript(in: record) == transcript)
+        let issues = await issueCollector.updates
+        #expect(issues.contains { $0.1 == .recordingSalvageFailed && $0.2 == false })
+        // Salvage cleans up the spool once the m4a is safe.
+        #expect(!FileManager.default.fileExists(atPath: spoolURL.path))
+    }
+
+    /// End-to-end: a real `ProcessingQueue` wrapping a `MeetingProcessor`
+    /// whose engine fails once then succeeds. Proves the queue's
+    /// retry-once path now actually covers engine failures — before the
+    /// rethrow fix, `MeetingProcessor` swallowed the error and wrote
+    /// `.error` itself, so the queue never even saw a failure to retry.
+    @Test func processingQueueRetriesEngineFailureAndMeetingCompletes() async throws {
+        let storage = makeStorage()
+        let record = try storage.create(Meeting(title: "Standup", date: .now))
+        try touchAudioFile(for: record)
+        let transcript = makeTranscript()
+        let statusCollector = StatusCollector()
+        let chainCollector = ChainCollector()
+        let processor = makeProcessor(
+            storage: storage,
+            engine: FlakyOnceEngine(transcript: transcript),
+            enhancer: FakeEnhancer(isAvailable: false),
+            statusCollector: statusCollector,
+            chainCollector: chainCollector
+        )
+
+        let queue = ProcessingQueue(executor: processor)
+        await queue.enqueue(ProcessingJob(kind: .transcribe, meetingID: record.meeting.id))
+
+        let deadline = ContinuousClock.now + .seconds(3)
+        while await queue.snapshot.jobCount != 0, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(await queue.snapshot.jobCount == 0)
+        let statuses = await statusCollector.all
+        #expect(statuses.last == .ready)
+        #expect(try storage.loadTranscript(in: record) == transcript)
     }
 
     // MARK: 6. Enhance job happy path

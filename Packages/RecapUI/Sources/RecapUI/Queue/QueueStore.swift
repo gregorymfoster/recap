@@ -96,7 +96,17 @@ public final class QueueStore {
                 }
             }
         )
-        let queue = ProcessingQueue(executor: executorOverride ?? processor)
+        let queue = ProcessingQueue(
+            executor: executorOverride ?? processor,
+            timeoutLimit: { @Sendable job in
+                let audioSeconds = await MainActor.run { () -> TimeInterval? in
+                    guard let duration = library.record(for: job.meetingID)?.meeting.duration, duration > 0
+                    else { return nil }
+                    return duration
+                }
+                return JobTimeoutPolicy.limit(kind: job.kind, audioSeconds: audioSeconds)
+            }
+        )
         self.queue = queue
         Task { await queueBox.set(queue) }
 
@@ -128,7 +138,16 @@ public final class QueueStore {
                         queueStoreLog.error(
                             "transcription job failed after retry: meetingID=\(job.meetingID.uuidString, privacy: .private) error=\(String(describing: error), privacy: .private)"
                         )
-                        library.updateStatus(job.meetingID, to: .error(message: "Transcription failed"))
+                        if error is JobTimedOut {
+                            library.updateStatus(job.meetingID, to: .error(message: "Transcription timed out"))
+                        } else {
+                            library.updateStatus(job.meetingID, to: .error(message: "Transcription failed"))
+                            // Parity with the in-band failure path in
+                            // `MeetingProcessor`, which used to write this
+                            // issue itself before it started rethrowing
+                            // engine errors so the queue's retry can fire.
+                            library.addProcessingIssue(.transcriptionFailed, for: job.meetingID)
+                        }
                     case .enhance:
                         queueStoreLog.error(
                             "enhancement job failed after retry: meetingID=\(job.meetingID.uuidString, privacy: .private) error=\(String(describing: error), privacy: .private)"
@@ -143,7 +162,7 @@ public final class QueueStore {
                 }
             }
         }
-        recoverUnfinishedWork(in: library)
+        recoverUnfinishedWork(in: library, storage: storage)
 
         // A meeting can finish `.ready` with mirror backup already enabled
         // but never get exported — Recap quit between the pipeline
@@ -229,10 +248,11 @@ public final class QueueStore {
     /// `.recovered` is the one exception — it's parked/kept as `.recovered`
     /// until the user explicitly presses Transcribe (`transcribeRecovered`),
     /// rather than silently auto-requeuing. Decision logic lives in the pure
-    /// `LaunchRecovery.action(for:)`.
-    private func recoverUnfinishedWork(in library: LibraryStore) {
+    /// `LaunchRecovery.action(for:hasTranscript:)`.
+    private func recoverUnfinishedWork(in library: LibraryStore, storage: LibraryStorage) {
         for record in library.meetings {
-            switch LaunchRecovery.action(for: record.meeting.status) {
+            let hasTranscript = (try? storage.loadTranscript(in: record)) != nil
+            switch LaunchRecovery.action(for: record.meeting.status, hasTranscript: hasTranscript) {
             case .requeueTranscribe:
                 library.updateStatus(record.meeting.id, to: .queued)
                 enqueueTranscription(for: record.meeting.id)

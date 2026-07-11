@@ -37,6 +37,34 @@ public protocol JobExecutor: Sendable {
     func execute(_ job: ProcessingJob, progress: @escaping @Sendable (Double) -> Void) async throws
 }
 
+/// Thrown (via onJobFailed) when a job exceeded its deadline. Not retried:
+/// a hang is not transient, and retrying would risk a second concurrent
+/// engine run while the cancelled (possibly wedged) attempt winds down.
+public struct JobTimedOut: Error, Equatable, Sendable {
+    public let job: ProcessingJob
+    public let limit: Duration
+
+    public init(job: ProcessingJob, limit: Duration) {
+        self.job = job
+        self.limit = limit
+    }
+}
+
+public enum JobTimeoutPolicy {
+    /// transcribe: max(10 min, 1× audio duration); enhance: 10 min; export: 5 min.
+    public static func limit(kind: ProcessingJob.Kind, audioSeconds: TimeInterval?) -> Duration {
+        switch kind {
+        case .transcribe:
+            let seconds = max(600, audioSeconds ?? 0)
+            return .seconds(seconds)
+        case .enhance:
+            return .seconds(600)
+        case .export:
+            return .seconds(300)
+        }
+    }
+}
+
 /// Environment inputs that gate background processing.
 public struct PowerState: Equatable, Sendable {
     public var onBattery = false
@@ -58,17 +86,29 @@ public actor ProcessingQueue {
     private var running: ProcessingJob?
     private var runningProgress: Double = 0
     private var runningTask: Task<Void, Never>?
+    private var runToken: UUID?
 
     private var manuallyPaused = false
     private var powerState = PowerState()
 
     private let executor: JobExecutor
+    /// Optional per-job deadline. Returning nil means "no timeout" for that
+    /// job. Sendable closure, so nonisolated per SE-0313 — callable directly
+    /// from the unstructured tasks in `runWithTimeout` without hopping actors.
+    private let timeoutLimit: (@Sendable (ProcessingJob) async -> Duration?)?
+    private let timeoutSleep: @Sendable (Duration) async throws -> Void
     private var observer: (@Sendable (QueueSnapshot) -> Void)?
     private var onJobFailed: (@Sendable (ProcessingJob, Error) -> Void)?
     private var lastLoggedPauseReason: String??
 
-    public init(executor: JobExecutor) {
+    public init(
+        executor: JobExecutor,
+        timeoutLimit: (@Sendable (ProcessingJob) async -> Duration?)? = nil,
+        timeoutSleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) {
         self.executor = executor
+        self.timeoutLimit = timeoutLimit
+        self.timeoutSleep = timeoutSleep
         // Seeded to "not paused" so the initial notify() (queue starts
         // unpaused) doesn't log a spurious "resumed".
         self.lastLoggedPauseReason = .some(nil)
@@ -160,26 +200,41 @@ public actor ProcessingQueue {
         let job = pending.removeFirst()
         running = job
         runningProgress = 0
+        let token = UUID()
+        runToken = token
         notify()
         queueLog.info("job started: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private)")
         runningTask = Task(priority: .utility) {
-            await self.runJob(job, isRetry: false)
+            await self.runJob(job, isRetry: false, token: token)
         }
     }
 
-    /// Runs one attempt of `job`. A throw other than cancellation is retried
-    /// once automatically; a second failure is reported via `onJobFailed` and
-    /// the job is dropped so the queue can move on instead of stalling.
-    private func runJob(_ job: ProcessingJob, isRetry: Bool) async {
+    /// Runs one attempt of `job`. A throw other than cancellation or a
+    /// timeout is retried once automatically; a second failure (or any
+    /// timeout) is reported via `onJobFailed` and the job is dropped so the
+    /// queue can move on instead of stalling.
+    private func runJob(_ job: ProcessingJob, isRetry: Bool, token: UUID) async {
         do {
-            try await executor.execute(job) { [weak self] fraction in
-                guard let self else { return }
-                Task { await self.updateProgress(fraction, for: job) }
+            if let limit = await timeoutLimit?(job) {
+                try await runWithTimeout(job, limit: limit, token: token)
+            } else {
+                try await executor.execute(job) { [weak self] fraction in
+                    guard let self else { return }
+                    Task { await self.updateProgress(fraction, for: job, token: token) }
+                }
             }
             queueLog.info("job finished: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private)")
             jobFinished()
         } catch is CancellationError {
             queueLog.info("job canceled: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private)")
+            jobFinished()
+        } catch let timedOut as JobTimedOut {
+            // Not retried: see `JobTimedOut`'s doc comment. The original
+            // attempt may still be running in the background (e.g. hung on
+            // an uncancellable continuation) — we deliberately don't wait
+            // for it so the queue isn't wedged by it.
+            queueLog.error("job timed out: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private) limit=\(String(describing: timedOut.limit), privacy: .public)")
+            onJobFailed?(job, timedOut)
             jobFinished()
         } catch {
             guard !isRetry else {
@@ -189,12 +244,43 @@ public actor ProcessingQueue {
                 return
             }
             queueLog.error("job failed, retrying once: kind=\(job.kind.rawValue, privacy: .public) meetingID=\(job.meetingID.uuidString, privacy: .private) error=\(String(describing: error), privacy: .private)")
-            await runJob(job, isRetry: true)
+            await runJob(job, isRetry: true, token: token)
         }
     }
 
-    private func updateProgress(_ fraction: Double, for job: ProcessingJob) {
-        guard running == job else { return }
+    /// Races `executor.execute` against `timeoutLimit`'s deadline using
+    /// unstructured tasks (not a `TaskGroup`) deliberately: a `TaskGroup`
+    /// implicitly awaits every child task before returning, so a truly
+    /// hung executor (stuck on an uncancellable continuation, never
+    /// observing `Task.cancel()`) would wedge this call — and the whole
+    /// queue — forever. With unstructured tasks, whichever side finishes
+    /// first resumes the continuation and this function returns; the loser
+    /// (cancelled, but possibly still running if it ignores cancellation)
+    /// is simply abandoned.
+    private func runWithTimeout(_ job: ProcessingJob, limit: Duration, token: UUID) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let resume = SingleResume(continuation)
+            let executionTask = Task {
+                do {
+                    try await self.executor.execute(job) { [weak self] fraction in
+                        guard let self else { return }
+                        Task { await self.updateProgress(fraction, for: job, token: token) }
+                    }
+                    await resume.finish(with: .success(()))
+                } catch {
+                    await resume.finish(with: .failure(error))
+                }
+            }
+            Task {
+                try? await self.timeoutSleep(limit)
+                executionTask.cancel()
+                await resume.finish(with: .failure(JobTimedOut(job: job, limit: limit)))
+            }
+        }
+    }
+
+    private func updateProgress(_ fraction: Double, for job: ProcessingJob, token: UUID) {
+        guard running == job, runToken == token else { return }
         runningProgress = fraction
         notify()
     }
@@ -203,6 +289,7 @@ public actor ProcessingQueue {
         running = nil
         runningProgress = 0
         runningTask = nil
+        runToken = nil
         pump()
     }
 
@@ -223,5 +310,23 @@ public actor ProcessingQueue {
         } else {
             queueLog.info("resumed")
         }
+    }
+}
+
+/// Resumes a `CheckedContinuation` at most once — guards the execution-vs-
+/// timeout race in `ProcessingQueue.runWithTimeout` against a double-resume
+/// crash when both sides settle around the same moment.
+private actor SingleResume {
+    private var resumed = false
+    private let continuation: CheckedContinuation<Void, Error>
+
+    init(_ continuation: CheckedContinuation<Void, Error>) {
+        self.continuation = continuation
+    }
+
+    func finish(with result: Result<Void, Error>) {
+        guard !resumed else { return }
+        resumed = true
+        continuation.resume(with: result)
     }
 }

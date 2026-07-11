@@ -92,6 +92,79 @@ private actor FailureLog {
     var count: Int { jobs.count }
 }
 
+/// Records whether each reported failure was a `JobTimedOut`, keyed by job.
+private actor TimeoutFailureLog {
+    private(set) var records: [(job: ProcessingJob, wasTimeout: Bool)] = []
+
+    func record(_ job: ProcessingJob, wasTimeout: Bool) {
+        records.append((job, wasTimeout))
+    }
+
+    var count: Int { records.count }
+}
+
+/// Simulates an engine call that hangs forever on an uncancellable
+/// continuation — never observes `Task.cancel()`, mirroring a genuinely
+/// wedged transcription/enhancement call. Never resumes, never completes.
+private actor HangingExecutor: JobExecutor {
+    private(set) var executedCount = 0
+
+    func execute(_ job: ProcessingJob, progress: @escaping @Sendable (Double) -> Void) async throws {
+        executedCount += 1
+        await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in
+            // Deliberately never resumed.
+        }
+    }
+}
+
+/// First call hangs forever (like `HangingExecutor`) so it can be timed out;
+/// every subsequent call reports 0.5 progress and then waits to be released
+/// — lets a test capture the first (zombie) run's progress closure and fire
+/// it after a second run of the identical job has started.
+private actor ZombieProgressExecutor: JobExecutor {
+    private var progressCallbacks: [@Sendable (Double) -> Void] = []
+    private var callCount = 0
+    private var gates: [CheckedContinuation<Void, Never>] = []
+
+    func execute(_ job: ProcessingJob, progress: @escaping @Sendable (Double) -> Void) async throws {
+        callCount += 1
+        progressCallbacks.append(progress)
+        if callCount == 1 {
+            await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in
+                // Deliberately never resumed — this run gets timed out.
+            }
+        } else {
+            progress(0.5)
+            await withCheckedContinuation { gates.append($0) }
+        }
+    }
+
+    func releaseHeldJob() {
+        guard !gates.isEmpty else { return }
+        gates.removeFirst().resume()
+    }
+
+    func progressCallback(at index: Int) -> (@Sendable (Double) -> Void)? {
+        progressCallbacks.indices.contains(index) ? progressCallbacks[index] : nil
+    }
+}
+
+/// Fires immediately on its first call (so the first, hung run times out
+/// promptly), then never resolves on subsequent calls — so a *second* run of
+/// the same queue isn't also torn down by the same immediate timeout while a
+/// test is still inspecting its in-flight progress.
+private actor OneShotImmediateSleep {
+    private var callCount = 0
+
+    func sleep(_ duration: Duration) async throws {
+        callCount += 1
+        guard callCount == 1 else {
+            await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
+            return
+        }
+    }
+}
+
 private func waitUntil(
     timeout: Duration = .seconds(2), _ condition: @escaping @Sendable () async -> Bool
 ) async -> Bool {
@@ -321,6 +394,109 @@ private func waitUntil(
 
         await executor.releaseHeldJob()
         #expect(await waitUntil { await queue.snapshot.jobCount == 0 })
+    }
+
+    // MARK: Job timeout
+
+    /// A job that hangs forever (never observes cancellation) is still
+    /// reported via `onJobFailed` as `JobTimedOut` — not retried — and the
+    /// queue advances to the next job instead of wedging on the hung
+    /// attempt, which keeps running abandoned in the background.
+    @Test func hungExecutorTimesOutWithoutRetryAndQueueAdvances() async {
+        let executor = HangingExecutor()
+        let queue = ProcessingQueue(
+            executor: executor,
+            timeoutLimit: { _ in .seconds(1) },
+            timeoutSleep: { _ in }  // resolves immediately, no real waiting
+        )
+        let hung = ProcessingJob(kind: .transcribe, meetingID: UUID())
+        let next = ProcessingJob(kind: .enhance, meetingID: UUID())
+
+        let recorder = TimeoutFailureLog()
+        await queue.setOnJobFailed { job, error in
+            Task { await recorder.record(job, wasTimeout: error is JobTimedOut) }
+        }
+
+        await queue.enqueue(hung)
+        await queue.enqueue(next)
+
+        // Both jobs hang forever, so both time out — proving the queue
+        // advanced past the first timeout instead of stalling on it.
+        #expect(await waitUntil { await recorder.count == 2 })
+        let records = await recorder.records
+        #expect(records.map(\.job).contains(hung))
+        #expect(records.map(\.job).contains(next))
+        #expect(records.allSatisfy { $0.wasTimeout })
+        // Exactly one `execute` call per job: a timeout is never retried.
+        #expect(await executor.executedCount == 2)
+        #expect(await queue.snapshot.running == nil)
+        #expect(await queue.snapshot.pending.isEmpty)
+    }
+
+    /// A stale progress closure captured by the timed-out (zombie) run must
+    /// not repaint progress once the identical job is re-enqueued and a new
+    /// run starts — mirrors `lateProgressCallbackFromFinishedJobDoesNotPaintNextJob`
+    /// but for the timeout path specifically, which mints a fresh run token
+    /// on every `pump()` dequeue.
+    @Test func staleProgressFromTimedOutRunDoesNotPaintReenqueuedRun() async {
+        let executor = ZombieProgressExecutor()
+        let sleepController = OneShotImmediateSleep()
+        let queue = ProcessingQueue(
+            executor: executor,
+            timeoutLimit: { _ in .seconds(1) },
+            timeoutSleep: { duration in try await sleepController.sleep(duration) }
+        )
+        let job = ProcessingJob(kind: .transcribe, meetingID: UUID())
+
+        let failures = FailureLog()
+        await queue.setOnJobFailed { job, _ in
+            Task { await failures.record(job) }
+        }
+
+        await queue.enqueue(job)
+        #expect(await waitUntil { await failures.count == 1 })
+        #expect(await queue.snapshot.running == nil)
+
+        let staleProgress = await executor.progressCallback(at: 0)
+        #expect(staleProgress != nil)
+
+        // Re-enqueue the identical job — a fresh run, fresh token.
+        await queue.enqueue(job)
+        #expect(await waitUntil { await queue.snapshot.running == job })
+        #expect(await waitUntil { await queue.snapshot.runningProgress == 0.5 })
+
+        // The first (timed-out) run's progress closure fires late.
+        staleProgress?(0.9)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(await queue.snapshot.running == job)
+        #expect(await queue.snapshot.runningProgress == 0.5)
+
+        await executor.releaseHeldJob()
+        #expect(await waitUntil { await queue.snapshot.jobCount == 0 })
+    }
+}
+
+@Suite struct JobTimeoutPolicyTests {
+    @Test func transcribeFloorsAtTenMinutesForShortAudio() {
+        #expect(JobTimeoutPolicy.limit(kind: .transcribe, audioSeconds: 30) == .seconds(600))
+    }
+
+    @Test func transcribeScalesWithLongerAudio() {
+        #expect(JobTimeoutPolicy.limit(kind: .transcribe, audioSeconds: 3600) == .seconds(3600))
+    }
+
+    @Test func transcribeWithUnknownAudioFloorsAtTenMinutes() {
+        #expect(JobTimeoutPolicy.limit(kind: .transcribe, audioSeconds: nil) == .seconds(600))
+    }
+
+    @Test func enhanceIsAlwaysTenMinutesRegardlessOfAudioLength() {
+        #expect(JobTimeoutPolicy.limit(kind: .enhance, audioSeconds: 3600) == .seconds(600))
+        #expect(JobTimeoutPolicy.limit(kind: .enhance, audioSeconds: nil) == .seconds(600))
+    }
+
+    @Test func exportIsAlwaysFiveMinutesRegardlessOfAudioLength() {
+        #expect(JobTimeoutPolicy.limit(kind: .export, audioSeconds: 3600) == .seconds(300))
+        #expect(JobTimeoutPolicy.limit(kind: .export, audioSeconds: nil) == .seconds(300))
     }
 }
 

@@ -28,4 +28,4 @@ for a subset). GRDB dependency; no simulator/hardware needed, runs in seconds.
   deps belong in their own packages.
 - Adding a new source file here can break sibling packages' incremental builds ("cannot find
   type in scope"). Fix is `swift package --package-path Packages/<failing-pkg> clean`, not a code change.
-- `LibraryChange.meetingDeleted` is defined but not posted anywhere yet (no delete affordance).
+- `LibraryChange.meetingDeleted` is posted by `LibraryStore.moveToTrash`.

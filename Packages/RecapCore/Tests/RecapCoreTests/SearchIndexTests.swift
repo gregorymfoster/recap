@@ -99,4 +99,21 @@ import Testing
         #expect(try index.search("alpha").map(\.meetingID) == [a.meeting.id])
         #expect(try index.indexedMeetingCount() == 2)
     }
+
+    // MARK: Unavailable last resort
+
+    /// The `dbQueue == nil` last-resort instance (only reachable in practice
+    /// if GRDB's in-memory construction itself fails) must never crash — every
+    /// entry point is a safe no-op instead of force-unwrapping.
+    @Test func unavailableIndexIsASafeNoOpEverywhere() throws {
+        let (storage, _) = try makeLibrary()
+        let record = try storage.create(Meeting(title: "Unindexed", date: .now))
+        let index = SearchIndex(unavailable: ())
+
+        try index.reindex(records: storage.loadAll(), storage: storage)
+        try index.update(record, from: storage)
+        try index.remove(meetingID: record.meeting.id)
+        #expect(try index.search("unindexed").isEmpty)
+        #expect(try index.indexedMeetingCount() == 0)
+    }
 }
