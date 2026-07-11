@@ -10,6 +10,9 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     from: 2.0.0
+  Sentry:
+    url: https://github.com/getsentry/sentry-cocoa
+    from: 8.0.0
   RecapCore:
     path: Packages/RecapCore
   RecapAudio:
@@ -34,6 +37,7 @@ targets:
       - package: RecapEnhancement
       - package: RecapUI
       - package: Sparkle
+      - package: Sentry
     info:
       path: Recap/Info.plist
       properties:

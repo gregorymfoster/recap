@@ -32,6 +32,9 @@ struct RecapApp: App {
     private let launch = LaunchConfiguration(arguments: Array(CommandLine.arguments.dropFirst()))
 
     init() {
+        // Crash handler first, before any store construction, so early
+        // launch crashes are captured. No-op in dev builds.
+        CrashReporting.start()
         // MUST run before NSApplicationMain: stops AppKit from treating a
         // leftover bare launch argument (e.g. the route in `-fixtures -open
         // settings/general`) as a document to open, which suppresses the
