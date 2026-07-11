@@ -6,20 +6,32 @@ import SwiftUI
 /// Escape without renaming — same semantics as `MeetingDetailView`'s
 /// title-editing today.
 ///
-/// Doc note: `MeetingDetailView` and the recording view still own their own
-/// inline title-editing implementations; they adopt this component in a
-/// later phase rather than being rewired here.
+/// Used by both `RecordingView` (single-click, dashed underline, one shared
+/// AXID across both states) and `MeetingDetailView` (double-click, no
+/// underline, distinct field/text AXIDs and a 2-line read-only clamp).
 struct EditableTitle: View {
     var text: String
     var font: Font = .system(size: 22, weight: .bold)
     var foreground: Color = Tokens.textPrimary
+    /// Extra letter-spacing; 0 (the default) matches SwiftUI's untouched
+    /// tracking, so callers that don't need it can leave this unset.
+    var kerning: CGFloat = 0
     /// Dashed-underline styling (`Tokens.editableUnderline`) — used where the
     /// title needs a persistent "this is editable" affordance rather than
     /// relying on a hover tooltip.
     var showsDashedUnderline: Bool = false
+    /// Line limit for the read-only `Text` state; the editing `TextField` is
+    /// always single-line regardless of this value.
+    var readOnlyLineLimit: Int = 1
     /// Hint shown as a tooltip on the read-only state; `nil` omits it.
     var hint: String? = "Click to rename"
     var activatesOnDoubleClick: Bool = false
+    /// AXID applied while the `TextField` is showing; `nil` applies none here
+    /// (e.g. when a caller tags the whole component externally instead).
+    var fieldAXID: AXID?
+    /// AXID applied while the read-only `Text` is showing; `nil` applies none
+    /// here (e.g. when a caller tags the whole component externally instead).
+    var textAXID: AXID?
     var onCommit: (String) -> Void
 
     @State private var isEditing = false
@@ -32,6 +44,7 @@ struct EditableTitle: View {
                 TextField("Title", text: $editedText)
                     .textFieldStyle(.plain)
                     .font(font)
+                    .kerning(kerning)
                     .foregroundStyle(foreground)
                     .lineLimit(1)
                     .focused($fieldFocused)
@@ -40,11 +53,13 @@ struct EditableTitle: View {
                     .onChange(of: fieldFocused) { _, focused in
                         if !focused { commit() }
                     }
+                    .axID(fieldAXID)
             } else {
                 Text(text)
                     .font(font)
+                    .kerning(kerning)
                     .foregroundStyle(foreground)
-                    .lineLimit(1)
+                    .lineLimit(readOnlyLineLimit)
                     .truncationMode(.tail)
                     .overlay(alignment: .bottom) {
                         if showsDashedUnderline {
@@ -58,6 +73,7 @@ struct EditableTitle: View {
                     .modifier(OptionalHelp(hint: hint))
                     .contentShape(Rectangle())
                     .onTapGesture(count: activatesOnDoubleClick ? 2 : 1) { begin() }
+                    .axID(textAXID)
             }
         }
     }
