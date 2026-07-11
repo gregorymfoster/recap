@@ -4,7 +4,7 @@ import Foundation
 /// one time-ordered list for display (Phase 0 scaffolding for the timed-notes
 /// redesign).
 public enum TranscriptMerge {
-    public enum Item: Equatable, Identifiable {
+    public enum Item: Equatable, Identifiable, Sendable {
         case utterance(Utterance)
         case note(TimedNote)
 

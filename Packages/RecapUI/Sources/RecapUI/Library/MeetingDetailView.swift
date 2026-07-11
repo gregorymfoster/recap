@@ -17,6 +17,14 @@ struct MeetingDetailView: View {
     @State private var enhancedNotes: String?
     @State private var speakerNames: [String: String] = [:]
     @State private var timedNotes: [TimedNote] = []
+    /// Pre-merged transcript+notes items — `TranscriptMerge.merged` runs
+    /// inside `LibraryStore.loadDetailContent(for:)`, never in this view's body.
+    @State private var transcriptItems: [TranscriptMerge.Item] = []
+    /// True while `loadDetailContent(for:)` is in flight for the current
+    /// meeting — gates `transcriptSection`'s neutral "Loading transcript…"
+    /// state so a `.ready` meeting mid-load never flashes the pretranscript
+    /// state's "Waiting to transcribe" copy.
+    @State private var isLoading = true
     @State private var isEditingTitle = false
     @State private var editedTitle = ""
     @FocusState private var titleFieldFocused: Bool
@@ -56,25 +64,35 @@ struct MeetingDetailView: View {
             .sharedBackgroundVisibility(.hidden)
         }
         .task(id: record.meeting.id) {
-            notes = library.loadNotes(for: record)
-            savedTranscript = library.loadTranscript(for: record)
-            enhancedNotes = library.loadEnhancedNotes(for: record)
-            speakerNames = library.loadSpeakerNames(for: record)
-            timedNotes = library.timedNotes(for: record)
+            // Reset to loading on every meeting switch, not just the first
+            // appearance, so the skeleton reappears rather than showing the
+            // previous meeting's transcript while this one loads.
+            isLoading = true
+            let content = await library.loadDetailContent(for: record)
+            guard !Task.isCancelled else { return }
+            notes = content.notes
+            savedTranscript = content.transcript
+            enhancedNotes = content.enhancedNotes
+            speakerNames = content.speakerNames
+            timedNotes = content.timedNotes
+            transcriptItems = content.transcriptItems
+            isLoading = false
         }
         .task(id: record.meeting.status) {
             // Refresh once the pipeline lands results (status flips to ready)
             // so the pretranscript skeleton swaps for the real transcript in
-            // place without a manual reload.
-            if case .ready = record.meeting.status {
-                if savedTranscript?.utterances.isEmpty != false {
-                    savedTranscript = library.loadTranscript(for: record)
-                }
-                if enhancedNotes == nil {
-                    enhancedNotes = library.loadEnhancedNotes(for: record)
-                }
-                timedNotes = library.timedNotes(for: record)
-            }
+            // place without a manual reload. Notes are deliberately left
+            // untouched here — they may be mid-edit — only the
+            // pipeline-produced fields are refreshed.
+            guard case .ready = record.meeting.status else { return }
+            let content = await library.loadDetailContent(for: record)
+            guard !Task.isCancelled else { return }
+            savedTranscript = content.transcript
+            enhancedNotes = content.enhancedNotes
+            speakerNames = content.speakerNames
+            timedNotes = content.timedNotes
+            transcriptItems = content.transcriptItems
+            isLoading = false
         }
         .onChange(of: notes) {
             library.notesChanged(notes, in: record)
@@ -215,7 +233,7 @@ struct MeetingDetailView: View {
     private var transcriptSection: some View {
         if let savedTranscript, !savedTranscript.utterances.isEmpty {
             TranscriptPane(
-                items: TranscriptMerge.merged(utterances: savedTranscript.utterances, notes: timedNotes),
+                items: transcriptItems,
                 speakerNames: speakerNames,
                 attendees: record.meeting.attendees,
                 onRenameSpeaker: { speakerID, name in
@@ -224,9 +242,30 @@ struct MeetingDetailView: View {
                 }
             )
             .axID(.transcriptPane)
+        } else if isLoading, case .ready = record.meeting.status {
+            // A `.ready` meeting with no transcript in hand yet is still
+            // loading — never the pretranscript state's "Waiting to
+            // transcribe" (that copy is for meetings that haven't been
+            // transcribed at all).
+            loadingTranscriptState
         } else {
             pretranscriptState
         }
+    }
+
+    private var loadingTranscriptState: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Loading transcript…")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Tokens.accentBlue)
+            }
+            skeletonLines
+        }
+        .padding(.top, 4)
+        .axID(.detailSkeleton)
     }
 
     private var pretranscriptState: some View {
