@@ -31,9 +31,7 @@ SPARKLE_BIN="${SPARKLE_BIN:-}"
 BUILD_DIR="build"
 DMG="dist/Recap-$VERSION.dmg"
 # Sentry org/project for dSYM upload (see CrashReporting.swift for the DSN).
-# Project ID in the DSN is 4511718270697472; this slug is a best guess from
-# the DSN host/org — VERIFY it against Settings > Projects in the Sentry UI
-# (https://gregorymfoster.sentry.io) before relying on this step.
+# Slug verified against the org's project list on 2026-07-11.
 SENTRY_ORG="gregorymfoster"
 SENTRY_PROJECT="${SENTRY_PROJECT:-recap}"
 
