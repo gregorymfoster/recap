@@ -23,14 +23,29 @@ public enum LaunchRecovery {
         case none
     }
 
-    public static func action(for status: MeetingStatus) -> Action {
+    /// - Parameter hasTranscript: Only consulted for `.queued` — a meeting
+    ///   queued with a transcript already on disk crashed between
+    ///   transcription finishing and enhancement starting, so it resumes at
+    ///   `.requeueEnhance` instead of re-transcribing from scratch.
+    ///   `.transcribing` always restarts transcription regardless (a
+    ///   partial/no transcript either way). Defaults to `false` so existing
+    ///   single-argument callers keep their original behavior.
+    public static func action(for status: MeetingStatus, hasTranscript: Bool = false) -> Action {
         switch status {
-        case .queued, .transcribing:
+        case .queued:
+            return hasTranscript ? .requeueEnhance : .requeueTranscribe
+        case .transcribing:
             return .requeueTranscribe
         case .recording, .recovered:
             return .markRecovered
         case .enhancing:
             return .requeueEnhance
+        case .error(RecoveryMessages.salvageFailed):
+            // Auto re-salvage at next launch — the raw audio is safe (see
+            // `ProcessingIssue.recordingSalvageFailed`), so this is a
+            // transient environment issue (e.g. disk was full), not a
+            // permanent dead end.
+            return .requeueTranscribe
         case .error("No speech model installed"):
             return .migrateToNeedsModel
         case .needsModel, .ready, .error:

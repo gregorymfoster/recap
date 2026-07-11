@@ -39,6 +39,11 @@ public enum ProcessingIssue: String, Codable, CaseIterable, Equatable, Identifia
     case transcriptionFailed
     case enhancementFailed
     case mirrorBackupFailed
+    /// Crash-spool salvage (rebuilding the m4a from a leftover .caf) failed.
+    /// The raw audio is still safe on disk (salvage never deletes the spool
+    /// on failure) — distinct from `recordingFileMissing`, where there is no
+    /// audio left to recover at all.
+    case recordingSalvageFailed
 
     public var id: String { rawValue }
 
@@ -48,8 +53,16 @@ public enum ProcessingIssue: String, Codable, CaseIterable, Equatable, Identifia
         case .transcriptionFailed: "REC-TRANSCRIBE-001"
         case .enhancementFailed: "REC-ENHANCE-001"
         case .mirrorBackupFailed: "REC-BACKUP-001"
+        case .recordingSalvageFailed: "REC-AUDIO-002"
         }
     }
+}
+
+/// Shared, stable copy for status messages that more than one type needs to
+/// match on exactly (`JobExecutor` writes it, `LaunchRecovery` pattern-matches
+/// it) — a single source of truth keeps them from drifting apart.
+public enum RecoveryMessages {
+    public static let salvageFailed = "Couldn't restore recording"
 }
 
 public struct Meeting: Codable, Equatable, Identifiable, Sendable {

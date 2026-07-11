@@ -23,20 +23,34 @@ public struct SearchHit: Equatable, Sendable, Identifiable {
 /// it entirely from the given records, so external edits (or a deleted
 /// database) heal on the next launch.
 public final class SearchIndex: Sendable {
-    private let dbQueue: DatabaseQueue
+    /// nil only for the last-resort `unavailable` instance — every entry
+    /// point below no-ops instead of force-unwrapping when this is nil, so a
+    /// GRDB construction failure (however unlikely) degrades search to
+    /// "nothing indexed" instead of crashing the app at launch.
+    private let dbQueue: DatabaseQueue?
 
     public init(databaseURL: URL) throws {
         try FileManager.default.createDirectory(
             at: databaseURL.deletingLastPathComponent(), withIntermediateDirectories: true
         )
-        dbQueue = try DatabaseQueue(path: databaseURL.path)
+        let dbQueue = try DatabaseQueue(path: databaseURL.path)
+        self.dbQueue = dbQueue
         try migrator.migrate(dbQueue)
     }
 
     /// In-memory index, for tests and previews.
     public init() throws {
-        dbQueue = try DatabaseQueue()
+        let dbQueue = try DatabaseQueue()
+        self.dbQueue = dbQueue
         try migrator.migrate(dbQueue)
+    }
+
+    /// The unavailable last resort: every indexing/search entry point no-ops
+    /// against this instead of crashing. Not `private` — kept internal
+    /// (rather than public) so it stays out of the module's public API while
+    /// still being directly constructible from `@testable import` tests.
+    init(unavailable: Void) {
+        dbQueue = nil
     }
 
     public static var defaultDatabaseURL: URL {
@@ -73,8 +87,8 @@ public final class SearchIndex: Sendable {
         if let index = try? SearchIndex() {
             return index
         }
-        searchIndexLog.fault("in-memory search index construction failed")
-        return try! SearchIndex()
+        searchIndexLog.fault("in-memory search index construction failed; falling back to an unavailable index")
+        return SearchIndex(unavailable: ())
     }
 
     /// Pure, testable core: dev builds get their own `Recap Dev/index.db` so a
@@ -115,6 +129,7 @@ public final class SearchIndex: Sendable {
     /// every launch paid for `loadAll()` twice: once for `LibraryStore`,
     /// once again inside this method).
     public func reindex(records: [MeetingRecord], storage: LibraryStorage) throws {
+        guard let dbQueue else { return }
         let entries = records.map { record in
             IndexEntry(
                 record: record,
@@ -134,6 +149,7 @@ public final class SearchIndex: Sendable {
 
     /// Refreshes a single meeting (called on save).
     public func update(_ record: MeetingRecord, from storage: LibraryStorage) throws {
+        guard let dbQueue else { return }
         let entry = IndexEntry(
             record: record,
             notes: (try? storage.loadNotes(in: record)) ?? "",
@@ -152,6 +168,7 @@ public final class SearchIndex: Sendable {
     /// used when a meeting is trashed, so it stops appearing in search
     /// immediately instead of waiting for the next full `reindex(from:)`.
     public func remove(meetingID: UUID) throws {
+        guard let dbQueue else { return }
         try dbQueue.write { db in
             let id = meetingID.uuidString
             try db.execute(sql: "DELETE FROM meeting WHERE id = ?", arguments: [id])
@@ -188,7 +205,7 @@ public final class SearchIndex: Sendable {
 
     public func search(_ query: String) throws -> [SearchHit] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
+        guard !trimmed.isEmpty, let dbQueue else { return [] }
         return try dbQueue.read { db in
             let rows = try Row.fetchAll(
                 db,
@@ -210,7 +227,8 @@ public final class SearchIndex: Sendable {
     }
 
     public func indexedMeetingCount() throws -> Int {
-        try dbQueue.read { db in
+        guard let dbQueue else { return 0 }
+        return try dbQueue.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM meeting") ?? 0
         }
     }

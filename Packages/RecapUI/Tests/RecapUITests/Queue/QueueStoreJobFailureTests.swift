@@ -19,6 +19,16 @@ import Testing
         }
     }
 
+    /// Throws `JobTimedOut` directly — `ProcessingQueue.runJob` catches it by
+    /// type regardless of whether it came from the actual timeout race or
+    /// (as here) straight from the executor, so this exercises
+    /// `QueueStore.setOnJobFailed`'s timeout-specific branch end to end.
+    private struct AlwaysTimingOutExecutor: JobExecutor {
+        func execute(_ job: ProcessingJob, progress: @escaping @Sendable (Double) -> Void) async throws {
+            throw JobTimedOut(job: job, limit: .seconds(600))
+        }
+    }
+
     private func makeStorage() -> LibraryStorage {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("QueueStoreJobFailureTests-\(UUID().uuidString)")
@@ -62,10 +72,43 @@ import Testing
         }
 
         #expect(library.record(for: record.meeting.id)?.meeting.status == .error(message: "Transcription failed"))
+        // Parity with the in-band failure path `MeetingProcessor` used to
+        // take before it started rethrowing engine errors (so the queue's
+        // retry can fire): the recoverable issue is still persisted here.
+        #expect(library.record(for: record.meeting.id)?.meeting.processingIssues == [.transcriptionFailed])
         // A permanently failed meeting must not be requeued at the next
         // launch — `LaunchRecovery.action(for:)` treats a generic `.error`
         // as terminal.
         #expect(LaunchRecovery.action(for: .error(message: "Transcription failed")) == .none)
+    }
+
+    /// A job timeout (`JobTimedOut`) gets its own status message, distinct
+    /// from a plain engine failure, and is never retried — a hang isn't
+    /// transient.
+    @Test func transcribeJobTimeoutMarksMeetingWithTimeoutMessage() async throws {
+        let storage = makeStorage()
+        let changeBus = LibraryChangeBus()
+        let library = LibraryStore(storage: storage, index: try! SearchIndex(), changeBus: changeBus)
+        let settings = makeSettings()
+
+        let record = try storage.create(Meeting(title: "Wedged transcription", date: .now, status: .queued))
+        library.reload()
+
+        let queue = QueueStore(
+            library: library, storage: storage, models: WhisperModelManager(),
+            changeBus: changeBus, settings: settings,
+            backup: BackupStatusStore(settings: settings, library: library, storage: storage),
+            executorOverride: AlwaysTimingOutExecutor()
+        )
+        queue.enqueueTranscription(for: record.meeting.id)
+
+        await waitUntil {
+            library.record(for: record.meeting.id)?.meeting.status == .error(message: "Transcription timed out")
+        }
+
+        #expect(
+            library.record(for: record.meeting.id)?.meeting.status == .error(message: "Transcription timed out")
+        )
     }
 
     @Test func enhanceJobFailureKeepsMeetingReadyWithIssue() async throws {
@@ -74,7 +117,14 @@ import Testing
         let library = LibraryStore(storage: storage, index: try! SearchIndex(), changeBus: changeBus)
         let settings = makeSettings()
 
-        let record = try storage.create(Meeting(title: "Flaky enhancement", date: .now, status: .queued))
+        // `.ready` (not `.queued`) so `QueueStore.recoverUnfinishedWork`
+        // treats it as a no-op at construction — a `.queued` meeting would
+        // race an automatic transcribe attempt (via the same
+        // `AlwaysFailingExecutor`) against this test's explicit
+        // `retryEnhancement` call, which — now that a failed transcribe job
+        // also persists `.transcriptionFailed` — would pollute
+        // `processingIssues` with an issue this test isn't exercising.
+        let record = try storage.create(Meeting(title: "Flaky enhancement", date: .now, status: .ready))
         library.reload()
 
         let queue = QueueStore(

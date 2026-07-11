@@ -192,7 +192,7 @@ struct MeetingDetailView: View {
 
     private func retry(_ issue: ProcessingIssue) {
         switch issue {
-        case .recordingFileMissing, .transcriptionFailed:
+        case .recordingFileMissing, .transcriptionFailed, .recordingSalvageFailed:
             queue?.retranscribe(record, in: library)
         case .enhancementFailed:
             queue?.retryEnhancement(record, in: library)

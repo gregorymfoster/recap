@@ -82,4 +82,58 @@ import Testing
         #expect(library.record(for: parked.meeting.id)?.meeting.status == .recovered)
         #expect(enqueuedIDs.isEmpty)
     }
+
+    /// A `.queued` meeting that crashed between transcription finishing and
+    /// enhancement starting already has a transcript on disk — it should
+    /// resume at `.requeueEnhance`, not re-transcribe from scratch. This
+    /// exercises `QueueStore.recoverUnfinishedWork`'s `hasTranscript` wiring
+    /// end to end (not just the pure `LaunchRecovery.action(for:hasTranscript:)`
+    /// decision, already covered exhaustively in `RecapCoreTests`).
+    @Test func queuedWithTranscriptOnDiskRequeuesEnhanceOnly() async throws {
+        let storage = makeStorage()
+        let changeBus = LibraryChangeBus()
+        let library = LibraryStore(storage: storage, index: try! SearchIndex(), changeBus: changeBus)
+        let settings = makeSettings()
+
+        let record = try storage.create(Meeting(title: "Crashed after transcript", date: .now, status: .queued))
+        try storage.saveTranscript(
+            Transcript(
+                utterances: [Utterance(start: 0, end: 1, text: "hi")],
+                engine: "whisperkit", model: "tiny", language: "en"
+            ),
+            in: record
+        )
+        library.reload()
+
+        let recorder = RecordedJobKinds()
+        _ = QueueStore(
+            library: library, storage: storage, models: WhisperModelManager(),
+            changeBus: changeBus, settings: settings,
+            backup: BackupStatusStore(settings: settings, library: library, storage: storage),
+            executorOverride: RecordingExecutor(recorder: recorder)
+        )
+
+        try await Task.sleep(for: .milliseconds(300))
+        let kinds = await recorder.kinds
+        #expect(kinds == [.enhance])
+    }
+}
+
+/// Records the `ProcessingJob.Kind` of every job handed to it, without
+/// actually doing any work — lets a test assert *which* job kind
+/// `QueueStore.recoverUnfinishedWork` enqueued.
+private actor RecordedJobKinds {
+    private(set) var kinds: [ProcessingJob.Kind] = []
+
+    func record(_ kind: ProcessingJob.Kind) {
+        kinds.append(kind)
+    }
+}
+
+private struct RecordingExecutor: JobExecutor {
+    let recorder: RecordedJobKinds
+
+    func execute(_ job: ProcessingJob, progress: @escaping @Sendable (Double) -> Void) async throws {
+        await recorder.record(job.kind)
+    }
 }

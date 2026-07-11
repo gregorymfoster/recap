@@ -13,6 +13,72 @@ import Testing
         #expect(LaunchRecovery.action(for: .transcribing(progress: 0.4)) == .requeueTranscribe)
     }
 
+    // MARK: hasTranscript matrix — only `.queued` consults it
+
+    @Test func queuedWithTranscriptRequeuesEnhance() {
+        #expect(LaunchRecovery.action(for: .queued, hasTranscript: true) == .requeueEnhance)
+    }
+
+    @Test func queuedWithoutTranscriptRequeuesTranscribe() {
+        #expect(LaunchRecovery.action(for: .queued, hasTranscript: false) == .requeueTranscribe)
+    }
+
+    @Test func transcribingRequeuesTranscribeRegardlessOfTranscript() {
+        #expect(LaunchRecovery.action(for: .transcribing(progress: 0.4), hasTranscript: true) == .requeueTranscribe)
+        #expect(LaunchRecovery.action(for: .transcribing(progress: 0.4), hasTranscript: false) == .requeueTranscribe)
+    }
+
+    @Test func recordingMarksRecoveredRegardlessOfTranscript() {
+        #expect(LaunchRecovery.action(for: .recording, hasTranscript: true) == .markRecovered)
+        #expect(LaunchRecovery.action(for: .recording, hasTranscript: false) == .markRecovered)
+    }
+
+    @Test func recoveredStaysRecoveredRegardlessOfTranscript() {
+        #expect(LaunchRecovery.action(for: .recovered, hasTranscript: true) == .markRecovered)
+        #expect(LaunchRecovery.action(for: .recovered, hasTranscript: false) == .markRecovered)
+    }
+
+    @Test func enhancingRequeuesEnhanceRegardlessOfTranscript() {
+        #expect(LaunchRecovery.action(for: .enhancing, hasTranscript: true) == .requeueEnhance)
+        #expect(LaunchRecovery.action(for: .enhancing, hasTranscript: false) == .requeueEnhance)
+    }
+
+    @Test func legacyNoSpeechModelErrorMigratesRegardlessOfTranscript() {
+        #expect(
+            LaunchRecovery.action(for: .error(message: "No speech model installed"), hasTranscript: true)
+                == .migrateToNeedsModel
+        )
+        #expect(
+            LaunchRecovery.action(for: .error(message: "No speech model installed"), hasTranscript: false)
+                == .migrateToNeedsModel
+        )
+    }
+
+    @Test func genericErrorIsANoOpRegardlessOfTranscript() {
+        #expect(LaunchRecovery.action(for: .error(message: "Transcription failed"), hasTranscript: true) == .none)
+        #expect(LaunchRecovery.action(for: .error(message: "Transcription failed"), hasTranscript: false) == .none)
+    }
+
+    @Test func needsModelIsANoOpRegardlessOfTranscript() {
+        #expect(LaunchRecovery.action(for: .needsModel, hasTranscript: true) == .none)
+        #expect(LaunchRecovery.action(for: .needsModel, hasTranscript: false) == .none)
+    }
+
+    @Test func readyIsANoOpRegardlessOfTranscript() {
+        #expect(LaunchRecovery.action(for: .ready, hasTranscript: true) == .none)
+        #expect(LaunchRecovery.action(for: .ready, hasTranscript: false) == .none)
+    }
+
+    // MARK: Salvage-failed message
+
+    @Test func salvageFailedMessageRequeuesTranscribe() {
+        #expect(LaunchRecovery.action(for: .error(message: RecoveryMessages.salvageFailed)) == .requeueTranscribe)
+    }
+
+    @Test func arbitraryOtherErrorMessageIsANoOp() {
+        #expect(LaunchRecovery.action(for: .error(message: "Some other failure")) == .none)
+    }
+
     /// A meeting still `.recording` at launch means Recap crashed mid-recording.
     /// The salvaged audio is parked in `.recovered`, not silently requeued for
     /// transcription — the user explicitly presses Transcribe later.
