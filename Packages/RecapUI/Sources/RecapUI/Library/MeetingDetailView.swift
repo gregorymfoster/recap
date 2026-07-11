@@ -25,9 +25,6 @@ struct MeetingDetailView: View {
     /// state so a `.ready` meeting mid-load never flashes the pretranscript
     /// state's "Waiting to transcribe" copy.
     @State private var isLoading = true
-    @State private var isEditingTitle = false
-    @State private var editedTitle = ""
-    @FocusState private var titleFieldFocused: Bool
 
     /// Column width for the whole page — title, summary disclosure, and
     /// transcript all share this single centered column (design mock 10b/11d).
@@ -145,57 +142,22 @@ struct MeetingDetailView: View {
 
     /// Click-to-edit title (Granola-like): a double-click on the read-only
     /// title reveals a real `TextField` seeded with the current title, styled
-    /// identically so the swap doesn't jump. Commits on Return/focus loss via
-    /// `commitTitleEdit()`; Escape cancels without renaming. Reuses
-    /// `RenameSheetModifier`'s trim/empty semantics and `library.rename`'s
-    /// existing persistence (disk + fixture branches, search index, change bus).
-    @ViewBuilder
+    /// identically so the swap doesn't jump. Commits on Return/focus loss;
+    /// Escape cancels without renaming. Shared `EditableTitle` control (see
+    /// `Shared/EditableTitle.swift`) drives the begin/commit/cancel/focus
+    /// logic; `library.rename`'s existing persistence (disk + fixture
+    /// branches, search index, change bus) handles the commit.
     private var titleText: some View {
-        if isEditingTitle {
-            TextField("Title", text: $editedTitle)
-                .textFieldStyle(.plain)
-                .font(.system(size: 22, weight: .bold))
-                .kerning(-0.3)
-                .foregroundStyle(Tokens.textPrimary)
-                .lineLimit(1)
-                .focused($titleFieldFocused)
-                .onSubmit { commitTitleEdit() }
-                .onExitCommand { cancelTitleEdit() }
-                .onChange(of: titleFieldFocused) { _, focused in
-                    if !focused { commitTitleEdit() }
-                }
-                .axID(.detailTitleField)
-        } else {
-            Text(record.meeting.title)
-                .font(.system(size: 22, weight: .bold))
-                .kerning(-0.3)
-                .foregroundStyle(Tokens.textPrimary)
-                .lineLimit(2)
-                .truncationMode(.tail)
-                .help("Double-click to rename")
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) { beginTitleEdit() }
-                .axID(.detailTitleText)
-        }
-    }
-
-    private func beginTitleEdit() {
-        editedTitle = record.meeting.title
-        isEditingTitle = true
-        titleFieldFocused = true
-    }
-
-    private func commitTitleEdit() {
-        guard isEditingTitle else { return }
-        isEditingTitle = false
-        let trimmed = editedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty, trimmed != record.meeting.title {
-            library.rename(record, to: trimmed)
-        }
-    }
-
-    private func cancelTitleEdit() {
-        isEditingTitle = false
+        EditableTitle(
+            text: record.meeting.title,
+            kerning: -0.3,
+            readOnlyLineLimit: 2,
+            hint: "Double-click to rename",
+            activatesOnDoubleClick: true,
+            fieldAXID: .detailTitleField,
+            textAXID: .detailTitleText,
+            onCommit: { newTitle in library.rename(record, to: newTitle) }
+        )
     }
 
     // MARK: Processing issues
