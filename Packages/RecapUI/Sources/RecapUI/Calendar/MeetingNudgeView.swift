@@ -44,7 +44,7 @@ public struct MeetingNudgeView: View {
             header
             Text(MeetingNudgeCopy.body(for: nudge))
                 .font(.system(size: 12))
-                .foregroundStyle(Tokens.textSecondary)
+                .foregroundStyle(Tokens.onDarkTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             actionRow
         }
@@ -76,7 +76,7 @@ public struct MeetingNudgeView: View {
             Spacer(minLength: 8)
             Text("now")
                 .font(.system(size: 11))
-                .foregroundStyle(Tokens.textTertiary)
+                .foregroundStyle(.white.opacity(0.4))
         }
     }
 
@@ -147,10 +147,10 @@ public struct MeetingNudgeView: View {
         } label: {
             Text("Not now")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Tokens.textSecondary)
+                .foregroundStyle(Tokens.onDarkTextSecondary)
                 .padding(.horizontal, 12)
                 .frame(height: 26)
-                .background(Tokens.chipBackground, in: Capsule())
+                .background(Tokens.onDarkChipFill, in: Capsule())
         }
         .buttonStyle(.plain)
         .axID(.nudgeDismissButton)

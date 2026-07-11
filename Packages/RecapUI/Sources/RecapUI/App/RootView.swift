@@ -68,6 +68,7 @@ public struct RootView: View {
     /// from launch-time `.task` context (no key window / responder chain
     /// yet), so `-open settings[/<tab>]` must use the real action.
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var library: LibraryStore { stores.library }
     private var session: MeetingSessionStore { stores.session }
@@ -89,7 +90,8 @@ public struct RootView: View {
     }
 
     public var body: some View {
-        screenContent
+        Group { screenContent }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: router.screen)
             // `.contain` forces a dedicated AX container for `root-view` —
             // without it the identifier lands on the child screen's own root
             // element (e.g. LibraryView's ScrollView), overwriting that
@@ -97,15 +99,18 @@ public struct RootView: View {
             .accessibilityElement(children: .contain)
             .axID(.rootView)
             .overlay {
-                if showSearch {
-                    ZStack(alignment: .top) {
+                ZStack(alignment: .top) {
+                    if showSearch {
                         Tokens.scrim
                             .ignoresSafeArea()
                             .onTapGesture { showSearch = false }
+                            .transition(.opacity)
                         SearchOverlay(isPresented: $showSearch, initialQuery: searchQuery)
                             .padding(.top, 90)
+                            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
                     }
                 }
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: showSearch)
             }
             .overlay(alignment: .bottom) {
                 // Lift above the recording pill (~64pt tall + 22pt bottom
@@ -213,6 +218,7 @@ public struct RootView: View {
                                 router.screen = .library
                                 library.selectedMeetingID = nil
                             }
+                            .help("Back to Library")
                             .axID(.libraryBackButton)
                         }
                         .sharedBackgroundVisibility(.hidden)

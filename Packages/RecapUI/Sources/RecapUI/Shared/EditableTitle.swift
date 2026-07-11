@@ -13,9 +13,9 @@ struct EditableTitle: View {
     var text: String
     var font: Font = .system(size: 22, weight: .bold)
     var foreground: Color = Tokens.textPrimary
-    /// Dashed-underline styling (1px dashed white .2) — used where the title
-    /// needs a persistent "this is editable" affordance rather than relying
-    /// on a hover tooltip.
+    /// Dashed-underline styling (`Tokens.editableUnderline`) — used where the
+    /// title needs a persistent "this is editable" affordance rather than
+    /// relying on a hover tooltip.
     var showsDashedUnderline: Bool = false
     /// Hint shown as a tooltip on the read-only state; `nil` omits it.
     var hint: String? = "Click to rename"
@@ -50,7 +50,7 @@ struct EditableTitle: View {
                         if showsDashedUnderline {
                             Rectangle()
                                 .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                                .foregroundStyle(Color.white.opacity(0.2))
+                                .foregroundStyle(Tokens.editableUnderline)
                                 .frame(height: 1)
                                 .offset(y: 2)
                         }

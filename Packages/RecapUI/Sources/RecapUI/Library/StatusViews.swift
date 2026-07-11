@@ -27,9 +27,13 @@ struct MeetingStatusView: View {
             // stays: white text on the solid red "Recording" chip in both modes
             chip("Recording", foreground: .white, background: Tokens.recordRed)
         case .queued, .recovered:
-            Text("Waiting to transcribe")
-                .font(Tokens.caption)
-                .foregroundStyle(Tokens.textSecondary)
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Waiting to transcribe")
+                    .font(Tokens.caption)
+                    .foregroundStyle(Tokens.textSecondary)
+            }
         case .transcribing(let progress):
             HStack(spacing: 8) {
                 Text("Transcribing · \(Int((progress * 100).rounded()))%")
@@ -99,9 +103,13 @@ struct MeetingStatusView: View {
         case .done, nil:
             // Setup finished (or unknown, e.g. previews) — this meeting is
             // just waiting its turn in the queue, same as `.queued`.
-            Text("Waiting to transcribe")
-                .font(Tokens.caption)
-                .foregroundStyle(Tokens.textSecondary)
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Waiting to transcribe")
+                    .font(Tokens.caption)
+                    .foregroundStyle(Tokens.textSecondary)
+            }
         }
     }
 

@@ -310,10 +310,7 @@ public struct MenuBarContent: View {
                     .foregroundStyle(Tokens.textSecondary)
             }
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .contentShape(Rectangle())
+        .buttonStyle(MenuRowButtonStyle())
         .axID(.menuBarRecentRow(record.meeting.id.uuidString))
     }
 
@@ -333,10 +330,7 @@ public struct MenuBarContent: View {
                 }
             }
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .contentShape(Rectangle())
+        .buttonStyle(MenuRowButtonStyle())
     }
 
     // MARK: Actions
@@ -356,6 +350,29 @@ public struct MenuBarContent: View {
 
     private func refreshUpNext() {
         upNext = calendarQuery.upNext()
+    }
+}
+
+/// Hover/press styling for `menuRow`/`recentRow` — a `.window`-style
+/// MenuBarExtra popover doesn't get any hover affordance for free the way a
+/// `.menu`-style one does, so this adds one explicitly (side benefit: moving
+/// the row's padding/`contentShape` inside the style makes the full row
+/// clickable, not just the label's intrinsic size).
+private struct MenuRowButtonStyle: ButtonStyle {
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .background(
+                hovering ? Tokens.chipBackground : .clear,
+                in: RoundedRectangle(cornerRadius: Tokens.radiusRow)
+            )
+            .opacity(configuration.isPressed ? 0.7 : 1)
+            .onHover { hovering = $0 }
     }
 }
 

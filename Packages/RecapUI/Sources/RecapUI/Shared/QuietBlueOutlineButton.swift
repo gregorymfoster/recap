@@ -19,11 +19,8 @@ public struct QuietBlueOutlineButtonStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.6 : 1)
     }
 
-    // Fixed rgba(109,178,255,.4) per the design handoff — not a dynamic
-    // token because the blue reads correctly against both a light and dark
-    // capsule/row background as-is.
-    static let strokeColor = Color(red: 109 / 255, green: 178 / 255, blue: 255 / 255).opacity(0.4)
-    static let textColor = Color(red: 109 / 255, green: 178 / 255, blue: 255 / 255)  // #6db2ff
+    static let strokeColor = Tokens.accentBlueText.opacity(0.4)
+    static let textColor = Tokens.accentBlueText
 }
 
 extension ButtonStyle where Self == QuietBlueOutlineButtonStyle {
