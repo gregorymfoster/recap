@@ -2,7 +2,10 @@ import AppKit
 import AudioToolbox
 import AVFoundation
 import CoreAudio
+import os
 import RecapCore
+
+private let micSourceLog = Logger(subsystem: "com.gregfoster.recap", category: "MicSource")
 
 /// Shared buffer→[Float] conversion used by both capture sources.
 /// Runs on capture queues; touches only objects owned by its caller.
@@ -223,6 +226,7 @@ public final class MicSource {
         } catch {
             // No usable input right now (e.g. device vanished with no
             // fallback). The next device change retries.
+            micSourceLog.error("mic rebuild failed: \(error, privacy: .public)")
         }
     }
 

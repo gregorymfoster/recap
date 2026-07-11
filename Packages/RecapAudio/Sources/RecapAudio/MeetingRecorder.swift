@@ -63,6 +63,13 @@ public enum RecorderEvent: Equatable, Sendable {
     /// the UI once those attempts didn't bring samples back. The recording
     /// is NOT stopped — system audio (if active) keeps being captured.
     case micStalled
+    /// Free disk space on the recording's volume dropped below
+    /// `MeetingRecorder.lowSpaceStopBytes` mid-recording. Fires at most once
+    /// per recording. Unlike `.systemAudioStalled`/`.micStalled`, this
+    /// mirrors `.writeFailed`'s auto-stop semantics — the UI should stop the
+    /// session so what was captured salvages cleanly, rather than riding the
+    /// write path into failure once the disk actually fills.
+    case diskSpaceLow
 }
 
 /// Records a meeting: microphone + (when permitted) system audio, mixed to
@@ -101,11 +108,37 @@ public final class MeetingRecorder {
     /// easily need a few hundred MB of spool plus models and transcripts.
     private static let minimumFreeBytes: Int64 = 1_000_000_000
 
+    /// Mid-recording low-space threshold — lower than `minimumFreeBytes`
+    /// since this only needs to catch a disk filling up before writes start
+    /// failing outright, not guarantee headroom for the whole meeting.
+    private static let lowSpaceStopBytes: Int64 = 200_000_000
+
     private let mic: MicCapturing
     private let makeSystemTap: @MainActor () -> SystemAudioCapturing
     private var systemTap: SystemAudioCapturing?
     private var engine: MixerEngine?
     private var pumpTasks: [Task<Void, Never>] = []
+
+    /// Reads free space on the volume containing `url`. Defaults to
+    /// `defaultFreeBytes(at:)`; tests inject a fake to force `start()`'s
+    /// disk-full gate or the mid-recording low-space watchdog without
+    /// touching a real volume.
+    private let freeBytes: @Sendable (URL) -> Int64?
+
+    /// Per-recording task polling `freeBytes` for the mid-recording low-space
+    /// watchdog (item 2). Cancelled in `teardownActive()`.
+    private var diskSpaceTask: Task<Void, Never>?
+
+    /// Test-only seam: overrides the low-space watchdog's poll interval
+    /// (default: a real 30s sleep) so tests can observe `.diskSpaceLow`
+    /// without waiting on a real timer. Never set in production. Same
+    /// pattern as `testFileWriterOverride`.
+    var testFreeSpaceTickOverride: (@Sendable () async -> Void)?
+
+    /// Test-only seam: overrides the mic-only heartbeat watchdog's tick
+    /// interval (default: a real 1s sleep), handed to `MixerEngine`. Never
+    /// set in production. Same pattern as `testFileWriterOverride`.
+    var testHeartbeatTickOverride: (@Sendable () async -> Void)?
 
     /// Test-only seam: when set, `start()` hands these to `MixerEngine`
     /// instead of the default `AVAudioFile`-backed writers, so tests can
@@ -175,12 +208,29 @@ public final class MeetingRecorder {
     ///   - makeSystemTap: Factory for the system-audio source, invoked fresh
     ///     each `start()` (mirroring the real tap's per-recording lifecycle);
     ///     defaults to constructing a real `SystemAudioTap`.
+    ///   - freeBytes: Free-space reader for `start()`'s disk-full gate and
+    ///     the mid-recording low-space watchdog; defaults to
+    ///     `defaultFreeBytes(at:)`. Tests inject a fake to force either path
+    ///     without touching a real volume.
     public init(
         mic: MicCapturing? = nil,
-        makeSystemTap: (@MainActor () -> SystemAudioCapturing)? = nil
+        makeSystemTap: (@MainActor () -> SystemAudioCapturing)? = nil,
+        freeBytes: (@Sendable (URL) -> Int64?)? = nil
     ) {
         self.mic = mic ?? MicSource()
         self.makeSystemTap = makeSystemTap ?? { SystemAudioTap() }
+        self.freeBytes = freeBytes ?? Self.defaultFreeBytes(at:)
+    }
+
+    /// Reads free space on the volume containing `url` via
+    /// `volumeAvailableCapacityForImportantUsage` — shared by `start()`'s
+    /// disk-full gate and the mid-recording low-space watchdog. `nonisolated`
+    /// so it can be used directly as a `@Sendable` closure value (the
+    /// low-space watchdog runs its polling off the main actor).
+    private nonisolated static func defaultFreeBytes(at url: URL) -> Int64? {
+        try? url.resourceValues(
+            forKeys: [.volumeAvailableCapacityForImportantUsageKey]
+        ).volumeAvailableCapacityForImportantUsage
     }
 
     public static func requestMicPermission() async -> Bool {
@@ -261,9 +311,7 @@ public final class MeetingRecorder {
         defer { isStarting = false }
 
         let folder = url.deletingLastPathComponent()
-        if let free = try? folder.resourceValues(
-            forKeys: [.volumeAvailableCapacityForImportantUsageKey]
-        ).volumeAvailableCapacityForImportantUsage, free < Self.minimumFreeBytes {
+        if let free = freeBytes(folder), free < Self.minimumFreeBytes {
             throw RecorderError.diskFull
         }
         mic.preferredInputUID = preferredInputUID
@@ -308,7 +356,8 @@ public final class MeetingRecorder {
                     await self?.systemTap?.rebuild()
                 },
                 fileWriterOverride: testFileWriterOverride,
-                spoolWriterOverride: testSpoolWriterOverride
+                spoolWriterOverride: testSpoolWriterOverride,
+                heartbeatTickOverride: testHeartbeatTickOverride
             )
         } catch {
             systemTap?.stop()
@@ -360,6 +409,7 @@ public final class MeetingRecorder {
         } else {
             micActive = false
         }
+        await engine.startHeartbeatIfNeeded()
 
         // A stop() that arrived while we were suspended above (e.g. awaiting
         // the system-audio TCC prompt or `mic.start()`) couldn't tear down a
@@ -370,6 +420,26 @@ public final class MeetingRecorder {
             recorderLog.info("start() cancelled: stop() arrived while still starting")
             _ = await teardownActive()
             throw RecorderError.startCancelled
+        }
+
+        // Mid-recording low-space watchdog (item 2): polls `freeBytes` on its
+        // own task so a disk filling up mid-meeting is caught before it rides
+        // into write failures. Captures only Sendable values, never `self` —
+        // it must keep running independent of anything that mutates the
+        // recorder's own state.
+        let freeBytesCheck = freeBytes
+        let checkFolder = folder
+        let lowSpaceStopBytes = Self.lowSpaceStopBytes
+        let tick = testFreeSpaceTickOverride ?? { try? await Task.sleep(for: .seconds(30)) }
+        diskSpaceTask = Task.detached(priority: .utility) {
+            while !Task.isCancelled {
+                await tick()
+                guard !Task.isCancelled else { return }
+                if let free = freeBytesCheck(checkFolder), free < lowSpaceStopBytes {
+                    eventContinuation.yield(.diskSpaceLow)
+                    return
+                }
+            }
         }
 
         clock = RecordingClock(startedAt: .now)
@@ -423,6 +493,8 @@ public final class MeetingRecorder {
         systemTap = nil
         systemAudioActive = false
         micActive = false
+        diskSpaceTask?.cancel()
+        diskSpaceTask = nil
         for task in pumpTasks {
             task.cancel()
         }
@@ -498,6 +570,20 @@ private actor MixerEngine {
     private var micRestartPolicy = RestartPolicy()
     private var systemRestartPolicy = RestartPolicy()
 
+    /// Wall-clock companion to `livenessWatchdog` for mic-only recordings
+    /// (`micCaptureActive && !systemActive`) — see `HeartbeatWatchdog`'s doc
+    /// comment for why the sample-count watchdog above has no heartbeat to
+    /// measure against when system audio isn't running at all. Only ticked
+    /// by `heartbeatTask`, which only exists in the mic-only case.
+    private var heartbeatWatchdog = HeartbeatWatchdog()
+    private var heartbeatTask: Task<Void, Never>?
+    private let shouldRunHeartbeat: Bool
+    private let heartbeatTick: @Sendable () async -> Void
+    /// Set while `paused`; on the pause→unpause edge the watchdog is reset so
+    /// the paused stretch (during which the mic legitimately makes no
+    /// progress) never counts as silent ticks against it.
+    private var heartbeatWasPaused = false
+
     /// A handful of consecutive failures means the disk is genuinely stuck,
     /// not a transient hiccup.
     private static let failureThreshold = 5
@@ -512,7 +598,8 @@ private actor MixerEngine {
         attemptMicRecovery: @MainActor @escaping () async -> Void = {},
         attemptSystemRecovery: @MainActor @escaping () async -> Void = {},
         fileWriterOverride: (any AudioFileWriting)? = nil,
-        spoolWriterOverride: (any AudioFileWriting)? = nil
+        spoolWriterOverride: (any AudioFileWriting)? = nil,
+        heartbeatTickOverride: (@Sendable () async -> Void)? = nil
     ) throws {
         buffer.systemActive = systemActive
         buffer.micActive = micActive
@@ -575,6 +662,34 @@ private actor MixerEngine {
                 events: events, health: writeHealth
             )
         }
+
+        // Mic-only recordings have no heartbeat for `livenessWatchdog`'s
+        // mic-stall direction (it requires `systemExpected`) — a dead mic tap
+        // simply stops calling into this actor at all, so nothing samples-
+        // based can ever notice. `HeartbeatWatchdog` fills that gap with a
+        // wall-clock tick instead. Deliberately NOT started for system-only
+        // recordings — out of scope here, unaffected by this change. Actually
+        // starting the task happens in `startHeartbeatIfNeeded()`, called by
+        // `MeetingRecorder.start()` right after construction — a `Task`
+        // capturing `self` can't be created directly inside this actor's own
+        // `init`.
+        self.shouldRunHeartbeat = micActive && !systemActive
+        self.heartbeatTick = heartbeatTickOverride ?? { try? await Task.sleep(for: .seconds(1)) }
+    }
+
+    /// Starts the mic-only heartbeat task (see `init`'s comment for why this
+    /// can't happen inside `init` itself). No-op for dual-source/system-only
+    /// recordings, or if already started.
+    func startHeartbeatIfNeeded() {
+        guard shouldRunHeartbeat, heartbeatTask == nil else { return }
+        let tick = heartbeatTick
+        heartbeatTask = Task.detached(priority: .utility) { [weak self] in
+            while !Task.isCancelled {
+                await tick()
+                guard !Task.isCancelled else { return }
+                await self?.checkHeartbeat()
+            }
+        }
     }
 
     /// Independent mic/system sample totals seen so far — see
@@ -612,7 +727,38 @@ private actor MixerEngine {
                 systemExpected: systemActive, micExpected: micCaptureActive
             )
         else { return }
+        handleWatchdogEvent(event)
+    }
 
+    /// Ticked by `heartbeatTask` (mic-only recordings only — see its comment
+    /// in `init`). Skips entirely while paused so a pause never contributes
+    /// silent ticks, and resets the watchdog on the pause→unpause edge so
+    /// the paused stretch doesn't count against the next stall window
+    /// either.
+    private func checkHeartbeat() {
+        guard !paused else {
+            heartbeatWasPaused = true
+            return
+        }
+        if heartbeatWasPaused {
+            heartbeatWasPaused = false
+            heartbeatWatchdog = HeartbeatWatchdog()
+        }
+        guard let event = heartbeatWatchdog.tick(micTotal: buffer.totalMicSamples) else { return }
+        handleWatchdogEvent(event)
+    }
+
+    /// Shared reaction to a watchdog event, from either `livenessWatchdog`
+    /// (sample-count-driven, both sides) or `heartbeatWatchdog` (wall-clock,
+    /// mic-only) — both funnel through the same bounded auto-recovery path,
+    /// tracked by one `RestartPolicy` each: up to
+    /// `RestartPolicy.attemptsAllowed` rebuild calls
+    /// (`MicCapturing.forceRebuild()` / `SystemAudioCapturing.rebuild()`,
+    /// hopped back to `MeetingRecorder`'s `@MainActor`, where the sources
+    /// live) before `.micStalled`/`.systemAudioStalled` reaches the UI. A
+    /// `.resumed` event resets that side's policy so a later, independent
+    /// stall gets its own fresh attempts.
+    private func handleWatchdogEvent(_ event: LivenessWatchdog.Event) {
         switch event {
         case .stalled(.system):
             if systemRestartPolicy.shouldAttempt() {
@@ -658,6 +804,8 @@ private actor MixerEngine {
     /// the files and ends the output streams. If the m4a writer had failed,
     /// the spool is transcoded to replace it; otherwise the spool is deleted.
     func finish() async {
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
         emit(buffer.flushRemainder())
         writeQueue.finish()
         let outcome = await writeTask?.value ?? WriteOutcome()

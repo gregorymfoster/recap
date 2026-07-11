@@ -1,5 +1,5 @@
 import Foundation
-import RecapAudio
+@testable import RecapAudio
 import RecapCore
 import Testing
 @testable import RecapUI
@@ -55,6 +55,22 @@ private final class FakeSystemAudioSource: SystemAudioCapturing {
 }
 
 private struct FakeError: Error {}
+
+/// Thread-safe call counter for a `freeBytes` fake — the low-disk watchdog
+/// polls off the main actor. `@unchecked Sendable`: all mutable state is
+/// guarded by `lock`.
+private final class TickCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    func snapshotAndIncrement() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        let before = value
+        value += 1
+        return before
+    }
+}
 
 @MainActor
 @Suite struct MeetingSessionStoreTests {
@@ -263,6 +279,51 @@ private struct FakeError: Error {}
         #expect(!store.isRecording)
         #expect(store.startFailureMessage == nil)
         #expect(!store.permissionDenied)
+    }
+
+    /// Mirrors `.writeFailed`'s auto-stop test pattern (item 2, low-disk
+    /// watchdog): `MeetingRecorder.freeBytes` reports plenty of space at
+    /// first, then drops below the low-space threshold — the recorder emits
+    /// `.diskSpaceLow`, and the store must react exactly like `.writeFailed`:
+    /// set the recording-failure message and trigger `onAutoStop`.
+    @Test func diskSpaceLowTriggersAutoStopWithMessage() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let callCount = TickCounter()
+        let recorder = MeetingRecorder(
+            mic: FakeMicSource(), makeSystemTap: { FakeSystemAudioSource() },
+            freeBytes: { _ in
+                // The first call is `start()`'s own disk-full gate — answer
+                // with plenty of space there so the recording actually
+                // starts; only the watchdog's later polls should see it
+                // drop below the low-space threshold.
+                callCount.snapshotAndIncrement() < 1 ? 10_000_000_000 : 100_000_000
+            }
+        )
+        recorder.testFreeSpaceTickOverride = {}
+        let store = MeetingSessionStore(
+            makeRecorder: { recorder },
+            requestMicPermission: { true },
+            probeSystemAudio: { .captured }
+        )
+        let record = makeRecord(in: dir)
+
+        var autoStopCalled = false
+        store.onAutoStop = { autoStopCalled = true }
+
+        await store.start(record: record, includeSystemAudio: false, includeMic: true)
+        #expect(store.isRecording)
+
+        // Poll briefly for the (async, off-main-actor) low-disk watchdog
+        // task to notice and yield `.diskSpaceLow` — more robust than a
+        // fixed sleep against a `.utility`-priority background task.
+        for _ in 0..<200 {
+            if autoStopCalled { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(autoStopCalled)
+        #expect(store.recordingFailureMessage == "Recording stopped — disk almost full")
     }
 }
 

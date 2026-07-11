@@ -269,6 +269,12 @@ public final class MeetingSessionStore {
             // there's nothing left for the UI to do but tell the user.
             micStalled = true
             onMicStalled?()
+        case .diskSpaceLow:
+            // Disk is about to fill up — stop now, same as `.writeFailed`,
+            // so what was captured salvages cleanly instead of riding the
+            // write path into failure once the disk actually fills.
+            recordingFailureMessage = "Recording stopped — disk almost full"
+            onAutoStop?()
         }
     }
 
