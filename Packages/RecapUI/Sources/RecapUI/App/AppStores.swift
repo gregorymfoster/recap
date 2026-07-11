@@ -289,7 +289,8 @@ public final class AppStores {
 
         if configuration.mode == .normal, let storage {
             changeBusConsumer = ChangeBusConsumer(
-                changeBus: changeBus, storage: storage, backup: backup, exportDebounce: .seconds(5)
+                changeBus: changeBus, storage: storage, backup: backup, exportDebounce: .seconds(5),
+                folderURL: { [weak library] in library?.record(for: $0)?.folderURL }
             )
         } else {
             changeBusConsumer = nil
@@ -429,7 +430,8 @@ public final class AppStores {
         }
         if let storage {
             let consumer = ChangeBusConsumer(
-                changeBus: changeBus, storage: storage, backup: backup, exportDebounce: exportDebounce
+                changeBus: changeBus, storage: storage, backup: backup, exportDebounce: exportDebounce,
+                folderURL: { [weak library] in library?.record(for: $0)?.folderURL }
             )
             changeBusConsumer = consumer
             consumer.start()

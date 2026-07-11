@@ -45,7 +45,7 @@ import Testing
         try storage.saveNotes("original content", in: record)
         let index = try SearchIndex()
         try index.reindex(records: [record], storage: storage)
-        #expect(try index.search("original").count == 1)
+        #expect(try await index.search("original").count == 1)
 
         // Edit notes.md directly on disk, bypassing the index. If reload()
         // skips the rebuild (1 folder == 1 indexed row already), the stale
@@ -55,8 +55,8 @@ import Testing
         _ = LibraryStore(storage: storage, index: index, changeBus: LibraryChangeBus())
         try await Task.sleep(for: .milliseconds(300))
 
-        #expect(try index.search("original").count == 1)
-        #expect(try index.search("edited").isEmpty)
+        #expect(try await index.search("original").count == 1)
+        #expect(try await index.search("edited").isEmpty)
     }
 
     @Test func reloadRepairsIndexWhenPreSeededWithFewerRowsThanFolders() async throws {
@@ -76,8 +76,8 @@ import Testing
 
         await waitUntil { (try? index.indexedMeetingCount()) == 3 }
         #expect(try index.indexedMeetingCount() == 3)
-        #expect(try index.search("beta").count == 1)
-        #expect(try index.search("gamma").count == 1)
+        #expect(try await index.search("beta").count == 1)
+        #expect(try await index.search("gamma").count == 1)
     }
 
     // MARK: 2b — corrupt-meeting.json surfacing

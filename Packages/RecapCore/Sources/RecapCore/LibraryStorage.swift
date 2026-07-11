@@ -149,6 +149,22 @@ public struct LibraryStorage: Sendable {
         }
     }
 
+    /// Reads one meeting folder's metadata. Returns nil when meeting.json is
+    /// missing or unreadable (folder trashed, corrupt) — mirrors loadAll's
+    /// skip-don't-throw posture for a single folder.
+    public func loadRecord(inFolder folderURL: URL) -> MeetingRecord? {
+        let metadataURL = folderURL.appendingPathComponent("meeting.json")
+        guard let data = try? Data(contentsOf: metadataURL),
+              let meeting = try? Self.decoder.decode(Meeting.self, from: data)
+        else {
+            if FileManager.default.fileExists(atPath: metadataURL.path) {
+                storageLog.error("loadRecord found unreadable metadata at \(metadataURL.path, privacy: .private)")
+            }
+            return nil
+        }
+        return MeetingRecord(meeting: meeting, folderURL: folderURL)
+    }
+
     /// True when the library root directory exists on disk. A fresh default
     /// install has no root folder until the first recording creates it (see
     /// `create(_:)`, whose `createDirectory(..., withIntermediateDirectories:

@@ -206,23 +206,33 @@ public final class SearchIndex: Sendable {
     public func search(_ query: String) throws -> [SearchHit] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let dbQueue else { return [] }
-        return try dbQueue.read { db in
-            let rows = try Row.fetchAll(
-                db,
-                sql: """
-                    SELECT meetingID, title,
-                           snippet(meeting_fts, -1, '', '', '…', 12) AS snippet
-                    FROM meeting_fts
-                    WHERE meeting_fts MATCH ?
-                    ORDER BY rank
-                    LIMIT 50
-                    """,
-                arguments: [FTS5Pattern(matchingAllPrefixesIn: trimmed)]
-            )
-            return rows.compactMap { row in
-                guard let id = UUID(uuidString: row["meetingID"]) else { return nil }
-                return SearchHit(meetingID: id, title: row["title"], snippet: row["snippet"])
-            }
+        return try dbQueue.read { db in try Self.fetchHits(db, matching: trimmed) }
+    }
+
+    /// Async variant: runs on GRDB's own database queue, never blocking the
+    /// caller (in particular, the `@MainActor` search overlay's `.task`).
+    public func search(_ query: String) async throws -> [SearchHit] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let dbQueue else { return [] }
+        return try await dbQueue.read { db in try Self.fetchHits(db, matching: trimmed) }
+    }
+
+    private static func fetchHits(_ db: Database, matching trimmed: String) throws -> [SearchHit] {
+        let rows = try Row.fetchAll(
+            db,
+            sql: """
+                SELECT meetingID, title,
+                       snippet(meeting_fts, -1, '', '', '…', 12) AS snippet
+                FROM meeting_fts
+                WHERE meeting_fts MATCH ?
+                ORDER BY rank
+                LIMIT 50
+                """,
+            arguments: [FTS5Pattern(matchingAllPrefixesIn: trimmed)]
+        )
+        return rows.compactMap { row in
+            guard let id = UUID(uuidString: row["meetingID"]) else { return nil }
+            return SearchHit(meetingID: id, title: row["title"], snippet: row["snippet"])
         }
     }
 

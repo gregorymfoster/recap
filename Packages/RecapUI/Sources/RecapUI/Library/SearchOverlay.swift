@@ -133,7 +133,11 @@ struct SearchOverlay: View {
                 return
             }
             guard !Task.isCancelled else { return }
-            hits = library.search(query)
+            let results = await library.search(query)
+            // `task(id:)` cancels but doesn't await the old task, so a
+            // superseded query's results must never overwrite a newer one's.
+            guard !Task.isCancelled else { return }
+            hits = results
             highlighted = 0
             isSearching = false
         }

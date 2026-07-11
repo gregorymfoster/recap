@@ -166,8 +166,17 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
         var nudges: [MeetingNudge] = []
     }
 
-    private func makeReadyMeeting(in storage: LibraryStorage, title: String = "Standup") throws -> MeetingRecord {
-        try storage.create(Meeting(title: title, date: .now, status: .ready))
+    /// Creates the meeting on disk, then reloads `stores.library` so it's
+    /// also visible in the in-memory library — `ChangeBusConsumer` now
+    /// resolves a meeting's folder via `library.record(for:)` rather than a
+    /// fresh disk scan, so a change-bus post for a meeting the library
+    /// doesn't know about is (correctly) a no-op, same as a trashed meeting.
+    private func makeReadyMeeting(
+        in storage: LibraryStorage, stores: AppStores, title: String = "Standup"
+    ) throws -> MeetingRecord {
+        let record = try storage.create(Meeting(title: title, date: .now, status: .ready))
+        stores.library.reload()
+        return record
     }
 
     /// Polls for a directory to appear with at least one entry, up to
@@ -247,7 +256,7 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
         precondition(!settings.mirrorBackupEnabled, "warm-up uses the mirror toggle; caller must not also use it")
         settings.mirrorBackupEnabled = true
         settings.mirrorFolderPath = canaryDir.path
-        let canary = try makeReadyMeeting(in: storage, title: "Canary")
+        let canary = try makeReadyMeeting(in: storage, stores: stores, title: "Canary")
         _ = try await withRetriedPost(changeBus, .meetingChanged(canary.meeting.id), until: canaryDir)
         settings.mirrorBackupEnabled = false
         settings.mirrorFolderPath = ""
@@ -275,7 +284,7 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
         settings.mirrorBackupEnabled = true
         settings.mirrorFolderPath = mirrorDir.path
 
-        let record = try makeReadyMeeting(in: storage)
+        let record = try makeReadyMeeting(in: storage, stores: stores)
         _ = stores // keep the consumer task alive via the strong reference below
 
         // The change-bus consumer subscribes from a freshly spawned Task in
@@ -308,7 +317,7 @@ private final class FakeCalendarWatcher: MeetingEventWatching {
         // post lands" and "debounce would have elapsed" into noise.
         let debounce = Duration.milliseconds(500)
         let (stores, storage, settings, changeBus) = makeStores(exportDebounce: debounce)
-        let record = try makeReadyMeeting(in: storage)
+        let record = try makeReadyMeeting(in: storage, stores: stores)
         _ = stores // keep the consumer task alive via the strong reference
 
         // Warm up the consumer against a throwaway destination first — before

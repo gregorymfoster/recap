@@ -192,6 +192,36 @@ import Testing
         #expect(try storage.loadAll().count == 2)
     }
 
+    @Test func loadRecordRoundTripsACreatedMeeting() throws {
+        let storage = try makeStorage()
+        // A fixed whole-second epoch date — ISO8601 encoding drops
+        // sub-second precision, so `Date.now` would fail the round-trip
+        // equality check below for a reason unrelated to `loadRecord` itself.
+        let record = try storage.create(Meeting(title: "Design sync", date: Date(timeIntervalSince1970: 1_780_400_000)))
+
+        let loaded = storage.loadRecord(inFolder: record.folderURL)
+
+        #expect(loaded?.meeting == record.meeting)
+        #expect(loaded?.folderURL.resolvingSymlinksInPath() == record.folderURL.resolvingSymlinksInPath())
+    }
+
+    @Test func loadRecordReturnsNilForMissingMetadata() throws {
+        let storage = try makeStorage()
+        let emptyFolder = storage.rootURL.appendingPathComponent("no meeting.json here")
+        try FileManager.default.createDirectory(at: emptyFolder, withIntermediateDirectories: true)
+
+        #expect(storage.loadRecord(inFolder: emptyFolder) == nil)
+    }
+
+    @Test func loadRecordReturnsNilForCorruptMetadata() throws {
+        let storage = try makeStorage()
+        let corrupt = storage.rootURL.appendingPathComponent("corrupt folder")
+        try FileManager.default.createDirectory(at: corrupt, withIntermediateDirectories: true)
+        try Data("not json".utf8).write(to: corrupt.appendingPathComponent("meeting.json"))
+
+        #expect(storage.loadRecord(inFolder: corrupt) == nil)
+    }
+
     @Test func rootIsReachableTrueWhenDirectoryExists() throws {
         let storage = try makeStorage()
         #expect(!storage.rootIsReachable(), "root doesn't exist yet — no meeting created")

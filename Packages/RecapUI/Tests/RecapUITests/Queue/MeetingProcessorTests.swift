@@ -173,6 +173,7 @@ private actor IssueCollector {
 
     private func makeProcessor(
         storage: LibraryStorage,
+        recordFolder: @escaping @Sendable (UUID) async -> URL?,
         engine: TranscriptionEngine? = nil,
         diarizer: SpeakerDiarizer? = nil,
         enhancer: NoteEnhancer = FakeEnhancer(isAvailable: false),
@@ -186,6 +187,7 @@ private actor IssueCollector {
     ) -> MeetingProcessor {
         MeetingProcessor(
             storage: storage,
+            recordFolder: recordFolder,
             engineProvider: { @Sendable in engine },
             diarizerProvider: { @Sendable in diarizer },
             enhancer: enhancer,
@@ -213,6 +215,7 @@ private actor IssueCollector {
         let chainCollector = ChainCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             engine: FakeEngine(transcript: transcript),
             enhancer: FakeEnhancer(isAvailable: true),
             statusCollector: statusCollector,
@@ -241,6 +244,7 @@ private actor IssueCollector {
         let chainCollector = ChainCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             engine: FakeEngine(transcript: transcript),
             enhancer: FakeEnhancer(isAvailable: false),
             statusCollector: statusCollector,
@@ -266,6 +270,7 @@ private actor IssueCollector {
         let chainCollector = ChainCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             engine: FakeEngine(transcript: makeTranscript()),
             enhancer: FakeEnhancer(isAvailable: false),
             statusCollector: statusCollector,
@@ -294,6 +299,7 @@ private actor IssueCollector {
         let chainCollector = ChainCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             engine: nil,
             statusCollector: statusCollector,
             chainCollector: chainCollector
@@ -318,6 +324,7 @@ private actor IssueCollector {
         let chainCollector = ChainCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             engine: FakeEngine(transcript: makeTranscript()),
             statusCollector: statusCollector,
             chainCollector: chainCollector
@@ -346,6 +353,7 @@ private actor IssueCollector {
         let chainCollector = ChainCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             engine: FakeEngine(transcript: makeTranscript(), failure: StubError()),
             statusCollector: statusCollector,
             chainCollector: chainCollector
@@ -380,6 +388,7 @@ private actor IssueCollector {
         let issueCollector = IssueCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             engine: FakeEngine(transcript: makeTranscript()),
             statusCollector: statusCollector,
             chainCollector: chainCollector,
@@ -415,6 +424,7 @@ private actor IssueCollector {
         let issueCollector = IssueCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             engine: FakeEngine(transcript: transcript),
             enhancer: FakeEnhancer(isAvailable: false),
             statusCollector: statusCollector,
@@ -449,6 +459,7 @@ private actor IssueCollector {
         let chainCollector = ChainCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             engine: FlakyOnceEngine(transcript: transcript),
             enhancer: FakeEnhancer(isAvailable: false),
             statusCollector: statusCollector,
@@ -479,6 +490,7 @@ private actor IssueCollector {
         let chainCollector = ChainCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             enhancer: FakeEnhancer(isAvailable: true, result: EnhancementResult(notes: "## Notes\nShipped it.")),
             statusCollector: statusCollector,
             chainCollector: chainCollector
@@ -515,6 +527,7 @@ private actor IssueCollector {
         let capture = RawNotesCapture()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             enhancer: FakeEnhancer(isAvailable: true, onEnhance: { rawNotes in capture.value = rawNotes }),
             statusCollector: statusCollector,
             chainCollector: chainCollector
@@ -538,6 +551,7 @@ private actor IssueCollector {
         let subtitleCollector = SubtitleCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             enhancer: FakeEnhancer(
                 isAvailable: true,
                 result: EnhancementResult(notes: "## Notes\nShipped it.", subtitle: "Ship decision made, launch set for Friday")
@@ -568,6 +582,7 @@ private actor IssueCollector {
             let subtitleCollector = SubtitleCollector()
             let processor = makeProcessor(
                 storage: storage,
+                recordFolder: { _ in record.folderURL },
                 enhancer: FakeEnhancer(
                     isAvailable: true,
                     result: EnhancementResult(notes: "notes", subtitle: subtitle)
@@ -599,6 +614,7 @@ private actor IssueCollector {
         let issueCollector = IssueCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             enhancer: FakeEnhancer(isAvailable: true, failure: StubError()),
             statusCollector: statusCollector,
             chainCollector: chainCollector,
@@ -629,6 +645,7 @@ private actor IssueCollector {
         let chainCollector = ChainCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             enhancer: FakeEnhancer(isAvailable: true),
             statusCollector: statusCollector,
             chainCollector: chainCollector
@@ -662,6 +679,7 @@ private actor IssueCollector {
         let backupCollector = BackupCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             enhancer: FakeEnhancer(isAvailable: false),
             settings: {
                 ProcessorSettings(mirrorBackupEnabled: true, mirrorFolderPath: mirrorDir.path)
@@ -701,6 +719,7 @@ private actor IssueCollector {
         let backupCollector = BackupCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             enhancer: FakeEnhancer(isAvailable: false),
             settings: {
                 ProcessorSettings(mirrorBackupEnabled: false, mirrorFolderPath: mirrorDir.path)
@@ -727,6 +746,7 @@ private actor IssueCollector {
         let issueCollector = IssueCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             engine: FakeEngine(transcript: makeTranscript()),
             statusCollector: statusCollector,
             chainCollector: chainCollector,
@@ -755,6 +775,7 @@ private actor IssueCollector {
         let chainCollector = ChainCollector()
         let processor = makeProcessor(
             storage: storage,
+            recordFolder: { _ in record.folderURL },
             engine: FakeEngine(transcript: transcript),
             diarizer: nil,
             enhancer: FakeEnhancer(isAvailable: false),
@@ -769,6 +790,31 @@ private actor IssueCollector {
         let statuses = await statusCollector.all
         #expect(statuses.last == .ready)
         #expect(try storage.loadTranscript(in: record) == transcript)
+    }
+
+    // MARK: 11. recordFolder resolves nil (meeting trashed after enqueue)
+
+    @Test func nilRecordFolderNoOps() async throws {
+        let storage = makeStorage()
+        let record = try storage.create(Meeting(title: "Standup", date: .now))
+        try touchAudioFile(for: record)
+        let statusCollector = StatusCollector()
+        let chainCollector = ChainCollector()
+        let processor = makeProcessor(
+            storage: storage,
+            recordFolder: { _ in nil },
+            engine: FakeEngine(transcript: makeTranscript()),
+            statusCollector: statusCollector,
+            chainCollector: chainCollector
+        )
+
+        try await processor.execute(
+            ProcessingJob(kind: .transcribe, meetingID: record.meeting.id), progress: { _ in }
+        )
+
+        let statuses = await statusCollector.all
+        #expect(statuses.isEmpty)
+        #expect(try storage.loadTranscript(in: record) == nil)
     }
 }
 

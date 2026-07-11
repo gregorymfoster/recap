@@ -48,6 +48,9 @@ public final class QueueStore {
         }
         let processor = MeetingProcessor(
             storage: storage,
+            recordFolder: { @Sendable id in
+                await MainActor.run { library.record(for: id)?.folderURL }
+            },
             engineProvider: { @Sendable in
                 await models.activeEngine()
             },

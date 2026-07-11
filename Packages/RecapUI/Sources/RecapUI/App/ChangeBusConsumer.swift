@@ -14,6 +14,9 @@ final class ChangeBusConsumer {
     private let changeBus: LibraryChangeBus
     private let storage: LibraryStorage
     private let backup: BackupStatusStore
+    /// Resolves a meeting's folder from the in-memory library (MainActor hop)
+    /// — nil when the meeting was trashed since the change was posted.
+    private let folderURL: @MainActor (UUID) -> URL?
     /// Per-meeting debounce: each `.meetingChanged` cancels and restarts a
     /// debounce sleep (5s in production) before the mirror backup actually
     /// runs, so rapid edits coalesce into one export instead of one per
@@ -22,11 +25,15 @@ final class ChangeBusConsumer {
     private var exportDebounceTasks: [UUID: Task<Void, Never>] = [:]
     private var consumerTask: Task<Void, Never>?
 
-    init(changeBus: LibraryChangeBus, storage: LibraryStorage, backup: BackupStatusStore, exportDebounce: Duration) {
+    init(
+        changeBus: LibraryChangeBus, storage: LibraryStorage, backup: BackupStatusStore,
+        exportDebounce: Duration, folderURL: @escaping @MainActor (UUID) -> URL?
+    ) {
         self.changeBus = changeBus
         self.storage = storage
         self.backup = backup
         self.exportDebounce = exportDebounce
+        self.folderURL = folderURL
     }
 
     /// Starts the long-lived consumer task. Called once, right after
@@ -60,8 +67,9 @@ final class ChangeBusConsumer {
     private func runEnabledExporters(for meetingID: UUID) {
         let storage = storage
         let backup = backup
+        let folder = folderURL(meetingID)
         Task.detached(priority: .utility) {
-            guard let record = try? storage.loadAll().first(where: { $0.meeting.id == meetingID }) else { return }
+            guard let folder, let record = storage.loadRecord(inFolder: folder) else { return }
             await MainActor.run { backup.mirrorMeeting(record) }
         }
     }

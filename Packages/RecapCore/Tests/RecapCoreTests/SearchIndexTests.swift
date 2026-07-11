@@ -100,6 +100,46 @@ import Testing
         #expect(try index.indexedMeetingCount() == 2)
     }
 
+    /// Calls the synchronous `search(_:)` overload from an async test context.
+    /// A plain `index.search(query)` call site there resolves to the async
+    /// overload (Swift prefers it in an async context even without `await`),
+    /// so this forces the sync one via a non-async closure.
+    private func syncSearch(_ index: SearchIndex, _ query: String) throws -> [SearchHit] {
+        try index.search(query)
+    }
+
+    // MARK: Async search
+
+    @Test func asyncSearchReturnsSameHitsAsSyncSearch() async throws {
+        let (storage, index) = try makeLibrary()
+        let record = try storage.create(Meeting(title: "Roadmap review", date: .now))
+        try storage.saveNotes("- kubernetes migration blocked on budget", in: record)
+        try index.reindex(records: storage.loadAll(), storage: storage)
+
+        let asyncHits = try await index.search("kubernetes")
+        let syncHits = try syncSearch(index, "kubernetes")
+        #expect(asyncHits == syncHits)
+        #expect(asyncHits.map(\.meetingID) == [record.meeting.id])
+    }
+
+    @Test func asyncSearchEmptyQueryReturnsEmpty() async throws {
+        let (storage, index) = try makeLibrary()
+        _ = try storage.create(Meeting(title: "Roadmap review", date: .now))
+        try index.reindex(records: storage.loadAll(), storage: storage)
+
+        #expect(try await index.search("").isEmpty)
+        #expect(try await index.search("   ").isEmpty)
+    }
+
+    @Test func asyncSearchUnavailableIndexReturnsEmpty() async throws {
+        let (storage, _) = try makeLibrary()
+        _ = try storage.create(Meeting(title: "Unindexed", date: .now))
+        let index = SearchIndex(unavailable: ())
+
+        try index.reindex(records: storage.loadAll(), storage: storage)
+        #expect(try await index.search("unindexed").isEmpty)
+    }
+
     // MARK: Unavailable last resort
 
     /// The `dbQueue == nil` last-resort instance (only reachable in practice

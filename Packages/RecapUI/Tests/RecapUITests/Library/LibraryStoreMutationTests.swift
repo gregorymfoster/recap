@@ -394,13 +394,13 @@ private actor ChangeCollector {
         let record = try #require(store.startNewMeeting(title: "Gets trashed"))
         try storage.saveNotes("pineapple discussion", in: record)
         try index.update(record, from: storage)
-        #expect(try index.search("pineapple").map(\.meetingID) == [record.meeting.id])
+        #expect(try await index.search("pineapple").map(\.meetingID) == [record.meeting.id])
         let collector = ChangeCollector.make(changeBus)
 
         store.moveToTrash(record)
 
         #expect(store.record(for: record.meeting.id) == nil)
-        #expect(try index.search("pineapple").isEmpty)
+        #expect(try await index.search("pineapple").isEmpty)
 
         let changes = await collector.waitForCount(1)
         #expect(changes == [.meetingDeleted(record.meeting.id)])

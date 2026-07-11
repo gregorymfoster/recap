@@ -11,6 +11,9 @@ private let processorLog = Logger(subsystem: "com.gregfoster.recap", category: "
 /// results, and reports status transitions back to the main actor.
 struct MeetingProcessor: JobExecutor {
     let storage: LibraryStorage
+    /// Resolves a meeting's folder from the in-memory library (MainActor hop) —
+    /// nil when the meeting was trashed after the job was enqueued.
+    let recordFolder: @Sendable (UUID) async -> URL?
     let engineProvider: @Sendable () async -> TranscriptionEngine?
     /// nil when speaker labeling is disabled in settings.
     let diarizerProvider: @Sendable () async -> SpeakerDiarizer?
@@ -39,7 +42,8 @@ struct MeetingProcessor: JobExecutor {
     let onProcessingIssue: @Sendable (UUID, ProcessingIssue, Bool) async -> Void
 
     func execute(_ job: ProcessingJob, progress: @escaping @Sendable (Double) -> Void) async throws {
-        guard let record = try storage.loadAll().first(where: { $0.meeting.id == job.meetingID })
+        guard let folderURL = await recordFolder(job.meetingID),
+              let record = storage.loadRecord(inFolder: folderURL)
         else { return }
 
         switch job.kind {
