@@ -45,9 +45,10 @@ public struct MenuBarLabel: View {
 /// Rich popover content for the menu bar extra (design mock 8a), for use
 /// with `.menuBarExtraStyle(.window)`. Two layouts:
 ///   - Idle: start-recording row, an "Up next · Calendar" section (only when
-///     calendar access is already granted and a meeting-shaped event starts
-///     within 8h), a "Recent" section (up to 2 meetings), then the standard
-///     Open/Settings/Quit rows.
+///     `stores.upcoming` is available — real calendar access already
+///     granted, or a `-fixtures` scenario seeding it — and a meeting-shaped
+///     event starts within 8h), a "Recent" section (up to 2 meetings), then
+///     the standard Open/Settings/Quit rows.
 ///   - Recording (Phase 3C): a header block with the live elapsed label,
 ///     full-width Pause/Resume + Stop buttons, a device row sharing
 ///     `InputDeviceMenu` with `SessionCapsule`, then Open Recap.
@@ -58,11 +59,14 @@ public struct MenuBarContent: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
     private let stores: AppStores
-    /// Not started/polled — only used for the one-shot, never-prompting
-    /// `upNext()` query, refreshed each time the popover appears. Kept as
-    /// `@State` (not re-created per body evaluation) so it isn't
-    /// reconstructed every render.
-    @State private var calendarQuery = CalendarWatcher(onMeetingStarting: { _ in })
+    /// Derived from `stores.upcoming` (the same store the Library's Upcoming
+    /// section/`NextMeetingBanner` reads) via `UpNextEvent.choose`, refreshed
+    /// each time the popover appears — see `refreshUpNext()`. Sharing that
+    /// store (rather than this view standing up its own `CalendarWatcher`
+    /// query) is what makes this row fixture-seedable: every `-fixtures`
+    /// scenario already wires `AppStores.upcoming`, so
+    /// `-fixtures -show-menubar-content` can render this section without
+    /// live Calendar TCC access.
     @State private var upNext: CalendarEventSnapshot?
     /// The device row's `InputDeviceMenu` options — refreshed the same way
     /// `MeetingDetailView`/`RecordingView` do (`onAppear` + a live device-list
@@ -348,8 +352,14 @@ public struct MenuBarContent: View {
         dismiss()
     }
 
+    /// Re-queries `stores.upcoming` (never a fresh `CalendarWatcher` — see
+    /// the `upNext` property doc) and re-applies the same "soonest
+    /// meeting-shaped event within 8h" rule the old direct-EventKit query
+    /// used (`UpNextEvent.choose`'s default `withinHours`), so real usage is
+    /// unchanged while `-fixtures` scenarios get a real value to render.
     private func refreshUpNext() {
-        upNext = calendarQuery.upNext()
+        stores.upcoming.refresh()
+        upNext = UpNextEvent.choose(from: stores.upcoming.events, now: .now)
     }
 }
 

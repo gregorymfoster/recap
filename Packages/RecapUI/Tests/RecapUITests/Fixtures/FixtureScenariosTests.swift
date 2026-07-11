@@ -162,6 +162,19 @@ import Testing
         #expect(upcoming.imminentEvent() != nil)
     }
 
+    @Test func nextMeetingSoonRendersMenuBarUpNextRow() {
+        // `MenuBarContent` derives its "Up next · Calendar" row from
+        // `stores.upcoming.events` via `UpNextEvent.choose` (see
+        // `MenuBarView.refreshUpNext()`), not a live `CalendarWatcher` query —
+        // that's what makes the row fixture-seedable. Assert the same
+        // derivation the view performs actually finds an event here, so a
+        // future change to either side can't silently break the row without
+        // this test catching it.
+        let upcoming = FixtureScenario.nextMeetingSoon.upcoming
+        upcoming.refresh()
+        #expect(UpNextEvent.choose(from: upcoming.events) != nil)
+    }
+
     // MARK: default forwarding
 
     @Test func libraryStoreFixtureMatchesDefaultScenarioShape() {
