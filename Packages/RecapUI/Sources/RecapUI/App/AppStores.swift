@@ -463,7 +463,7 @@ public final class AppStores {
                 // folder that was unmounted/unreachable might be back, or
                 // might have just gone away) — same "switched back to Recap"
                 // trigger as the calendar refresh above.
-                self?.library.reload()
+                self?.library.refreshFromDisk()
             }
         }
     }

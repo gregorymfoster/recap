@@ -270,4 +270,67 @@ import Testing
         let loaded = try storage.loadAll()
         #expect(loaded.map(\.meeting.id) == [keep.meeting.id])
     }
+
+    // MARK: fingerprint()
+
+    @Test func fingerprintIsEmptyWhenRootDoesNotExist() throws {
+        let storage = try makeStorage()
+        #expect(storage.fingerprint() == LibraryStorage.LibraryFingerprint.empty)
+    }
+
+    @Test func fingerprintIsStableWhenNothingChanges() throws {
+        let storage = try makeStorage()
+        _ = try storage.create(Meeting(title: "Alpha", date: .now))
+        _ = try storage.create(Meeting(title: "Beta", date: .now))
+
+        let first = storage.fingerprint()
+        let second = storage.fingerprint()
+
+        #expect(first == second)
+    }
+
+    @Test func fingerprintChangesAfterCreatingAMeeting() async throws {
+        let storage = try makeStorage()
+        _ = try storage.create(Meeting(title: "Alpha", date: .now))
+        let before = storage.fingerprint()
+
+        // mtime granularity on some filesystems is coarser than our test
+        // speed — sleep past it so the new folder's creation timestamp is
+        // guaranteed to differ from the sampling above.
+        try await Task.sleep(for: .milliseconds(50))
+        _ = try storage.create(Meeting(title: "Beta", date: .now))
+        let after = storage.fingerprint()
+
+        #expect(before != after)
+    }
+
+    @Test func fingerprintChangesAfterTrashingAMeeting() throws {
+        let storage = try makeStorage()
+        _ = try storage.create(Meeting(title: "Alpha", date: .now))
+        let doomed = try storage.create(Meeting(title: "Beta", date: .now))
+        let before = storage.fingerprint()
+
+        try storage.trash(doomed)
+        let after = storage.fingerprint()
+
+        #expect(before != after)
+    }
+
+    @Test func fingerprintChangesAfterSaveMetadata() async throws {
+        let storage = try makeStorage()
+        let record = try storage.create(Meeting(title: "Alpha", date: .now))
+        let before = storage.fingerprint()
+
+        // `saveMetadata` writes atomically (rename-into-place), which bumps
+        // the containing folder's mtime — sleep past filesystem mtime
+        // granularity before the mutating call so the fingerprint is
+        // guaranteed to observe a difference.
+        try await Task.sleep(for: .milliseconds(50))
+        var updated = record
+        updated.meeting.title = "Alpha renamed"
+        try storage.saveMetadata(updated)
+        let after = storage.fingerprint()
+
+        #expect(before != after)
+    }
 }

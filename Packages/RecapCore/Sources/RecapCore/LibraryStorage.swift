@@ -165,6 +165,45 @@ public struct LibraryStorage: Sendable {
         return MeetingRecord(meeting: meeting, folderURL: folderURL)
     }
 
+    /// Cheap change detector for the whole library: folder names + directory
+    /// modification times, no `meeting.json` decoding. Metadata writes
+    /// (`saveMetadata`, `create`, `rename`) use `.atomic`, which renames a
+    /// temp file into place — that rename bumps the containing folder's
+    /// mtime, so both in-app edits and atomic external edits are caught.
+    /// An in-place (non-atomic) hand edit to a file inside a folder does NOT
+    /// change the folder's own mtime and so isn't caught here — the next
+    /// full launch-time `loadAllDetailed()` still picks it up.
+    public struct LibraryFingerprint: Equatable, Sendable {
+        struct Entry: Equatable, Sendable {
+            var name: String
+            var modified: Date?
+        }
+        var entries: [Entry]
+
+        static let empty = LibraryFingerprint(entries: [])
+    }
+
+    /// Builds a `LibraryFingerprint` from the folder names + mtimes directly
+    /// under `rootURL`. Missing root → the empty fingerprint (mirrors
+    /// `loadAllDetailed()`'s empty-result posture for a not-yet-created
+    /// library).
+    public func fingerprint() -> LibraryFingerprint {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: rootURL.path) else { return .empty }
+        guard let folders = try? fm.contentsOfDirectory(
+            at: rootURL, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey]
+        ) else {
+            return .empty
+        }
+        let entries = folders.compactMap { url -> LibraryFingerprint.Entry? in
+            guard (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
+            let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            return LibraryFingerprint.Entry(name: url.lastPathComponent, modified: modified)
+        }
+        .sorted { $0.name < $1.name }
+        return LibraryFingerprint(entries: entries)
+    }
+
     /// True when the library root directory exists on disk. A fresh default
     /// install has no root folder until the first recording creates it (see
     /// `create(_:)`, whose `createDirectory(..., withIntermediateDirectories:

@@ -31,6 +31,15 @@ public final class LibraryStore {
     /// Set the first time `reload()` observes the root as reachable this
     /// launch — part of `rootUnreachable`'s gating rule (see `reload()`).
     private var rootWasReachableThisLaunch = false
+    /// The fingerprint `reload()`/`refreshFromDisk()` last observed —
+    /// `refreshFromDisk()`'s short-circuit compares against this so an
+    /// unchanged library skips the full folder-list load.
+    private var lastFingerprint: LibraryStorage.LibraryFingerprint?
+    /// Guards against overlapping `refreshFromDisk()` calls (e.g. two
+    /// foreground notifications in quick succession) — not part of the
+    /// observable view state, so it's excluded from `@Observable` tracking.
+    @ObservationIgnored
+    private var refreshInFlight = false
     /// Canned transcripts for fixture records (no disk in fixture mode), so
     /// -fixtures runs and screenshot dumps can show the transcript pane —
     /// avatars, rename affordance. Empty in disk-backed mode.
@@ -197,7 +206,134 @@ public final class LibraryStore {
             let plural = result.skippedCount == 1 ? "" : "s"
             onSaveError?("\(result.skippedCount) meeting\(plural) couldn't be read and \(result.skippedCount == 1 ? "was" : "were") skipped.")
         }
+        // Primes the short-circuit `refreshFromDisk()` compares against, so
+        // the first foreground refresh after launch can skip a redundant
+        // full load if nothing's changed on disk in the meantime.
+        lastFingerprint = storage.fingerprint()
         reindexInBackground(records: result.records, storage: storage, index: index)
+    }
+
+    /// Merges a freshly loaded disk snapshot with the in-memory `meetings`
+    /// array. Disk wins for membership (folders added/removed externally)
+    /// and for a record that's strictly newer on disk than in memory;
+    /// otherwise the in-memory record is kept, since it's the writer and
+    /// transcription-progress ticks live only in memory (no disk write, no
+    /// `updatedAt` bump) — a snapshot loaded mid-job must not regress a row
+    /// back to its last-saved (pre-progress) state. A record only present in
+    /// memory is dropped (it was deleted from disk) UNLESS its status is
+    /// `.recording` — insurance against a mid-create race where the folder
+    /// hasn't hit disk yet when the fingerprint/load ran.
+    static func mergeReloaded(current: [MeetingRecord], loaded: [MeetingRecord]) -> [MeetingRecord] {
+        let loadedByID = Dictionary(uniqueKeysWithValues: loaded.map { ($0.meeting.id, $0) })
+        var handledIDs: Set<UUID> = []
+        var result: [MeetingRecord] = []
+
+        for currentRecord in current {
+            handledIDs.insert(currentRecord.meeting.id)
+            guard let loadedRecord = loadedByID[currentRecord.meeting.id] else {
+                if currentRecord.meeting.status == .recording {
+                    result.append(currentRecord)
+                }
+                continue
+            }
+            if isStrictlyNewer(loadedRecord.meeting.updatedAt, than: currentRecord.meeting.updatedAt) {
+                result.append(loadedRecord)
+            } else {
+                result.append(currentRecord)
+            }
+        }
+        for loadedRecord in loaded where !handledIDs.contains(loadedRecord.meeting.id) {
+            result.append(loadedRecord)
+        }
+        return result
+    }
+
+    private static func isStrictlyNewer(_ candidate: Date?, than base: Date?) -> Bool {
+        guard let candidate else { return false }
+        guard let base else { return true }
+        return candidate > base
+    }
+
+    /// Outcome of the off-main fingerprint+load step behind
+    /// `refreshFromDisk()`.
+    private enum RefreshOutcome: Sendable {
+        case rootUnreachable
+        case unchanged(LibraryStorage.LibraryFingerprint)
+        case loaded(LibraryStorage.LoadAllResult, LibraryStorage.LibraryFingerprint)
+    }
+
+    /// Runs off the main actor (this is `nonisolated`, so awaiting it from a
+    /// `@MainActor` method hops execution to the background before touching
+    /// the filesystem): checks reachability, then fingerprints the root and
+    /// compares against `lastFingerprint` to decide whether a full
+    /// `loadAllDetailed()` is needed at all.
+    private nonisolated static func loadIfChanged(
+        storage: LibraryStorage, lastFingerprint: LibraryStorage.LibraryFingerprint?
+    ) async -> RefreshOutcome {
+        guard storage.rootIsReachable() else { return .rootUnreachable }
+        let fingerprint = storage.fingerprint()
+        if let lastFingerprint, fingerprint == lastFingerprint {
+            return .unchanged(fingerprint)
+        }
+        let result = (try? storage.loadAllDetailed()) ?? LibraryStorage.LoadAllResult(records: [], skippedCount: 0)
+        return .loaded(result, fingerprint)
+    }
+
+    /// Foreground-refresh path: like `reload()`, but cheap in the common
+    /// case where nothing changed on disk while Recap was backgrounded — the
+    /// fingerprint check and (when needed) the folder load both run off the
+    /// main actor, and a changed result is merged with the in-memory state
+    /// rather than replacing it outright (see `mergeReloaded`), so an
+    /// in-flight transcription's in-memory progress survives a concurrent
+    /// disk snapshot. No-ops (like `reload()`) when there's no real storage,
+    /// or while a previous call is still in flight.
+    public func refreshFromDisk() {
+        guard let storage, let index else { return }
+        guard !refreshInFlight else { return }
+        refreshInFlight = true
+        let capturedFingerprint = lastFingerprint
+        Task {
+            let outcome = await Self.loadIfChanged(storage: storage, lastFingerprint: capturedFingerprint)
+            applyRefreshOutcome(outcome, storage: storage, index: index)
+            refreshInFlight = false
+        }
+    }
+
+    /// Applies a `RefreshOutcome` back on the main actor — mirrors
+    /// `reload()`'s `rootUnreachable` bookkeeping exactly (same flags, same
+    /// gating rule) so the two code paths can't drift apart.
+    private func applyRefreshOutcome(_ outcome: RefreshOutcome, storage: LibraryStorage, index: SearchIndex) {
+        let reachable: Bool
+        switch outcome {
+        case .rootUnreachable: reachable = false
+        case .unchanged, .loaded: reachable = true
+        }
+        if reachable { rootWasReachableThisLaunch = true }
+        let isCustomRoot = storage.rootURL.path != LibraryStorage.defaultRootURL.path
+        rootUnreachable = LibraryStorage.rootUnreachableIsError(
+            reachable: reachable, isCustomRoot: isCustomRoot, wasReachableEarlierThisLaunch: rootWasReachableThisLaunch
+        )
+        guard reachable else {
+            // Keep the last-known `meetings` in memory, same as reload()'s
+            // unreachable branch.
+            return
+        }
+
+        switch outcome {
+        case .rootUnreachable:
+            return
+        case .unchanged(let fingerprint):
+            lastFingerprint = fingerprint
+        case .loaded(let result, let fingerprint):
+            meetings = Self.mergeReloaded(current: meetings, loaded: result.records)
+            rebuildDisplayMeetings()
+            if result.skippedCount > 0 {
+                let plural = result.skippedCount == 1 ? "" : "s"
+                onSaveError?("\(result.skippedCount) meeting\(plural) couldn't be read and \(result.skippedCount == 1 ? "was" : "were") skipped.")
+            }
+            reindexInBackground(records: meetings, storage: storage, index: index)
+            lastFingerprint = fingerprint
+        }
     }
 
     /// Rebuilds the search index off the main actor. Per-mutation
