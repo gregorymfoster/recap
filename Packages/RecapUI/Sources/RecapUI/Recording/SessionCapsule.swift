@@ -59,7 +59,7 @@ struct SessionCapsule: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Tokens.textPrimary)
                         .frame(width: 32, height: 32)
-                        .background(.white.opacity(0.08), in: Circle())
+                        .background(Tokens.chipBackground, in: Circle())
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut("p", modifiers: [.command, .option])
@@ -105,14 +105,14 @@ struct SessionCapsule: View {
     private var floatingContent: some View {
         HStack(spacing: 10) {
             statusIndicator(dotSize: 7)
-            timer(font: .system(size: 12, weight: .semibold).monospacedDigit(), color: .white)
+            timer(font: .system(size: 12, weight: .semibold).monospacedDigit(), color: Tokens.textPrimary)
                 .opacity(isPaused ? 0.5 : 1)
             Button(action: onPauseToggle) {
                 Image(systemName: isPaused ? "play.fill" : "pause.fill")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(Tokens.textPrimary.opacity(0.9))
                     .frame(width: 22, height: 22)
-                    .background(.white.opacity(0.12), in: Circle())
+                    .background(Tokens.chipBackground, in: Circle())
             }
             .buttonStyle(.plain)
             .help(isPaused ? "Resume recording" : "Pause recording")
@@ -181,7 +181,7 @@ struct SessionCapsule: View {
 
     private func divider(height: CGFloat) -> some View {
         Rectangle()
-            .fill(.white.opacity(0.12))
+            .fill(Tokens.hairline)
             .frame(width: 1, height: height)
     }
 }

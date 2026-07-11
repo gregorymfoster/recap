@@ -184,9 +184,7 @@ struct LibraryView: View {
             }
             .padding(.horizontal, 10)
             .frame(width: 180, height: 28)
-            // stays: fixed white tint per the design handoff — reads as a
-            // subtle field fill against both the light and dark toolbar.
-            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
+            .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: 7))
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(Tokens.hairline, lineWidth: 1))
         }
         .buttonStyle(.plain)
@@ -212,6 +210,7 @@ struct LibraryView: View {
         }
         .buttonStyle(.plain)
         .keyboardShortcut("n", modifiers: .command)
+        .help("Start recording (⌘N)")
         .axID(.libraryRecordButton)
     }
 
@@ -237,6 +236,7 @@ struct LibraryView: View {
             .overlay(Capsule().stroke(Tokens.hairline, lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .help("Return to the live recording")
         .axID(.libraryRecordingIndicatorButton)
     }
 

@@ -13,6 +13,10 @@ struct SearchOverlay: View {
     @State private var query = ""
     @State private var hits: [SearchHit] = []
     @State private var highlighted = 0
+    /// True while a non-empty query is debouncing/running — drives the
+    /// spinner next to the "esc" chip and gates the "No matches" empty state
+    /// so it never flashes mid-debounce (stale hits stay visible instead).
+    @State private var isSearching = false
     @FocusState private var fieldFocused: Bool
 
     /// Yellow-tinted match highlight (design spec: `rgba(255,214,10,.3)`).
@@ -31,6 +35,10 @@ struct SearchOverlay: View {
                     .focused($fieldFocused)
                     .onSubmit { open(hitAt: highlighted) }
                     .axID(.searchOverlayField)
+                if isSearching {
+                    ProgressView()
+                        .controlSize(.small)
+                }
                 Text("esc")
                     .font(Tokens.microLabel)
                     .foregroundStyle(Tokens.textTertiary)
@@ -92,7 +100,7 @@ struct SearchOverlay: View {
                         scrollProxy.scrollTo(highlighted, anchor: .center)
                     }
                 }
-            } else if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+            } else if !isSearching, !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 Divider()
                 VStack(spacing: 4) {
                     Text("No matches for \"\(query)\"")
@@ -115,6 +123,10 @@ struct SearchOverlay: View {
             // query, so fast typists don't trigger a synchronous query per
             // keystroke on large libraries. Cancelled (via task(id:))
             // whenever `query` changes again before the sleep completes.
+            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                isSearching = true
+            }
             do {
                 try await Task.sleep(for: .milliseconds(150))
             } catch {
@@ -123,6 +135,7 @@ struct SearchOverlay: View {
             guard !Task.isCancelled else { return }
             hits = library.search(query)
             highlighted = 0
+            isSearching = false
         }
         .onAppear {
             fieldFocused = true

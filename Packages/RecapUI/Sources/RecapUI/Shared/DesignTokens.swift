@@ -52,10 +52,32 @@ public enum Tokens {
     public static let hairline = dynamic(light: NSColor.black.withAlphaComponent(0.07), dark: NSColor.white.withAlphaComponent(0.10))
     public static let accentBlue = Color(red: 0x0A / 255, green: 0x84 / 255, blue: 0xFF / 255)  // #0a84ff
     /// Lighter accent used for icons/text against a blue-tinted background
-    /// (e.g. `NextMeetingBanner`'s calendar glyph) — matches
-    /// `QuietBlueOutlineButtonStyle`'s fixed blue. Not dynamic: reads
+    /// (e.g. `NextMeetingBanner`'s calendar glyph). Not dynamic: reads
     /// correctly against a fixed blue-tint fill in both appearances.
+    /// `QuietBlueOutlineButtonStyle` uses the dynamic `accentBlueText`
+    /// instead, since its stroke/text sit on the app's (dynamic) surfaces.
     public static let accentBlueLight = Color(red: 109 / 255, green: 178 / 255, blue: 255 / 255)  // #6db2ff
+    /// Blue for text/outline controls (`QuietBlueOutlineButtonStyle`): full
+    /// accent blue in light mode, the lighter `#6db2ff` in dark — the fixed
+    /// accent reads fine on a light background but is too saturated against
+    /// a dark one.
+    public static let accentBlueText = dynamic(
+        light: NSColor(red: 0x0A / 255, green: 0x84 / 255, blue: 0xFF / 255, alpha: 1),
+        dark: NSColor(red: 0x6D / 255, green: 0xB2 / 255, blue: 0xFF / 255, alpha: 1))
+    /// Dashed "editable" underline affordance (`EditableTitle`) — subtle dark
+    /// hairline in light mode, subtle light hairline in dark (replaces a
+    /// fixed `.white.opacity(0.2)` that vanished against a light surface).
+    public static let editableUnderline = dynamic(
+        light: NSColor.black.withAlphaComponent(0.25),
+        dark: NSColor.white.withAlphaComponent(0.20))
+    /// Secondary ink for text painted on a pinned-dark surface
+    /// (`Tokens.darkSurface`) — fixed, since that surface never flips with
+    /// the system appearance.
+    public static let onDarkTextSecondary = Color.white.opacity(0.65)
+    /// Chip fill for controls painted on a pinned-dark surface
+    /// (`Tokens.darkSurface`) — fixed for the same reason as
+    /// `onDarkTextSecondary`.
+    public static let onDarkChipFill = Color.white.opacity(0.10)
     public static let recordRed = Color(red: 0xFF / 255, green: 0x45 / 255, blue: 0x3A / 255)  // #ff453a
     public static let recordRedDark = Color(red: 0xD6 / 255, green: 0x3A / 255, blue: 0x30 / 255)  // #d63a30
     public static let successGreen = Color(red: 0x30 / 255, green: 0xB3 / 255, blue: 0x52 / 255)  // #30b352

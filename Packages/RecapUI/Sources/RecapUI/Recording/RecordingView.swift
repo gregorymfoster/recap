@@ -27,6 +27,12 @@ struct RecordingView: View {
     @State private var inputDevices: [AudioInputDevice] = []
     @State private var deviceListListener: AudioObjectPropertyListenerBlock?
     @FocusState private var noteFieldFocused: Bool
+    /// Shows the green checkmark confirmation for the first 5s of the
+    /// screen, then settles into a quiet, checkmark-free label — the
+    /// confirmation matters right after hitting Record, not for the rest of
+    /// a long meeting.
+    @State private var showingSavingConfirmation = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var record: MeetingRecord? { session.activeRecord }
 
@@ -51,6 +57,7 @@ struct RecordingView: View {
                     // "● Recording · MM:SS" pill that returns here.
                     router.screen = .library
                 }
+                .help("Back to Library")
                 .axID(.libraryBackButton)
             }
             .sharedBackgroundVisibility(.hidden)
@@ -121,13 +128,10 @@ struct RecordingView: View {
                     font: .system(size: 22, weight: .bold),
                     foreground: Tokens.textPrimary,
                     showsDashedUnderline: true,
-                    hint: nil,
+                    hint: "Click to rename",
                     onCommit: { newTitle in library.rename(record, to: newTitle) }
                 )
                 .axID(.recordingTitleField)
-                Text("click to rename")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Tokens.textPrimary.opacity(0.3))
             }
             Text(metaLine(for: record))
                 .font(.system(size: 12))
@@ -144,7 +148,7 @@ struct RecordingView: View {
                         .foregroundStyle(Tokens.textPrimary.opacity(0.85))
                         .padding(.vertical, 1)
                         .padding(.horizontal, 6)
-                        .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 4))
+                        .background(Tokens.chipBackground, in: RoundedRectangle(cornerRadius: 4))
                         .fixedSize()
                     Text(note.text)
                         .font(.system(size: 13.5))
@@ -227,13 +231,29 @@ struct RecordingView: View {
     // MARK: Saving status
 
     private var savingStatus: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "checkmark")
-                .font(.system(size: 10, weight: .semibold))
-            Text("Audio saving to \(savingFolderLabel)")
-                .font(.system(size: 11.5))
+        Group {
+            if showingSavingConfirmation {
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("Audio saving to \(savingFolderLabel)")
+                        .font(.system(size: 11.5))
+                }
+                .foregroundStyle(Tokens.successGreen.opacity(0.45))
+            } else {
+                Text("Saving to \(savingFolderLabel)")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Tokens.textTertiary)
+            }
         }
-        .foregroundStyle(Tokens.successGreen.opacity(0.45))
+        .help("Audio is saved to disk continuously while recording — nothing is lost if Recap quits.")
+        .task {
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) {
+                showingSavingConfirmation = false
+            }
+        }
     }
 
     private var savingFolderLabel: String {
