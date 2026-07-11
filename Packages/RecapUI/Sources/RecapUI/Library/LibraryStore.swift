@@ -111,17 +111,53 @@ public final class LibraryStore {
     /// place via `updateDisplayElement`.
     public private(set) var displayMeetings: [MeetingRecord] = []
 
+    /// Section-grouped copy of `displayMeetings` (Today/Yesterday/This
+    /// Week/…), cached alongside it for the same reason: `LibraryView`'s body
+    /// used to call `MeetingGrouping.sections` directly on every render,
+    /// which re-buckets and re-sorts the whole library on every
+    /// transcription-progress tick. Rebuilt whenever `displayMeetings` is
+    /// rebuilt or a status transition re-sorts a record; `updateDisplayElement`
+    /// patches the matching record in place instead of regrouping.
+    public private(set) var displaySections: [MeetingGrouping.Section] = []
+    /// The calendar day `displaySections` was last built for — lets
+    /// `sections(now:calendar:)` detect a stale cache after midnight without
+    /// a timer.
+    private var sectionsDay: Date?
+
     private func rebuildDisplayMeetings() {
         displayMeetings = meetings.sorted { $0.meeting.date > $1.meeting.date }
+        rebuildSections()
+    }
+
+    private func rebuildSections(now: Date = .now, calendar: Calendar = .current) {
+        displaySections = MeetingGrouping.sections(displayMeetings, now: now, calendar: calendar)
+        sectionsDay = calendar.startOfDay(for: now)
+    }
+
+    /// Cached when built for the same calendar day; a post-midnight render
+    /// falls back to a fresh (uncached) computation — same cost as today —
+    /// until the next mutation re-primes the cache. Never mutates state, so
+    /// it's safe to call from a view body.
+    public func sections(now: Date = .now, calendar: Calendar = .current) -> [MeetingGrouping.Section] {
+        if calendar.startOfDay(for: now) == sectionsDay { return displaySections }
+        return MeetingGrouping.sections(displayMeetings, now: now, calendar: calendar)
     }
 
     /// Patches one element of the cached `displayMeetings` in place, for
     /// mutations that don't change membership or sort order (status,
     /// progress, subtitle, backup timestamp, rename). No-op if the record
-    /// isn't present (shouldn't happen, but keeps this defensive).
+    /// isn't present (shouldn't happen, but keeps this defensive). Also
+    /// patches `displaySections` in the same spot, so progress ticks don't
+    /// need a full regroup.
     private func updateDisplayElement(_ record: MeetingRecord) {
         if let i = displayMeetings.firstIndex(where: { $0.meeting.id == record.meeting.id }) {
             displayMeetings[i] = record
+        }
+        outer: for si in displaySections.indices {
+            for ri in displaySections[si].records.indices where displaySections[si].records[ri].meeting.id == record.meeting.id {
+                displaySections[si].records[ri] = record
+                break outer
+            }
         }
     }
 
@@ -335,8 +371,11 @@ public final class LibraryStore {
         }
         // None of `replace`'s callers change `meeting.date` (the sort key),
         // so the cached display order stays valid — patch the element
-        // in place rather than re-sorting the whole library.
+        // in place rather than re-sorting the whole library. Section
+        // membership CAN change though (e.g. a `.recovered` transition
+        // unpins from the top of Today), so re-bucket after patching.
         updateDisplayElement(record)
+        rebuildSections()
         guard let storage else { return }
         do {
             try storage.saveMetadata(record)

@@ -36,9 +36,7 @@ public enum MeetingGrouping {
 
         var order: [String] = []
         var buckets: [String: (title: String, records: [MeetingRecord])] = [:]
-        let monthFormatter = DateFormatter()
-        monthFormatter.dateFormat = "MMMM yyyy"
-        monthFormatter.calendar = calendar
+        let monthStyle = Date.FormatStyle(calendar: calendar).month(.wide).year()
 
         func append(_ record: MeetingRecord, id: String, title: String) {
             if buckets[id] == nil {
@@ -62,7 +60,7 @@ public enum MeetingGrouping {
             } else {
                 let monthAnchor = calendar.dateInterval(of: .month, for: date)?.start ?? date
                 let id = "month-\(monthAnchor.timeIntervalSinceReferenceDate)"
-                append(record, id: id, title: monthFormatter.string(from: date))
+                append(record, id: id, title: date.formatted(monthStyle))
             }
         }
 

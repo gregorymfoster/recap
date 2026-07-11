@@ -279,7 +279,7 @@ struct LibraryView: View {
     /// Grouped-with-headers date sections (Today, Yesterday, ...) —
     /// `MeetingGrouping` sorts any `.recovered` meeting to the top of Today.
     private var content: some View {
-        let sections = MeetingGrouping.sections(library.displayMeetings, now: .now, calendar: .current)
+        let sections = library.sections()
         return LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
             ForEach(sections, id: \.id) { section in
                 VStack(alignment: .leading, spacing: 7) {
