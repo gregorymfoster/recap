@@ -29,7 +29,10 @@ open <path>/Recap.app --args -fixtures busy
 ```
 
 - `default` (bare `-fixtures`) — today's small sample library: a handful of meetings spanning
-  every status, one ready meeting with playable audio, a canned transcript, and notes.
+  every status, one ready meeting with playable audio, a canned transcript, and notes. Also
+  seeds `UpcomingStore` with the standard fixture calendar events (one ~19 minutes out), so
+  both `NextMeetingBanner` and the menu bar popover's "Up next · Calendar" row
+  (`-show-menubar-content`, AXID `menu-bar-up-next-record-button`) render.
 - `empty` — first-run/empty library: no meetings, no queue activity, calendar not connected
   (`UpcomingStore.isAvailable` is `false`, so `NextMeetingBanner` never renders).
 - `firstRunWithAgenda` — first-run/empty library, but calendar access IS granted with events
@@ -57,7 +60,8 @@ open <path>/Recap.app --args -fixtures busy
 - `waitingForSetup` — meetings parked at `.needsModel` with `TranscriptionSetupStore.phase`
   overridden to `.downloading` — exercises the row's "Waiting for setup · N%" copy.
 - `nextMeetingSoon` — the `default` library with the standard fixture calendar events (one
-  ~19 minutes out), so `NextMeetingBanner` renders above the list.
+  ~19 minutes out), so `NextMeetingBanner` renders above the list (and, like `default`, the
+  menu bar popover's "Up next · Calendar" row).
 - `updateAvailable` — library update banner + menu-bar install row, no Sparkle.
 
 Unit tests for each scenario's invariants live in
