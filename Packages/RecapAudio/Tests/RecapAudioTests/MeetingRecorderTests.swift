@@ -83,6 +83,72 @@ private final class FakeSystemAudioSource: SystemAudioCapturing {
 
 private struct FakeError: Error {}
 
+/// Thread-safe call counter for closures invoked from detached tasks (the
+/// heartbeat/low-disk watchdogs run their polling loops off the main actor).
+/// `@unchecked Sendable`: all mutable state is guarded by `lock`.
+private final class TickCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func increment() {
+        lock.lock()
+        defer { lock.unlock() }
+        value += 1
+    }
+
+    /// Returns the count as of just before this call, then increments it —
+    /// lets a fake closure answer differently on its Nth invocation.
+    func snapshotAndIncrement() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        let before = value
+        value += 1
+        return before
+    }
+}
+
+/// Lets a test drive a watchdog's tick-driven loop one step at a time
+/// instead of an unbounded instant tick (which would spin the loop far
+/// faster than real sample delivery and spuriously trip stall detection
+/// during test setup). `advance()` unblocks one pending `wait()` call, or —
+/// if nothing is waiting yet — queues so the next `wait()` returns
+/// immediately, so a test can call `advance()` any number of times up front
+/// without racing the loop's own scheduling.
+private actor TickGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var pending = 0
+    /// Number of `wait()` calls that have returned so far — lets a test poll
+    /// until the watchdog's loop has actually consumed every `advance()`
+    /// instead of guessing a fixed sleep duration (the loop runs on a
+    /// `.utility`-priority detached task, which can lag behind a busy test
+    /// runner by more than a few milliseconds).
+    private(set) var completed = 0
+
+    func wait() async {
+        if pending > 0 {
+            pending -= 1
+        } else {
+            await withCheckedContinuation { continuation = $0 }
+        }
+        completed += 1
+    }
+
+    func advance() {
+        if let continuation {
+            continuation.resume()
+            self.continuation = nil
+        } else {
+            pending += 1
+        }
+    }
+}
+
 /// Always-throwing `AudioFileWriting` double — proves the write-failure
 /// counters (moved off the actor onto `MixerEngine`'s background write task)
 /// still trip `.writeFailed` at the same threshold as before the move.
@@ -715,6 +781,177 @@ private final class ThrowingFileWriter: AudioFileWriting {
 
         #expect(!collected.isEmpty)
         #expect(collected.contains { $0 > 0 })
+    }
+
+    /// Drives `gate.advance()` `count` times, then polls (bounded, ~2s worst
+    /// case) until the watchdog's loop has actually consumed all of them —
+    /// more robust than a fixed sleep against a `.utility`-priority task that
+    /// can lag behind a busy test runner.
+    private func driveTicks(_ gate: TickGate, count: Int) async {
+        for _ in 0..<count {
+            await gate.advance()
+        }
+        for _ in 0..<200 {
+            if await gate.completed >= count { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        // A little extra settle time for `checkHeartbeat()`/`handleWatchdogEvent`
+        // (and any recovery `Task`s they spawn) to finish running after the
+        // last tick was consumed.
+        try? await Task.sleep(for: .milliseconds(50))
+    }
+
+    // MARK: 7d. Mic-only heartbeat watchdog (wall-clock companion to LivenessWatchdog)
+
+    /// Mic-only recording (no system audio at all): a dead mic tap stops
+    /// pushing samples entirely, so `LivenessWatchdog`'s sample-count-based
+    /// detection has nothing to measure silence against (its mic-stall
+    /// direction requires `systemExpected`). `HeartbeatWatchdog`'s wall-clock
+    /// tick is the only thing that can notice — with an instant tick
+    /// override, the same bounded-recovery path (`RestartPolicy`,
+    /// `forceRebuild()`) must still apply: two attempts, then `.micStalled`.
+    @Test func micOnlyHeartbeatAttemptsRecoveryThenEmitsMicStalledEvent() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("audio.m4a")
+        let mic = FakeMicSource()
+        let recorder = MeetingRecorder(mic: mic, makeSystemTap: { FakeSystemAudioSource() })
+        let gate = TickGate()
+        recorder.testHeartbeatTickOverride = { await gate.wait() }
+
+        let output = try await recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
+        let micContinuation = try #require(mic.continuation)
+
+        var collected: [RecorderEvent] = []
+        let collectorTask = Task {
+            for await event in output.events {
+                collected.append(event)
+            }
+        }
+
+        // A brief moment of real audio first, so the mic genuinely goes
+        // silent mid-call rather than never starting. No heartbeat ticks are
+        // driven during this window, so it can't spuriously trip the
+        // watchdog against the chunked delivery of `push(...)`.
+        await push(micContinuation, seconds: 0.2)
+
+        // The very first tick always registers as "progress" (the watchdog's
+        // baseline starts at 0, and the mic total from the `push` above is
+        // already nonzero) — so 3 stall windows costs one extra tick beyond
+        // `stallTicks * 3`: two bounded recovery attempts, then the final
+        // report once recovery keeps failing (this fake's `forceRebuild()`
+        // is a no-op).
+        await driveTicks(gate, count: HeartbeatWatchdog.stallTicks * 3 + 1)
+
+        #expect(mic.forceRebuildCallCount == 2)
+        #expect(collected.contains(.micStalled))
+        #expect(collected.filter { $0 == .micStalled }.count == 1)
+        #expect(recorder.micActive == true)
+
+        _ = await recorder.stop()
+        await collectorTask.value
+    }
+
+    /// When the bounded recovery attempt actually brings the mic back (the
+    /// fake's `forceRebuild()` pushes fresh samples), `.micStalled` must
+    /// never be emitted.
+    @Test func micOnlyHeartbeatRecoveringSuppressesMicStalledEvent() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("audio.m4a")
+        let mic = FakeMicSource()
+        let recorder = MeetingRecorder(mic: mic, makeSystemTap: { FakeSystemAudioSource() })
+        let gate = TickGate()
+        recorder.testHeartbeatTickOverride = { await gate.wait() }
+
+        let output = try await recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
+        let micContinuation = try #require(mic.continuation)
+
+        mic.onForceRebuild = { [micContinuation] in
+            micContinuation.yield([Float](repeating: 0.1, count: 4_800))
+        }
+
+        var collected: [RecorderEvent] = []
+        let collectorTask = Task {
+            for await event in output.events {
+                collected.append(event)
+            }
+        }
+
+        await push(micContinuation, seconds: 0.2)
+
+        // The very first tick always registers as "progress" (see the
+        // sibling test's comment) — one stall window costs `stallTicks + 1`
+        // ticks. The first recovery attempt fires and (per the fake's hook
+        // above) immediately "succeeds", pushing samples that resume
+        // progress.
+        await driveTicks(gate, count: HeartbeatWatchdog.stallTicks + 1)
+
+        #expect(mic.forceRebuildCallCount == 1)
+        #expect(!collected.contains(.micStalled))
+
+        _ = await recorder.stop()
+        await collectorTask.value
+    }
+
+    /// Dual-source recording: the heartbeat must never start at all (only
+    /// the mic-only case gets one), so there's no double-reporting alongside
+    /// `LivenessWatchdog`. Proven by the heartbeat tick override never being
+    /// invoked even with an instant tick and a long wait.
+    @Test func dualSourceRecordingNeverStartsHeartbeat() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("audio.m4a")
+        let mic = FakeMicSource()
+        let tap = FakeSystemAudioSource()
+        let recorder = MeetingRecorder(mic: mic, makeSystemTap: { tap })
+        let tickCount = TickCounter()
+        recorder.testHeartbeatTickOverride = { tickCount.increment() }
+
+        _ = try await recorder.start(writingTo: url, includeSystemAudio: true, includeMic: true)
+        try? await Task.sleep(for: .milliseconds(150))
+
+        #expect(tickCount.count == 0)
+
+        _ = await recorder.stop()
+    }
+
+    // MARK: 9. Mid-recording low-disk watchdog
+
+    /// `freeBytes` reports comfortably-above-threshold space at first, then
+    /// drops below `lowSpaceStopBytes` — the watchdog must emit
+    /// `.diskSpaceLow` exactly once and then stop polling (no repeated
+    /// events on subsequent ticks).
+    @Test func lowDiskSpaceMidRecordingEmitsDiskSpaceLowExactlyOnce() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("audio.m4a")
+        let mic = FakeMicSource()
+        let callCount = TickCounter()
+        let recorder = MeetingRecorder(
+            mic: mic, makeSystemTap: { FakeSystemAudioSource() },
+            freeBytes: { _ in
+                callCount.snapshotAndIncrement() < 2 ? 10_000_000_000 : 100_000_000
+            }
+        )
+        recorder.testFreeSpaceTickOverride = {}
+
+        let output = try await recorder.start(writingTo: url, includeSystemAudio: false, includeMic: true)
+
+        var collected: [RecorderEvent] = []
+        let collectorTask = Task {
+            for await event in output.events {
+                collected.append(event)
+            }
+        }
+
+        try? await Task.sleep(for: .milliseconds(200))
+
+        #expect(collected.contains(.diskSpaceLow))
+        #expect(collected.filter { $0 == .diskSpaceLow }.count == 1)
+
+        _ = await recorder.stop()
+        await collectorTask.value
     }
 
     // MARK: 8. Write failures still trip .writeFailed after moving off the actor

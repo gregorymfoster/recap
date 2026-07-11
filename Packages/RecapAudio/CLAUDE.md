@@ -5,9 +5,10 @@ and no UI (RecapUI) — this package only produces mixed/transcoded audio and ca
 Depends on RecapCore for shared types (`AudioChunk`, etc.).
 
 ## Key files
-- `MeetingRecorder.swift` (510 lines, largest file) — orchestrates a recording session: starts
-  mic + system audio sources, drives the mixer, writes output, handles pause/resume/stop and
-  spool salvage on write failure.
+- `MeetingRecorder.swift` (939 lines, largest file) — orchestrates a recording session: starts
+  mic + system audio sources, drives the mixer, writes output, handles pause/resume/stop,
+  spool salvage on write failure, the mic-only heartbeat watchdog, and the mid-recording
+  low-disk watchdog.
 - `SystemAudioTap.swift` — `@MainActor` Core Audio process-tap capture (the modern
   "System Audio Recording Only" permission path, not full Screen Recording).
 - `MicSource.swift` — `AVAudioEngine` mic capture; installs a `@Sendable` tap block that runs
