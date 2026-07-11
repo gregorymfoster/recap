@@ -15,6 +15,10 @@
 #      project.yml). Sparkle tools come from `brew install --cask sparkle` or
 #      the Sparkle release tarball — set SPARKLE_BIN to their directory.
 #   4. brew install xcodegen create-dmg; gh auth login.
+#   5. Optional, for symbolicated crash reports: `brew install getsentry/tools/sentry-cli`
+#      and set SENTRY_AUTH_TOKEN (a Sentry auth token with project:releases
+#      scope). Without it dSYM upload is skipped and the release still ships —
+#      crash reports just stay unsymbolicated until backfilled.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -26,6 +30,12 @@ ASC_KEY_PATH="$HOME/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8"
 SPARKLE_BIN="${SPARKLE_BIN:-}"
 BUILD_DIR="build"
 DMG="dist/Recap-$VERSION.dmg"
+# Sentry org/project for dSYM upload (see CrashReporting.swift for the DSN).
+# Project ID in the DSN is 4511718270697472; this slug is a best guess from
+# the DSN host/org — VERIFY it against Settings > Projects in the Sentry UI
+# (https://gregorymfoster.sentry.io) before relying on this step.
+SENTRY_ORG="gregorymfoster"
+SENTRY_PROJECT="${SENTRY_PROJECT:-recap}"
 
 command -v xcodegen >/dev/null || { echo "missing: brew install xcodegen" >&2; exit 1; }
 command -v create-dmg >/dev/null || { echo "missing: brew install create-dmg" >&2; exit 1; }
@@ -96,6 +106,32 @@ for KEY in com.apple.security.device.audio-input com.apple.security.personal-inf
     exit 1
   fi
 done
+
+echo "==> Upload dSYMs to Sentry"
+upload_dsyms() {
+  local dsym_dir="$BUILD_DIR/Recap.xcarchive/dSYMs"
+  if ! command -v sentry-cli >/dev/null; then
+    echo "WARNING: sentry-cli not installed (brew install getsentry/tools/sentry-cli) —" >&2
+    echo "WARNING: skipping dSYM upload. Crash reports for v$VERSION will be unsymbolicated." >&2
+    return 0
+  fi
+  if [[ -z "${SENTRY_AUTH_TOKEN:-}" ]]; then
+    echo "WARNING: SENTRY_AUTH_TOKEN is not set — skipping dSYM upload." >&2
+    echo "WARNING: Crash reports for v$VERSION will be unsymbolicated." >&2
+    return 0
+  fi
+  if [[ ! -d "$dsym_dir" ]]; then
+    echo "WARNING: no dSYMs found at $dsym_dir — skipping upload." >&2
+    echo "WARNING: Crash reports for v$VERSION will be unsymbolicated." >&2
+    return 0
+  fi
+  if ! sentry-cli debug-files upload --org "$SENTRY_ORG" --project "$SENTRY_PROJECT" "$dsym_dir"; then
+    echo "WARNING: sentry-cli upload failed — continuing release." >&2
+    echo "WARNING: Crash reports for v$VERSION will be unsymbolicated." >&2
+    return 0
+  fi
+}
+upload_dsyms
 
 echo "==> Notarize"
 /usr/bin/ditto -c -k --keepParent "$APP" "$BUILD_DIR/Recap.zip"
