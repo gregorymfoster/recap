@@ -310,6 +310,37 @@ private func waitUntil(
         #expect(await failures.count == 0)
     }
 
+    /// Same as above, but with a timeout configured. The timeout race runs
+    /// the executor in an unstructured task, so outer cancellation must be
+    /// explicitly forwarded (withTaskCancellationHandler) — without that,
+    /// cancel(meetingID:) would leave the job running to completion.
+    @Test func cancelMeetingIDStopsRunningJobWhenTimeoutConfigured() async {
+        let executor = CancellableExecutor()
+        let queue = ProcessingQueue(
+            executor: executor,
+            timeoutLimit: { _ in .seconds(3600) }
+        )
+        let meetingID = UUID()
+        let running = ProcessingJob(kind: .transcribe, meetingID: meetingID)
+        let next = ProcessingJob(kind: .enhance, meetingID: UUID())
+
+        let failures = FailureLog()
+        await queue.setOnJobFailed { job, _ in
+            Task { await failures.record(job) }
+        }
+
+        await queue.enqueue(running)
+        #expect(await waitUntil { await executor.executed.contains(running) })
+        await queue.enqueue(next)
+
+        await queue.cancel(meetingID: meetingID)
+
+        #expect(await waitUntil { await executor.executed.contains(next) })
+        #expect(await executor.completed.isEmpty)
+        // A cancel is a clean stop — not a failure, and not a timeout.
+        #expect(await failures.count == 0)
+    }
+
     @Test func observerSeesProgressAndCompletion() async {
         let executor = FakeExecutor()
         await executor.setHoldsJobs(true)

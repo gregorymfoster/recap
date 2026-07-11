@@ -254,28 +254,60 @@ public actor ProcessingQueue {
     /// hung executor (stuck on an uncancellable continuation, never
     /// observing `Task.cancel()`) would wedge this call — and the whole
     /// queue — forever. With unstructured tasks, whichever side finishes
-    /// first resumes the continuation and this function returns; the loser
+    /// first settles the outcome stream and this function returns; the loser
     /// (cancelled, but possibly still running if it ignores cancellation)
     /// is simply abandoned.
+    ///
+    /// The rendezvous is an `AsyncThrowingStream` rather than a checked
+    /// continuation: `finish`/`yield` after a first `finish` are documented
+    /// no-ops, which gives first-wins semantics for free, and awaiting
+    /// `next()` is cancellation-aware — so cancelling the *outer* task
+    /// (`cancel(meetingID:)` → `runningTask?.cancel()`) still stops the job
+    /// promptly even though the racers are unstructured (the `defer`
+    /// forwards the cancellation to them).
     private func runWithTimeout(_ job: ProcessingJob, limit: Duration, token: UUID) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let resume = SingleResume(continuation)
-            let executionTask = Task {
-                do {
-                    try await self.executor.execute(job) { [weak self] fraction in
-                        guard let self else { return }
-                        Task { await self.updateProgress(fraction, for: job, token: token) }
-                    }
-                    await resume.finish(with: .success(()))
-                } catch {
-                    await resume.finish(with: .failure(error))
+        let (stream, outcome) = AsyncThrowingStream<Void, Error>.makeStream()
+        // Both racers are detached, not `Task {}`: an actor-inherited task
+        // closure cancelled mid-`Task.sleep` trips a task-allocator abort
+        // ("freed pointer was not the last allocation") in the Swift
+        // runtime when the task deallocates on the actor's executor.
+        let executor = executor
+        let executionTask = Task.detached(priority: .utility) { [weak self] in
+            do {
+                try await executor.execute(job) { [weak self] fraction in
+                    guard let self else { return }
+                    Task { await self.updateProgress(fraction, for: job, token: token) }
                 }
+                outcome.yield(())
+                outcome.finish()
+            } catch {
+                outcome.finish(throwing: error)
             }
-            Task {
-                try? await self.timeoutSleep(limit)
-                executionTask.cancel()
-                await resume.finish(with: .failure(JobTimedOut(job: job, limit: limit)))
-            }
+        }
+        // The timer is deliberately never cancelled: cancelling a task
+        // suspended in `Task.sleep` while the awaiting side is tearing down
+        // trips a task-allocator abort ("freed pointer was not the last
+        // allocation") in the Swift runtime. Instead it always runs out its
+        // limit and lands on `finish`/`cancel` calls that are documented
+        // no-ops once the race has already settled — a lingering timer per
+        // job (at most minutes, holding only the job value) is the price.
+        _ = Task.detached(priority: .utility) { [timeoutSleep] in
+            try? await timeoutSleep(limit)
+            executionTask.cancel()
+            outcome.finish(throwing: JobTimedOut(job: job, limit: limit))
+        }
+        defer {
+            // Forwards outer cancellation (`cancel(meetingID:)`) to the
+            // executor; a no-op on the success/timeout paths where the
+            // execution task already settled.
+            executionTask.cancel()
+        }
+        var iterator = stream.makeAsyncIterator()
+        if try await iterator.next() == nil {
+            // No value means the stream ended without `execute` succeeding —
+            // only possible when the outer task was cancelled mid-await
+            // (every other path either yields a value or throws).
+            throw CancellationError()
         }
     }
 
@@ -310,23 +342,5 @@ public actor ProcessingQueue {
         } else {
             queueLog.info("resumed")
         }
-    }
-}
-
-/// Resumes a `CheckedContinuation` at most once — guards the execution-vs-
-/// timeout race in `ProcessingQueue.runWithTimeout` against a double-resume
-/// crash when both sides settle around the same moment.
-private actor SingleResume {
-    private var resumed = false
-    private let continuation: CheckedContinuation<Void, Error>
-
-    init(_ continuation: CheckedContinuation<Void, Error>) {
-        self.continuation = continuation
-    }
-
-    func finish(with result: Result<Void, Error>) {
-        guard !resumed else { return }
-        resumed = true
-        continuation.resume(with: result)
     }
 }

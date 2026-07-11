@@ -118,7 +118,7 @@ struct MeetingProcessor: JobExecutor {
                 await reporter.close()
                 throw CancellationError()
             } catch {
-                // Rethrow instead of writing `.error` here (as this used to):
+                // Rethrow instead of writing `.error` in-band:
                 // swallowing the error made every engine failure look like a
                 // success to `ProcessingQueue`, so its retry-once path never
                 // fired. `close()` (not `finish()`) drops any late progress

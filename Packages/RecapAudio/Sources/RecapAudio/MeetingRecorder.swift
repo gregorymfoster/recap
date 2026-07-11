@@ -126,7 +126,7 @@ public final class MeetingRecorder {
     private let freeBytes: @Sendable (URL) -> Int64?
 
     /// Per-recording task polling `freeBytes` for the mid-recording low-space
-    /// watchdog (item 2). Cancelled in `teardownActive()`.
+    /// watchdog. Cancelled in `teardownActive()`.
     private var diskSpaceTask: Task<Void, Never>?
 
     /// Test-only seam: overrides the low-space watchdog's poll interval
@@ -422,7 +422,7 @@ public final class MeetingRecorder {
             throw RecorderError.startCancelled
         }
 
-        // Mid-recording low-space watchdog (item 2): polls `freeBytes` on its
+        // Mid-recording low-space watchdog: polls `freeBytes` on its
         // own task so a disk filling up mid-meeting is caught before it rides
         // into write failures. Captures only Sendable values, never `self` —
         // it must keep running independent of anything that mutates the
@@ -668,7 +668,7 @@ private actor MixerEngine {
         // simply stops calling into this actor at all, so nothing samples-
         // based can ever notice. `HeartbeatWatchdog` fills that gap with a
         // wall-clock tick instead. Deliberately NOT started for system-only
-        // recordings — out of scope here, unaffected by this change. Actually
+        // recordings, whose idle push cadence is unverified — a false positive there would spam tap rebuilds. Actually
         // starting the task happens in `startHeartbeatIfNeeded()`, called by
         // `MeetingRecorder.start()` right after construction — a `Task`
         // capturing `self` can't be created directly inside this actor's own

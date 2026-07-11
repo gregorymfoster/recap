@@ -251,7 +251,10 @@ public final class QueueStore {
     /// `LaunchRecovery.action(for:hasTranscript:)`.
     private func recoverUnfinishedWork(in library: LibraryStore, storage: LibraryStorage) {
         for record in library.meetings {
-            let hasTranscript = (try? storage.loadTranscript(in: record)) != nil
+            // Only `.queued` consults hasTranscript — don't pay a transcript
+            // decode for every meeting in the library at launch.
+            let hasTranscript = record.meeting.status == .queued
+                && (try? storage.loadTranscript(in: record)) != nil
             switch LaunchRecovery.action(for: record.meeting.status, hasTranscript: hasTranscript) {
             case .requeueTranscribe:
                 library.updateStatus(record.meeting.id, to: .queued)
